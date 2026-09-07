@@ -132,7 +132,31 @@ struct UAVStructuralLoadSolver {
         /// crossed, but by making an ordinary manoeuvre the one that finds the weakness.
         /// Zero for every aircraft that stays cold and inside its limits, so the default
         /// leaves existing behaviour untouched.
-        thermalWeakening: Float = 0.0
+        thermalWeakening: Float = 0.0,
+        /// What the propulsion is actually pushing with, newtons.
+        ///
+        /// Needed because a propeller mount carries *thrust*, and the load below used to
+        /// be `m·g·throttle / rotorCount` for every rotor on every airframe. That is the
+        /// right load for a multirotor, where each of N discs really does hold up its
+        /// share of the aircraft — and badly wrong for an aeroplane, where one propeller
+        /// was charged the whole weight. Defaulted to zero so a caller with no propulsion
+        /// figure behaves as before on a multirotor, which is what the headless probes are.
+        thrustNewtons: Float = 0.0,
+        /// The aircraft's real wing area, m², or zero to measure it off the geometry.
+        ///
+        /// ⚠️ The geometry cannot be trusted for this. A wing section's area is taken from
+        /// its bounding half-extents, and those come from the rendered wing — a rectangle
+        /// drawn around a swept, tapered planform. Measured: 76.5 m² on an MQ-9B whose
+        /// real wing is about 11.5. Worse, it moved: the procedural stand-in wings were a
+        /// fraction of the real aircraft, so switching to the authored models multiplied
+        /// this by 98 on the MQ-9B and by 570 on the X-10, and loads that had always been
+        /// too small became large enough to tear wings off in level flight.
+        ///
+        /// So the geometry is used for the *distribution* — which surface carries what
+        /// share — and the catalogue for the *magnitude*. That is the same split that
+        /// `VehicleMassProperties` needed: trustworthy for distribution, untrustworthy
+        /// for scale.
+        referenceWingAreaM2: Float = 0.0
     ) -> UAVStructuralLoadResult {
         guard deltaTime > 0.0001, !graph.isEmpty else { return .none }
 
@@ -173,8 +197,41 @@ struct UAVStructuralLoadSolver {
             }
         }()
         let airframeAerodynamicLift = totalMass * specificForce * wingborneFraction
+        // How far the drawn surfaces are from the real ones. The wing is the only surface
+        // the catalogue gives an area for, so its error sets the scale for all of them.
+        //
+        // ⚠️ This has to be applied to *every* lifting surface, not just the wing. The load
+        // on a surface is its share of the airframe's lift — `area / totalLiftingArea` —
+        // and correcting one term of that sum while leaving the others as drawn does not
+        // just rescale the loads, it redistributes them. Measured on the empennage's share
+        // of the airframe's lift with the wing corrected alone: MQ-9B 35.7 %, AQM-35A
+        // 55.2 % — more on the tail than on the wing. The manoeuvre margin that fell out
+        // of that: the MQ-9B started shedding `tail.horizontal` at 2.0 g and the MQ-9A and
+        // Hermes 900 at 2.8 g, in clean air with nothing to hit, where a transport airframe
+        // is stressed for 2.5 g and a light one for 3.8. An operator's MQ-9B lost its
+        // horizontal tail at 217 m the moment a lost radio link rolled it into a returnHome
+        // turn, then porpoised into the ground.
+        //
+        // Every one of these areas is a bounding box drawn around a real surface, so they
+        // are all over-estimates of the same kind and the same order: on the MQ-9B the wing
+        // rectangle is 2.1x the catalogue wing, and the empennage draft is about 3x the
+        // real V-tail. One factor for all of them keeps the geometry's proportions, which
+        // is what the geometry is trusted for, and takes the magnitude from the catalogue,
+        // which is what the catalogue is for.
+        let geometricWingArea = componentSnapshot.reduce(Float(0.0)) { total, member in
+            guard case .wingSection = member.kind else { return total }
+            return total + (Self.liftingSurface(for: member)?.area ?? 0.0)
+        }
+        let surfaceAreaCorrection: Float = referenceWingAreaM2 > 0.0001 && geometricWingArea > 0.0001
+            ? referenceWingAreaM2 / geometricWingArea
+            : 1.0
+        func correctedSurface(for member: VehicleComponent) -> LiftingSurface? {
+            guard var surface = Self.liftingSurface(for: member) else { return nil }
+            surface.area *= surfaceAreaCorrection
+            return surface
+        }
         let totalLiftingArea = componentSnapshot.reduce(Float(0.0)) { total, member in
-            total + (Self.liftingSurface(for: member)?.area ?? 0.0)
+            total + (correctedSurface(for: member)?.area ?? 0.0)
         }
 
         func belongsToSubtree(_ component: VehicleComponent, rootID: String) -> Bool {
@@ -216,7 +273,7 @@ struct UAVStructuralLoadSolver {
                 case .motor(let slot), .propeller(let slot):
                     rotorSlots.insert(slot)
                 case .wingSection, .horizontalTail, .verticalTail, .elevator, .rudder:
-                    guard let surface = Self.liftingSurface(for: member) else { break }
+                    guard let surface = correctedSurface(for: member) else { break }
                     aerodynamicForce += aerodynamicLoad(
                         on: surface,
                         dynamicPressure: dynamicPressure,
@@ -233,7 +290,28 @@ struct UAVStructuralLoadSolver {
 
             if !rotorSlots.isEmpty {
                 let relevantRotors = rotorModel.rotors.filter { rotorSlots.contains($0.slot) }
-                let baseRotorLoad = totalMass * 9.81 * state.motorThrottle / Float(rotorCount)
+                // ⚠️ A rotor mount carries one of two quite different loads, and which one
+                // depends on what the rotor is doing rather than on what it is.
+                //
+                // Holding the aircraft up: each of N discs carries m·g/N, and that is the
+                // load a quadcopter's arm really sees. Pushing it along: the mount carries
+                // thrust, which on an aeroplane is a small fraction of weight.
+                //
+                // This used to be the weight formula for everything. On the MQ-9B — one
+                // propeller, 5,670 kg — it charged that single mount 26.0 kN at full
+                // throttle against a 19.6 kN joint, so the aircraft tore its own propeller
+                // off on the takeoff roll and reported critical structural damage with no
+                // impact anywhere in the log. Hermes 900 did the same at 8.1 kN against
+                // 7.2 kN. Measured, both of them.
+                //
+                // `wingborneFraction` is already the answer to "is this aircraft being
+                // held up by its wing or by its rotors": 1 for a fixed wing, 0 for a
+                // multirotor, the transition blend for a VTOL. So the two loads mix on
+                // exactly that, and no case changes except the one that was wrong.
+                let liftShare = totalMass * 9.81 * state.motorThrottle / Float(rotorCount)
+                let thrustShare = max(0.0, thrustNewtons) / Float(rotorCount)
+                let baseRotorLoad = liftShare * (1.0 - wingborneFraction)
+                    + thrustShare * wingborneFraction
                 let rotorLoad = relevantRotors.reduce(Float(0.0)) {
                     $0 + baseRotorLoad * $1.thrustFactor
                 }
@@ -278,22 +356,10 @@ struct UAVStructuralLoadSolver {
     }
 
     private static func liftingSurface(for component: VehicleComponent) -> LiftingSurface? {
-        let half = component.boundingHalfExtents
-        switch component.kind {
-        case .wingSection:
-            return LiftingSurface(area: max(0.005, half.x * half.z * 4.0), maximumCoefficient: 1.15)
-        case .horizontalTail:
-            return LiftingSurface(area: max(0.003, half.x * half.z * 4.0), maximumCoefficient: 0.72)
-        case .verticalTail:
-            return LiftingSurface(area: max(0.003, half.y * half.z * 4.0), maximumCoefficient: 0.72)
-        case .elevator:
-            return LiftingSurface(area: max(0.002, half.x * half.z * 4.0), maximumCoefficient: 0.48)
-        case .rudder:
-            return LiftingSurface(area: max(0.002, half.y * half.z * 4.0), maximumCoefficient: 0.48)
-        case .motor, .propeller, .frame, .fuselage, .arm, .tailSection, .battery,
-             .flightController, .esc, .radio, .cameraGimbal, .payloadMount, .landingGear:
-            return nil
-        }
+        // One source of truth, shared with the connection builder that sizes the joints
+        // these loads pass through — see `VehicleComponent.liftingSurface`.
+        guard let surface = component.liftingSurface else { return nil }
+        return LiftingSurface(area: surface.area, maximumCoefficient: surface.maximumCoefficient)
     }
 
     /// The aerodynamic force on one surface: its area share of the lift the airframe is currently
@@ -308,7 +374,23 @@ struct UAVStructuralLoadSolver {
     ) -> Float {
         let areaShare = totalLiftingArea > 0.0001 ? surface.area / totalLiftingArea : 1.0
         let stallCeiling = dynamicPressure * surface.area * surface.maximumCoefficient
-        let parasiteFloor = dynamicPressure * surface.area * 0.08
+        // ⚠️ The floor is a *profile-drag* load, so its coefficient has to be a profile-drag
+        // coefficient. It was 0.08, which is roughly eight times what a clean surface
+        // actually has (0.008–0.012 referenced to its own area), and because the floor grows
+        // with V² and nothing above it does, it stopped being a floor and became the whole
+        // answer: measured on every fixed wing in the catalogue, `aero` came out exactly
+        // equal to this term, four to seventeen times the lift the surface was really
+        // carrying. On an AQM-35 at its own published maximum that was 34.7 kN on a wing
+        // root — six times the aircraft's entire weight — and the joint failed at a speed
+        // the catalogue says is fine, in level flight, with nothing to hit. Two aircraft
+        // shed their wings on a plain full-throttle climb; the operator's AQM-35 lost both
+        // wing roots and then its tail at 285 m/s one metre off the ground, where sea-level
+        // density makes this term the largest.
+        //
+        // At 0.01 the floor does what its name says: it binds only in a dive, where there is
+        // no load factor but the air pressure is real, and the surface's share of the
+        // airframe's own lift binds everywhere else.
+        let parasiteFloor = dynamicPressure * surface.area * 0.01
         return max(parasiteFloor, min(stallCeiling, airframeLift * areaShare))
     }
 }

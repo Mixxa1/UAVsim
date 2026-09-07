@@ -95,15 +95,39 @@ enum RFVideoLinkPreset: String, Codable, CaseIterable, Hashable, Sendable {
         }
     }
 
+    /// How much resolution the link is allowed to shed at its worst, before it starts dropping
+    /// frames instead.
+    ///
+    /// The floors used to bottom out around 0.3–0.5 for everything, which put a modern DJI feed
+    /// at well under half resolution and made it look like a cheap analogue camera. That is the
+    /// wrong end of the trade for these systems: an OcuSync-class link spends its margin on
+    /// bitrate and cadence and holds a sharp picture until it cannot hold one at all. A budget
+    /// digital link is exactly the one that does go soft, so those floors stay low.
     var minimumDetailScale: Double {
         switch self {
         case .djiO3Enterprise, .djiO4Enterprise, .publicSafetyAdaptive,
              .industrialAdaptive, .bvlosAdaptive:
-            return 0.42
-        case .djiO4Consumer, .skydioEnterprise: return 0.50
-        case .djiLegacy: return 0.30
-        case .tacticalAdaptive: return 0.36
-        case .researchDigital, .genericDigital: return 0.32
+            return 0.78
+        case .djiO4Consumer, .skydioEnterprise: return 0.74
+        case .tacticalAdaptive: return 0.66
+        case .djiLegacy: return 0.42
+        case .researchDigital, .genericDigital: return 0.40
+        case .analogNTSC, .tetheredFiber: return 1
+        }
+    }
+
+    /// Share of the nominal bitrate the encoder can give up with no visible loss of detail at all.
+    /// Adaptive video re-encodes to fit the pipe long before a pixel changes; a fixed-rate consumer
+    /// decoder has far less room to do that in.
+    var detailPreservingBitrateHeadroom: Double {
+        switch self {
+        case .djiO3Enterprise, .djiO4Enterprise, .publicSafetyAdaptive,
+             .industrialAdaptive, .bvlosAdaptive:
+            return 0.45
+        case .djiO4Consumer, .skydioEnterprise: return 0.38
+        case .tacticalAdaptive: return 0.32
+        case .djiLegacy: return 0.16
+        case .researchDigital, .genericDigital: return 0.20
         case .analogNTSC, .tetheredFiber: return 1
         }
     }

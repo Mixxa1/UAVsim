@@ -80,14 +80,24 @@ struct DroneVisualGeometrySample: Hashable {
         var propellers: [DroneVisualGeometryPropeller] = []
         for (index, propNode) in model.propellerNodes.enumerated() {
             guard let aabb = accumulateBounds(of: propNode, in: bodyFrameNode) else { continue }
-            let halfExtents = (aabb.max - aabb.min) * 0.5
+            // ⚠️ The hub is the spin node's own origin, not the centre of the blades'
+            // bounding box. A propeller is modelled with its blades frozen at one
+            // azimuth, so that box is lopsided: the Hermes 900's pusher reported a
+            // centre 81 mm off its own shaft, which is a fact about the pose the artist
+            // left it in and not about the aeroplane. The graph places the motor and
+            // propeller components there, measures the rotor arm that sets yaw and roll
+            // authority from it, and splits motors into quadrants by it — and 81 mm was
+            // enough to put a centreline pusher on the left-hand side of an aircraft
+            // that has no left-hand engine.
+            let hub = bodyFrameNode.simdConvertPosition(.zero, from: propNode)
+            let reach = simd_max(aabb.max - hub, hub - aabb.min)
             let spin = index < model.propellerSpinDirections.count
                 ? model.propellerSpinDirections[index]
                 : (index.isMultiple(of: 2) ? 1.0 : -1.0)
             propellers.append(
                 DroneVisualGeometryPropeller(
-                    center: (aabb.min + aabb.max) * 0.5,
-                    radius: max(halfExtents.x, halfExtents.y, halfExtents.z, 0.02),
+                    center: hub,
+                    radius: max(reach.x, reach.y, reach.z, 0.02),
                     spinDirection: spin >= 0.0 ? 1.0 : -1.0
                 )
             )

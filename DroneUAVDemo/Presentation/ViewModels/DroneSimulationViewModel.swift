@@ -879,6 +879,10 @@ final class DroneSimulationViewModel: ObservableObject {
     /// The player's undamaged radio layout, captured once at launch so the per-tick damage
     /// adapter has something to apply itself to without rebuilding the whole configuration.
     private var interceptBaseRFConfiguration: RFSystemConfiguration?
+    /// The nose load, as a real member of the player's component graph. Mass taped to the nose is
+    /// mass on the nose: it moves the centre of mass forward and down and adds to what the rotors
+    /// have to lift, which is the whole reason one module is worth choosing over another.
+    private var interceptModuleComponent: VehicleComponent?
     /// Cached line-of-sight answers, keyed by call sign. Raycasts are sampled, not run per frame.
     private var interceptLineOfSight: [String: Bool] = [:]
     private var interceptLineOfSightAccumulator: Float = 0
@@ -888,6 +892,12 @@ final class DroneSimulationViewModel: ObservableObject {
     /// Height above the local ground at which an aeroplane target transits. Clear of the treeline
     /// by a wide margin: the mission is an interception in open air, not an obstacle course.
     private static let interceptTransitAltitude: Float = 110
+    /// How far behind the dock the hunter starts on the delivery side. Behind the operator, on the
+    /// way they came from: close enough to be a problem inside the first minute, far enough that
+    /// the run is not decided before it starts.
+    private static let interceptHunterStandoff: Float = 150
+    /// How much faster the hunter cruises than the difficulty's agility alone would make it.
+    private static let interceptHunterSpeedScale: Float = 1.35
     @Published private(set) var missionScenarioRemainingSeconds: Double = 0.0
     @Published private(set) var missionScenarioDetectionProgress: Double = 0.0
     @Published private(set) var fireResponseObjectiveState: FireResponseObjectiveState?
@@ -1921,6 +1931,18 @@ final class DroneSimulationViewModel: ObservableObject {
     private let hoseController: PayloadFireHoseController
     private let capsuleController: PayloadFireCapsuleController
     private let agriculturalSprayerController: PayloadAgriculturalSprayerController
+    /// Everything currently falling: capsules, released payloads.
+    ///
+    /// Driven from the simulation tick rather than from `SCNAction`s in the scene, so a drop is
+    /// integrated at a fixed step regardless of frame rate and its impact is resolved on the main
+    /// actor along with the rest of the mission state.
+    private let ballisticRuntime = BallisticProjectileRuntime()
+    /// Cached aiming solution for the capsule reticle, recomputed on a timer rather than every
+    /// tick — a forward integration is far too expensive to run at 120 Hz for a piece of UI.
+    private var dropAimPrediction: BallisticPrediction?
+    private var secondsSinceDropAimUpdate: Float = .greatestFiniteMagnitude
+    /// Drop events already launched locally, so a replicated release is played exactly once.
+    private var handledOnlineDropEventIDs: Set<UUID> = []
     private let tacticalMapCoordinator = TacticalMapCoordinator()
     private let missionDraftBuilder = MissionDraftBuilder()
     private let missionPreviewBuilder = MissionPreviewBuilder()
@@ -2203,12 +2225,29 @@ final class DroneSimulationViewModel: ObservableObject {
     }
     private var phaseClock: Double = 0.0
     private var phaseTotals = [Double](repeating: 0.0, count: TickPhase.allCases.count)
+    /// ⚠️ The mean alone cannot see the thing operators actually report. A tick that spikes to
+    /// 35 ms once inside a second of ~90 ticks moves the average by 0.4 ms — invisible, while
+    /// being exactly the stutter that is felt. These keep the worst single tick in the window
+    /// and which phase owned it, so a spike is attributable instead of merely believed.
+    private var phasePeaks = [Double](repeating: 0.0, count: TickPhase.allCases.count)
+    private var phaseWorstTickMs: Double = 0.0
+    private var phaseWorstTickPhase: TickPhase = .input
+    private var phaseCurrentTickMs: Double = 0.0
+    private var phaseCurrentTickWorstPhase: TickPhase = .input
+    private var phaseCurrentTickWorstMs: Double = 0.0
     private var phaseTickCount: Int = 0
     private var phaseTelemetryAccumulator: Float = 0.0
     @inline(__always)
     private func markTickPhase(_ phase: TickPhase) {
         let now = CACurrentMediaTime()
-        phaseTotals[phase.rawValue] += now - phaseClock
+        let elapsed = now - phaseClock
+        phaseTotals[phase.rawValue] += elapsed
+        if elapsed > phasePeaks[phase.rawValue] { phasePeaks[phase.rawValue] = elapsed }
+        phaseCurrentTickMs += elapsed
+        if elapsed > phaseCurrentTickWorstMs {
+            phaseCurrentTickWorstMs = elapsed
+            phaseCurrentTickWorstPhase = phase
+        }
         phaseClock = now
     }
     #endif
@@ -4085,7 +4124,33 @@ final class DroneSimulationViewModel: ObservableObject {
 
         releasedPayloadConfiguration = installedPayloadConfiguration
         lastPayloadImpact = nil
-        let releaseID = sceneController.releasePayloadVisual()
+        let release = sceneController.releasePayloadVisual()
+        let releaseID = release?.releaseID
+        if let release, let configuration = releasedPayloadConfiguration {
+            let descriptor = configuration.payloadType.ballisticDescriptor(
+                massKg: configuration.payloadMass
+            )
+            let carrierVelocity = finiteVector(state.velocity, fallback: .zero)
+            ballisticRuntime.launch(
+                id: release.releaseID,
+                kind: .releasedPayload(configuration.payloadType),
+                descriptor: descriptor,
+                position: release.position,
+                carrierVelocity: carrierVelocity,
+                surfaceProbe: sceneController
+            )
+            recordMissionReplayEvent(
+                .payloadReleased,
+                message: "Payload released (\(configuration.payloadType.rawValue))",
+                position: release.position
+            )
+            replicateOnlineDropIfNeeded(
+                kind: .releasedPayload(configuration.payloadType),
+                descriptor: descriptor,
+                position: release.position,
+                velocity: carrierVelocity
+            )
+        }
         activePayloadReleaseID = releaseID
         installedPayloadConfiguration = nil
         payloadDraftConfiguration.isAttached = false
@@ -4133,23 +4198,33 @@ final class DroneSimulationViewModel: ObservableObject {
         payloadStatusMessageKey = "payload.capsule.dropped_status"
         refreshPayloadRuntimeState()
 
-        sceneController.dropFireCapsule(size: size) { [weak self] impactPosition in
-            guard let self else { return }
-            guard var runtime = self.fireResponseRuntime, runtime.isActive else { return }
-            runtime.extinguishTreesInRadius(
-                center: SIMD2<Float>(impactPosition.x, impactPosition.z),
-                radiusMeters: size.blastRadiusMeters
-            )
-            self.fireResponseRuntime = runtime
-            self.sceneController.updateFireResponseVisuals(
-                treeStatuses: runtime.treeStatuses,
-                viewerWorldPosition: finiteVector(self.state.position, fallback: self.lastFiniteState.position)
-            )
-            self.publishFireResponseState()
-            if let outcome = runtime.outcome {
-                self.handleFireResponseOutcome(outcome)
-            }
-        }
+        let releasePosition = sceneController.payloadReleaseWorldPosition
+        let projectileID = ballisticRuntime.launch(
+            kind: .fireCapsule(size),
+            descriptor: size.ballisticDescriptor,
+            position: releasePosition,
+            // The carrier's velocity is the whole difference between this and the old drop path,
+            // which froze the release point's x and z and so implicitly assumed a hover.
+            carrierVelocity: finiteVector(state.velocity, fallback: .zero),
+            surfaceProbe: sceneController
+        )
+        sceneController.spawnFireCapsuleVisual(id: projectileID, at: releasePosition)
+
+        // Replay already draws release/impact markers, focuses its camera on them and filters the
+        // timeline by them — but nothing ever emitted the events, so all of that was dead code.
+        // The position is the point of release, not the aircraft's: with ballistics the two are
+        // metres apart, and the marker is about the capsule.
+        recordMissionReplayEvent(
+            .payloadReleased,
+            message: "Fire capsule released (\(size.rawValue))",
+            position: releasePosition
+        )
+        replicateOnlineDropIfNeeded(
+            kind: .fireCapsule(size),
+            descriptor: size.ballisticDescriptor,
+            position: releasePosition,
+            velocity: finiteVector(state.velocity, fallback: .zero)
+        )
 
         if missionEventRecorder.currentTimeline != nil {
             recordMissionEvents([
@@ -4430,6 +4505,11 @@ final class DroneSimulationViewModel: ObservableObject {
         }
         sceneController.resetCameraRuntimeState()
         sceneController.clearDroppedPayloadVisuals()
+        // Anything still in the air belongs to the run being torn down. Left in the runtime it
+        // would keep integrating into the next one and land with no node to show for it.
+        ballisticRuntime.removeAll()
+        dropAimPrediction = nil
+        secondsSinceDropAimUpdate = .greatestFiniteMagnitude
         if payloadState == .released || payloadState == .falling || payloadState == .landed {
             payloadState = .cleanedUp
             payloadStatusMessageKey = nil
@@ -7239,22 +7319,45 @@ final class DroneSimulationViewModel: ObservableObject {
 
         var settings = config.interception ?? .make(difficulty: config.parameters.difficulty)
         settings.timeLimit = config.parameters.timeLimitSeconds
+        // The drop zone has to be somewhere the world actually extends to. Clamped before the
+        // boundary, because `validated` grows the boundary to contain the zone — doing it the
+        // other way round would put the zone outside the world and the boundary outside that.
+        let zoneReach = simd_length(SIMD2<Float>(settings.deliveryZoneOffset.x, settings.deliveryZoneOffset.z))
+        let zoneLimit = terrain.worldHalfExtent * 0.78
+        if zoneReach > zoneLimit, zoneReach > 0.001 {
+            settings.deliveryZoneOffset *= zoneLimit / zoneReach
+        }
         // The escape boundary has to fit inside the world the mission is actually flown in,
         // whatever the setup screen asked for.
         settings.areaRadius = min(settings.areaRadius, terrain.worldHalfExtent * 0.8)
         settings = settings.validated
 
         let adapter = InterceptMissionScene(scene: scene, showsCallsigns: config.parameters.difficulty != .hard)
-        let catalogue = LIPODroneModelRepository().allProfiles
-        let targetProfile = interceptProfile(settings.targetProfileID, in: catalogue, allowingFixedWing: true)
+        let catalogue = interceptSelectableProfiles()
+        // On the delivery side the other aircraft is the hunter, and a hunter is a rotorcraft: an
+        // aeroplane cannot follow a quadcopter through a turn, and the mission would be an
+        // aeroplane flying past while the operator waits it out.
+        let isDelivery = settings.side == .delivery
+        let targetProfile = interceptProfile(
+            settings.targetProfileID,
+            in: catalogue,
+            allowingFixedWing: !isDelivery
+        )
         // An aeroplane is not a hovering target parked next to the dock: it enters the area on a
         // transit, above the treeline, and crosses it. It therefore starts further out, higher,
         // and pointed at the middle of the area rather than away from it.
         let isTransitingTarget = targetProfile.airframeClass == .fixedWing
-        let targetOffset = isTransitingTarget
-            ? SIMD3<Float>(0, Self.interceptTransitAltitude, -settings.areaRadius * 0.7)
-            : settings.targetOffset
-        let targetCourse = isTransitingTarget ? SIMD3<Float>(0, 0, 1) : SIMD3<Float>(0, 0, -1)
+        // The hunter starts behind the operator, between them and the dock: close enough to be a
+        // problem from the first minute, not so close that the run is over before it begins.
+        let targetOffset: SIMD3<Float>
+        if isDelivery {
+            targetOffset = SIMD3<Float>(0, settings.targetOffset.y, Self.interceptHunterStandoff)
+        } else if isTransitingTarget {
+            targetOffset = SIMD3<Float>(0, Self.interceptTransitAltitude, -settings.areaRadius * 0.7)
+        } else {
+            targetOffset = settings.targetOffset
+        }
+        let targetCourse = isTransitingTarget || isDelivery ? SIMD3<Float>(0, 0, 1) : SIMD3<Float>(0, 0, -1)
 
         let target = adapter.makeActor(
             id: InterceptCallsign.target,
@@ -7262,24 +7365,56 @@ final class DroneSimulationViewModel: ObservableObject {
             profile: targetProfile,
             position: interceptSpawn(dock: dock, offset: targetOffset),
             payload: interceptTargetPayload(settings: settings),
+            moduleShape: settings.moduleShape,
             seed: config.parameters.seed &+ 101,
             initialCourse: targetCourse
         )
-        target.cruiseSpeedScale = settings.targetAgility
+        // A hunter has to be able to run the operator down, and a stern chase between two aircraft
+        // of the same speed is not a chase. The advantage is what makes evading it a matter of
+        // flying rather than of holding the stick forward.
+        target.cruiseSpeedScale = settings.targetAgility * (isDelivery ? Self.interceptHunterSpeedScale : 1)
         let observer = adapter.makeActor(
             id: InterceptCallsign.observer,
             role: .observer,
             profile: interceptProfile(settings.observerProfileID, in: catalogue, allowingFixedWing: false),
             position: interceptSpawn(dock: dock, offset: settings.observerOffset),
             payload: nil,
+            moduleShape: settings.moduleShape,
             seed: config.parameters.seed &+ 202
         )
         interceptScene = adapter
 
-        let session = InterceptMissionSession(configuration: settings, target: target, observer: observer, origin: dock)
-        // Nothing is mounted, so there is nothing to spend on contact. The run is still flyable —
-        // it just cannot be won, and the HUD says why from the first frame.
-        if payloadState != .attached { session.playerPayload.state = .inert }
+        // The drop zone sits on the real ground, not at the dock's altitude — the load has to reach
+        // a place, and a place in this world has a height.
+        let deliveryZone = isDelivery
+            ? interceptSpawn(dock: dock, offset: SIMD3<Float>(
+                settings.deliveryZoneOffset.x, 0, settings.deliveryZoneOffset.z
+            ))
+            : nil
+        let session = InterceptMissionSession(
+            configuration: settings,
+            target: target,
+            observer: observer,
+            origin: dock,
+            deliveryZone: deliveryZone
+        )
+        if let deliveryZone {
+            adapter.setDeliveryZone(
+                centre: deliveryZone,
+                radius: settings.deliveryZoneRadius,
+                shape: settings.moduleShape
+            )
+        }
+        // The chosen module, taped under the operator's own aircraft. Mounted here rather than
+        // through the payload catalogue because it is mission equipment for one run — and because
+        // the catalogue used to mount a second, unasked-for box alongside it.
+        sceneController.setNoseMountedEquipment(
+            session.playerPayload.state.canTrigger
+                ? InterceptMissionScene.makeModuleNode(shape: settings.moduleShape)
+                : nil,
+            size: settings.moduleShape.sizeMeters
+        )
+        mountInterceptModuleMass(shape: settings.moduleShape)
         interceptSession = session
         interceptEventGate = InterceptEventGate(runID: session.director.runID, authorityID: session.director.authorityID)
         interceptBaseRFConfiguration = resolvedRFConfiguration()
@@ -7290,8 +7425,100 @@ final class DroneSimulationViewModel: ObservableObject {
             missionPlanID: session.director.runID
         )
         setCameraMode(.fpv)
-        adapter.update(session, deltaTime: 0)
+        adapter.update(
+            session,
+            deltaTime: 0,
+            ground: { [sceneController] position, radius in
+                sceneController.supportSurfaceHeight(
+                    at: SIMD2<Float>(position.x, position.z),
+                    clearanceRadius: radius,
+                    maximumHeight: position.y + radius
+                ) ?? 0
+            }
+        )
         publishInterceptHUD()
+    }
+
+    // MARK: Nose load as mass
+
+    /// Puts the chosen module into the player's component graph, where the mass model can see it.
+    ///
+    /// Not through `VehicleMassModel.payloadMass`: that is a scalar, and a scalar cannot say that
+    /// 0.9 kg of net is hanging off the nose rather than sitting over the centre. The graph can —
+    /// `massProperties` derives total mass, centre of mass and inertia from where the components
+    /// actually are — and it is also what lets the module come off when it is spent.
+    private func mountInterceptModuleMass(shape: AttachedModuleShape) {
+        interceptModuleComponent = nil
+        guard let position = sceneController.noseMountedEquipmentBodyPosition() else { return }
+        let size = shape.sizeMeters
+        interceptModuleComponent = VehicleComponent(
+            id: AttachedPayloadComponent.noseMountPointID,
+            // A taped-on load, not structure: it is damaged through proximity and its joint is a
+            // release, so a hard enough contact sheds it the way the real thing would.
+            kind: .payloadMount,
+            parentID: componentGraph.component(id: "frame") != nil ? "frame" : "fuselage",
+            massKg: shape.massKg,
+            localPosition: position,
+            boundingHalfExtents: size * 0.5,
+            strengthJ: Self.interceptModuleStrengthJ,
+            integrity: 1,
+            legacyComponent: nil,
+            functionalDependencies: [],
+            failureModes: []
+        )
+        // One call: the scalar mass model the thrust and hover baselines read, the graph rebuild,
+        // and the load's re-insertion into it.
+        refreshPayloadRuntimeState()
+    }
+
+    /// Adds the load to the graph if it belongs there and is not already in it. Called after every
+    /// rebuild too, because a rebuild starts from the builder's output and would otherwise quietly
+    /// drop it.
+    private func insertInterceptModuleComponent() {
+        guard let component = interceptModuleComponent,
+              componentGraph.component(id: component.id) == nil,
+              !componentGraph.isEmpty else { return }
+        componentGraph = VehicleComponentGraph(
+            components: componentGraph.components + [component],
+            massPropertiesRevision: componentGraph.massPropertiesRevision &+ 1
+        )
+        refreshDamagePhysicsModels()
+    }
+
+    /// The load separates at the moment it goes off. Detaching rather than deleting keeps the
+    /// graph's shape stable, and `massProperties` counts only what is still attached — so the
+    /// aircraft becomes lighter and its centre of mass moves back at exactly the right instant.
+    private func releaseInterceptModuleMass() {
+        guard interceptModuleComponent != nil else { return }
+        interceptModuleComponent = nil
+        // The rebuild starts from the builder's output, which never contained the load, and the
+        // re-insertion above is now a no-op — so the aircraft comes out lighter, with its centre
+        // of mass back where the airframe's own is, at exactly the instant the module leaves.
+        refreshPayloadRuntimeState()
+    }
+
+    /// Tape and a plastic case. Enough that an ordinary knock does not shed the load, far less than
+    /// the airframe it is stuck to.
+    private static let interceptModuleStrengthJ: Float = 120
+
+    /// Everything the setup screen offered for the mission's other two aircraft: the catalogue plus
+    /// the operator's own Workbench builds.
+    ///
+    /// The screen has always listed those builds; the runtime resolved the chosen ID against the
+    /// catalogue alone, found nothing and quietly substituted the first multirotor. An operator who
+    /// picked their own airframe as the target — or, on the delivery side, as the hunter that is
+    /// coming for them — flew against a stock one and was never told.
+    private func interceptSelectableProfiles() -> [DroneModelProfile] {
+        var profiles = LIPODroneModelRepository(abstractParameters: .default).allProfiles
+        for build in WorkbenchBuildStore.listLibraryBuilds() {
+            let profile = UAVBuildProfileSynthesizer.synthesizeProfile(for: build)
+            if let index = profiles.firstIndex(where: { $0.id == profile.id }) {
+                profiles[index] = profile
+            } else {
+                profiles.append(profile)
+            }
+        }
+        return profiles
     }
 
     /// The mission's aircraft are picked from the multirotor catalogue; an unknown or empty ID
@@ -7343,6 +7570,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
     private func clearInterceptMission() {
         sceneController.observationPointOfView = nil
+        sceneController.setNoseMountedEquipment(nil)
+        interceptModuleComponent = nil
         interceptScene?.clear()
         interceptScene = nil
         interceptSession = nil
@@ -7389,7 +7618,21 @@ final class DroneSimulationViewModel: ObservableObject {
     /// the physics step so everything it reads has already been resolved.
     private func updateInterceptMission(deltaTime: Float) {
         guard let session = interceptSession else { return }
-        interceptScene?.update(session, deltaTime: deltaTime)
+        // The scene needs the same ground sampler the session flies against, so wreckage lands on
+        // the terrain rather than on the y = 0 plane its old parabola assumed, and the same wind
+        // the aircraft feel.
+        interceptScene?.update(
+            session,
+            deltaTime: deltaTime,
+            ground: { [sceneController] position, radius in
+                sceneController.supportSurfaceHeight(
+                    at: SIMD2<Float>(position.x, position.z),
+                    clearanceRadius: radius,
+                    maximumHeight: position.y + radius
+                ) ?? 0
+            },
+            wind: finiteVector(weather.windVector, fallback: .zero)
+        )
         refreshInterceptLineOfSight(session: session, deltaTime: deltaTime)
 
         // The target is flown and damaged like any other actor, but it is not one of the
@@ -7439,6 +7682,15 @@ final class DroneSimulationViewModel: ObservableObject {
             targetVisible: interceptLineOfSight[InterceptCallsign.attacker] ?? false
         )
         if previousSource != session.observation.activeVehicleID { synchronizeInterceptCamera() }
+
+        // Spent means gone: the module separates at the moment it activates, which is also the
+        // moment the operator loses the picture. Leaving it bolted on afterwards is what made the
+        // blackout look unmotivated.
+        if !session.playerPayload.state.canTrigger,
+           sceneController.noseMountedEquipmentNode(named: InterceptMissionScene.moduleNodeName) != nil {
+            sceneController.setNoseMountedEquipment(nil)
+            releaseInterceptModuleMass()
+        }
 
         let events = session.drainEvents()
         recordInterceptEvents(events)
@@ -7526,9 +7778,23 @@ final class DroneSimulationViewModel: ObservableObject {
                 session.target.state.position
             ),
             sourceHasTargetInView: session.observation.active?.hasLineOfSight ?? false,
-            hidesRanges: session.director.configuration.hidesRangeReadouts
+            hidesRanges: session.director.configuration.hidesRangeReadouts,
+            side: session.director.configuration.side,
+            delivery: session.delivery?.state ?? .carried,
+            deliveryZoneRange: session.delivery?.planarRange(from: state.position) ?? 0,
+            isOverDeliveryZone: session.delivery?.isOverZone(state.position) ?? false,
+            canRelease: session.delivery?.state == .carried && session.director.isActive
         )
         if interceptHUD != value { interceptHUD = value }
+    }
+
+    /// The operator lets the load go. The one command this side of the mission has, and the moment
+    /// the whole run is decided by — everything after it is ballistics.
+    func releaseInterceptDelivery() {
+        guard let session = interceptSession, session.releaseDelivery(from: state) else { return }
+        sceneController.setNoseMountedEquipment(nil)
+        releaseInterceptModuleMass()
+        publishInterceptHUD()
     }
 
     /// Link quality as the OSD reports it: the share of packets that are still arriving.
@@ -9391,17 +9657,30 @@ final class DroneSimulationViewModel: ObservableObject {
         markTickPhase(.persistence)
         phaseTickCount += 1
         phaseTelemetryAccumulator += dt
+        if phaseCurrentTickMs > phaseWorstTickMs {
+            phaseWorstTickMs = phaseCurrentTickMs
+            phaseWorstTickPhase = phaseCurrentTickWorstPhase
+        }
+        phaseCurrentTickMs = 0.0
+        phaseCurrentTickWorstMs = 0.0
         if phaseTelemetryAccumulator >= 1.0, phaseTickCount > 0 {
             let ticks = Double(phaseTickCount)
             let perTick = phaseTotals.map { $0 * 1000.0 / ticks }
             let total = perTick.reduce(0.0, +)
+            // Mean and worst side by side, per phase: `wing=0.31/12.4` reads "0.31 ms on an
+            // average tick, 12.4 ms on the worst tick this second".
             let breakdown = TickPhase.allCases
-                .map { String(format: "%@=%.2f", $0.label, perTick[$0.rawValue]) }
+                .map {
+                    String(format: "%@=%.2f/%.1f", $0.label, perTick[$0.rawValue],
+                           phasePeaks[$0.rawValue] * 1000.0)
+                }
                 .joined(separator: " ")
             print(String(
-                format: "[Phase] hz=%.0f tick=%.2fms %@ | objs=%d bodies=%d parts=%d nav=%d env=%d",
+                format: "[Phase] hz=%.0f tick=%.2fms peak=%.1fms(%@) %@ | objs=%d bodies=%d parts=%d nav=%d env=%d",
                 ticks / Double(phaseTelemetryAccumulator),
                 total,
+                phaseWorstTickMs * 1000.0,
+                phaseWorstTickPhase.label as NSString,
                 breakdown as NSString,
                 cachedDiagnostics.activeObjectCount,
                 cachedDiagnostics.activePhysicsBodyCount,
@@ -9410,6 +9689,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 sceneController.environmentObstacles.count
             ))
             phaseTotals = [Double](repeating: 0.0, count: TickPhase.allCases.count)
+            phasePeaks = [Double](repeating: 0.0, count: TickPhase.allCases.count)
+            phaseWorstTickMs = 0.0
             phaseTickCount = 0
             phaseTelemetryAccumulator = 0.0
         }
@@ -10901,7 +11182,9 @@ final class DroneSimulationViewModel: ObservableObject {
             rotorModel: vehicleRotorModel,
             deltaTime: deltaTime,
             airDensity: currentAtmosphere().state(worldY: state.position.y).airDensity,
-            thermalWeakening: currentStructuralWeakening()
+            thermalWeakening: currentStructuralWeakening(),
+            thrustNewtons: state.propulsionThrustNewtons,
+            referenceWingAreaM2: state.referenceWingAreaM2
         )
         for entry in result.connectionDamage {
             let meaningfulDelta = entry.residualStrengthBefore - entry.residualStrengthAfter >= 0.002
@@ -12142,7 +12425,13 @@ final class DroneSimulationViewModel: ObservableObject {
             case .requestReset:
                 reset()
             case .dropPayload:
-                releasePayload()
+                // The same key does the same thing: it lets go of what the aircraft is carrying.
+                // On the delivery side that is the mission's one command, so it goes there first.
+                if interceptSession?.delivery?.state == .carried {
+                    releaseInterceptDelivery()
+                } else {
+                    releasePayload()
+                }
             case .armAircraft:
                 arm()
             case .disarmAircraft:
@@ -18865,6 +19154,7 @@ final class DroneSimulationViewModel: ObservableObject {
         refreshRangefinderStatus()
         refreshLidarStatus()
         refreshHoseAimStatus(deltaTime: deltaTime)
+        updateBallisticProjectiles(deltaTime: deltaTime)
         refreshCapsuleLauncherStatus(deltaTime: deltaTime)
         refreshAgriculturalSprayerStatus(deltaTime: deltaTime)
         refreshFlightControlDiagnostics()
@@ -18891,14 +19181,7 @@ final class DroneSimulationViewModel: ObservableObject {
         capsuleState = capsuleController.state
         sceneController.setCapsuleLauncherOpticsAvailability(capsuleState.isAvailable)
 
-        if capsuleState.isAvailable {
-            sceneController.setFireCapsuleTargetReticle(
-                dronePlanarPosition: currentPlanarPosition(),
-                radiusMeters: capsuleState.capsuleSize.blastRadiusMeters
-            )
-        } else {
-            sceneController.setFireCapsuleTargetReticle(dronePlanarPosition: nil, radiusMeters: 0)
-        }
+        updateDropAimReticle(deltaTime: Float(deltaTime))
 
         let capsuleSignals = capsuleController.consumeMissionSignals()
         if !capsuleSignals.isEmpty {
@@ -18906,6 +19189,360 @@ final class DroneSimulationViewModel: ObservableObject {
             if payloadMissionSignals.count > 24 {
                 payloadMissionSignals.removeFirst(payloadMissionSignals.count - 24)
             }
+        }
+    }
+
+    /// Tells the other participants that something was released, and with what initial state.
+    ///
+    /// Only the release is sent, never the trajectory. The runtime integrates at a fixed step from
+    /// a fixed state, so every machine that receives this computes the same arc — one small message
+    /// instead of a position stream, with no interpolation and nothing to jitter.
+    private func replicateOnlineDropIfNeeded(
+        kind: BallisticProjectile.Kind,
+        descriptor: BallisticDescriptor,
+        position: SIMD3<Float>,
+        velocity: SIMD3<Float>
+    ) {
+        guard let context = onlineRuntimeContext,
+              context.localHasVehicleAuthority,
+              let localVehicleID = context.localVehicleID else {
+            return
+        }
+
+        var payloadTypeRawValue: String?
+        var capsuleSizeRawValue: String?
+        switch kind {
+        case let .fireCapsule(size):
+            capsuleSizeRawValue = size.rawValue
+        case let .releasedPayload(type):
+            payloadTypeRawValue = type.rawValue
+        case .debris:
+            return  // Wreckage is local scenery; it is not replicated.
+        }
+
+        let event = OnlineSharedEvent(
+            sessionID: context.launchDescriptor.id,
+            kind: .payloadReleased,
+            reporterParticipantID: context.localParticipant.id,
+            reporterObjectID: localVehicleID,
+            pairKey: nil,
+            positionX: Double(position.x),
+            positionY: Double(position.y),
+            positionZ: Double(position.z),
+            result: .none,
+            participants: [
+                OnlineSharedEventParticipant(
+                    objectID: localVehicleID,
+                    objectKind: .vehicle,
+                    ownerParticipantID: context.localParticipant.id,
+                    ownerVehicleID: localVehicleID,
+                    displayName: context.localParticipant.displayName
+                )
+            ],
+            drop: OnlineDropPayload(
+                velocityX: Double(velocity.x),
+                velocityY: Double(velocity.y),
+                velocityZ: Double(velocity.z),
+                massKg: Double(descriptor.massKg),
+                dragCoefficient: Double(descriptor.dragCoefficient),
+                referenceAreaSqM: Double(descriptor.referenceAreaSqM),
+                payloadTypeRawValue: payloadTypeRawValue,
+                capsuleSizeRawValue: capsuleSizeRawValue
+            )
+        )
+        onlineSharedEventTransport?.submitSharedEvent(event)
+    }
+
+    /// Replays other participants' drops locally.
+    ///
+    /// The event list is a running window that grows by appends, so each drop is launched exactly
+    /// once and remembered by event id. Our own events come back through this list after the host
+    /// orders them — launching those again would double every capsule.
+    func applyOnlineSharedEvents(_ events: [OnlineSharedEvent]) {
+        guard let context = onlineRuntimeContext else {
+            return
+        }
+        for event in events {
+            guard event.kind == .payloadReleased,
+                  let drop = event.drop,
+                  !handledOnlineDropEventIDs.contains(event.id),
+                  event.reporterParticipantID != context.localParticipant.id else {
+                continue
+            }
+            handledOnlineDropEventIDs.insert(event.id)
+
+            let kind: BallisticProjectile.Kind
+            if let raw = drop.capsuleSizeRawValue, let size = FireCapsuleSize(rawValue: raw) {
+                kind = .fireCapsule(size)
+            } else if let raw = drop.payloadTypeRawValue, let type = PayloadType(rawValue: raw) {
+                kind = .releasedPayload(type)
+            } else {
+                continue
+            }
+
+            let position = SIMD3<Float>(
+                Float(event.positionX),
+                Float(event.positionY),
+                Float(event.positionZ)
+            )
+            let projectileID = ballisticRuntime.launch(
+                id: event.id,
+                kind: kind,
+                descriptor: BallisticDescriptor(
+                    massKg: Float(drop.massKg),
+                    dragCoefficient: Float(drop.dragCoefficient),
+                    referenceAreaSqM: Float(drop.referenceAreaSqM)
+                ),
+                ownership: .remote,
+                position: position,
+                carrierVelocity: SIMD3<Float>(
+                    Float(drop.velocityX),
+                    Float(drop.velocityY),
+                    Float(drop.velocityZ)
+                ),
+                surfaceProbe: sceneController
+            )
+            sceneController.spawnRemoteDropVisual(id: projectileID, kind: kind, at: position)
+        }
+
+        // The window is trimmed to 50 by the session; anything far past that can never arrive again.
+        if handledOnlineDropEventIDs.count > 256 {
+            let live = Set(events.map(\.id))
+            handledOnlineDropEventIDs.formIntersection(live)
+        }
+    }
+
+    /// The air a dropped object falls through, at this moment in this weather.
+    private func currentBallisticEnvironment() -> BallisticEnvironment {
+        BallisticEnvironment(
+            atmosphere: currentAtmosphere(),
+            windVector: finiteVector(weather.windVector, fallback: .zero)
+        )
+    }
+
+    /// Advances everything in the air and applies whatever landed.
+    ///
+    /// Called from the simulation tick. The impacts arrive here, on the main actor, instead of
+    /// inside an `SCNAction.run` closure on an arbitrary thread — which is where capsule impacts
+    /// used to be resolved, and which had already produced a main-thread deadlock.
+    private func updateBallisticProjectiles(deltaTime: TimeInterval) {
+        guard !ballisticRuntime.isEmpty else {
+            return
+        }
+
+        let result = ballisticRuntime.update(
+            deltaTime: Float(deltaTime),
+            environment: currentBallisticEnvironment(),
+            surfaceProbe: sceneController
+        )
+
+        // Survivors first, so a projectile that impacted this tick is not also drawn mid-air.
+        for projectile in ballisticRuntime.projectiles {
+            guard projectile.ownership == .local else {
+                sceneController.updateRemoteDropVisual(
+                    id: projectile.id,
+                    position: projectile.position,
+                    orientation: projectile.orientation
+                )
+                continue
+            }
+            switch projectile.kind {
+            case .fireCapsule:
+                sceneController.updateFireCapsuleVisual(
+                    id: projectile.id,
+                    position: projectile.position,
+                    orientation: projectile.orientation
+                )
+            case .releasedPayload:
+                sceneController.updateReleasedPayloadVisual(
+                    id: projectile.id,
+                    position: projectile.position,
+                    orientation: projectile.orientation,
+                    isParachuteDeployed: projectile.isParachuteDeployed
+                )
+            case .debris:
+                // Wreckage belongs to the intercept scene's own runtime, not this one.
+                break
+            }
+        }
+
+        for impact in result.impacts {
+            // A replicated drop is drawn everywhere but acted on only by the participant who made
+            // it. Otherwise one capsule extinguishes the same fire once per connected player, and
+            // every one of them writes a mission event for someone else's release.
+            guard impact.ownership == .local else {
+                sceneController.finishRemoteDropVisual(id: impact.projectileID, at: impact.position)
+                continue
+            }
+            switch impact.kind {
+            case let .fireCapsule(size):
+                handleFireCapsuleImpact(impact, size: size)
+            case let .releasedPayload(payloadType):
+                handleReleasedPayloadImpact(impact, payloadType: payloadType)
+            case .debris:
+                break
+            }
+        }
+
+        // A projectile the runtime gave up on still has a node in the scene. Clear it, or the
+        // world accumulates capsules frozen in mid-air for the rest of the session.
+        for lost in result.abandoned {
+            guard lost.ownership == .local else {
+                sceneController.discardRemoteDropVisual(id: lost.id)
+                continue
+            }
+            switch lost.kind {
+            case .fireCapsule:
+                sceneController.discardFireCapsuleVisual(id: lost.id)
+            case .releasedPayload:
+                sceneController.discardReleasedPayloadVisual(id: lost.id)
+            case .debris:
+                break
+            }
+        }
+        if !result.abandoned.isEmpty {
+            syncPayloadLifecycleEvents()
+        }
+    }
+
+    /// A capsule reached the ground, a rooftop, or the water.
+    private func handleFireCapsuleImpact(_ impact: BallisticImpact, size: FireCapsuleSize) {
+        sceneController.finishFireCapsuleVisual(
+            id: impact.projectileID,
+            at: impact.position,
+            size: size,
+            isWater: impact.isWater
+        )
+
+        recordMissionReplayEvent(
+            .payloadImpact,
+            message: impact.isWater
+                ? String(format: "Capsule into water at %.1f m/s", impact.speedMps)
+                : String(format: "Capsule impact at %.1f m/s", impact.speedMps),
+            position: impact.position
+        )
+
+        // A capsule that lands in a river does not suppress anything — it was a miss, and the
+        // splash the scene draws instead of a burst is the honest feedback for it.
+        guard !impact.isWater else {
+            payloadStatusMessageKey = "payload.capsule.impact_water"
+            refreshPayloadRuntimeState()
+            return
+        }
+
+        guard var runtime = fireResponseRuntime, runtime.isActive else {
+            return
+        }
+        runtime.extinguishTreesInRadius(
+            center: SIMD2<Float>(impact.position.x, impact.position.z),
+            radiusMeters: size.blastRadiusMeters
+        )
+        fireResponseRuntime = runtime
+        sceneController.updateFireResponseVisuals(
+            treeStatuses: runtime.treeStatuses,
+            viewerWorldPosition: finiteVector(state.position, fallback: lastFiniteState.position)
+        )
+        publishFireResponseState()
+        if let outcome = runtime.outcome {
+            handleFireResponseOutcome(outcome)
+        }
+    }
+
+    /// A released payload reached the ground, a rooftop, or the water.
+    ///
+    /// Impact speed is the magnitude of the full velocity vector, horizontal component included. The
+    /// old path derived it from drop height alone (`sqrt(2gh)`), which is only true for something
+    /// released from a hover in a vacuum.
+    private func handleReleasedPayloadImpact(_ impact: BallisticImpact, payloadType: PayloadType) {
+        sceneController.finishReleasedPayloadVisual(
+            id: impact.projectileID,
+            at: impact.position,
+            payloadType: payloadType,
+            impactSpeedMps: impact.speedMps
+        )
+        recordMissionReplayEvent(
+            .payloadImpact,
+            message: String(
+                format: "%@ impact at %.1f m/s (%.0f kg·m/s)",
+                payloadType.rawValue, impact.speedMps, impact.momentumKgMps
+            ),
+            position: impact.position
+        )
+        syncPayloadLifecycleEvents()
+    }
+
+    /// What the drop reticle should currently be solving for, if anything.
+    ///
+    /// Both droppable mechanics answer here. A capsule launcher aims at its blast radius; a plain
+    /// payload aims at a point. Everything else mounted — a gimbal, a hose, a sprayer — is not
+    /// released in flight and gets no reticle.
+    private func currentDropAimSubject() -> (descriptor: BallisticDescriptor, radiusMeters: Float)? {
+        if capsuleState.isAvailable {
+            return (capsuleState.capsuleSize.ballisticDescriptor,
+                    capsuleState.capsuleSize.blastRadiusMeters)
+        }
+        guard payloadState == .attached, let configuration = installedPayloadConfiguration else {
+            return nil
+        }
+        switch configuration.payloadType {
+        case .cargoBox, .rescuePack:
+            return (
+                configuration.payloadType.ballisticDescriptor(massKg: configuration.payloadMass),
+                1.0
+            )
+        case .cameraGimbal, .thermalCamera, .lidarModule, .laserRangefinder, .fireHose,
+             .fireCapsuleLauncher, .agriculturalSprayer, .sensorModule, .radioRelay, .custom:
+            return nil
+        }
+    }
+
+    /// Recomputes where a release right now would land, and draws it.
+    ///
+    /// This exists because ballistics without an aiming solution is not a simulation improvement,
+    /// it is a broken mission. The capsule reticle used to sit directly under the aircraft and the
+    /// capsule used to fall directly under the aircraft; both were wrong in the same direction, so
+    /// the pair worked. Fixing only the fall would leave a pilot aiming with a circle tens of
+    /// metres from the truth. A cargo drop never had a reticle at all, and now needs one for the
+    /// same reason — the delivery zone can be as small as a metre across.
+    ///
+    /// Throttled deliberately. A forward integration walks the trajectory and queries the world
+    /// along it; at tick rate, with the scene's column query casting twice into the mesh and then
+    /// walking every procedural support surface, that is an order of magnitude more world queries
+    /// than the flight model itself performs. Ten hertz is imperceptible on a reticle.
+    private func updateDropAimReticle(deltaTime: Float) {
+        guard let subject = currentDropAimSubject() else {
+            dropAimPrediction = nil
+            secondsSinceDropAimUpdate = .greatestFiniteMagnitude
+            sceneController.setDropImpactReticle(impactPoint: nil, radiusMeters: 0, isReliable: false)
+            sceneController.setCapsuleBombardierAim(impactPoint: nil)
+            return
+        }
+
+        secondsSinceDropAimUpdate += max(0.0, deltaTime)
+        if secondsSinceDropAimUpdate >= 0.1 || dropAimPrediction == nil {
+            secondsSinceDropAimUpdate = 0.0
+            dropAimPrediction = ballisticRuntime.predictImpact(
+                descriptor: subject.descriptor,
+                position: sceneController.payloadReleaseWorldPosition,
+                carrierVelocity: finiteVector(state.velocity, fallback: .zero),
+                environment: currentBallisticEnvironment(),
+                surfaceProbe: sceneController
+            )
+        }
+
+        sceneController.setDropImpactReticle(
+            impactPoint: dropAimPrediction?.position,
+            radiusMeters: subject.radiusMeters,
+            isReliable: !(dropAimPrediction?.isExtrapolated ?? true)
+        )
+
+        // The bombardier camera belongs to the launcher; a plain cargo drop has no such optic, and
+        // aiming a camera that is not mounted would only move a rig nobody is looking through.
+        if capsuleState.isAvailable {
+            // An extrapolated solution is a guess about ground the world could not answer for.
+            // Driving the gimbal to it would swing the view somewhere arbitrary, so hold nadir.
+            let aimPoint = (dropAimPrediction?.isExtrapolated ?? true) ? nil : dropAimPrediction?.position
+            sceneController.setCapsuleBombardierAim(impactPoint: aimPoint)
         }
     }
 
@@ -19636,7 +20273,8 @@ final class DroneSimulationViewModel: ObservableObject {
             uavProfile: activeUAVProfile,
             installedPayload: installedPayloadConfiguration,
             payloadState: payloadState,
-            installedFiberSpool: installedFiberSpoolModule
+            installedFiberSpool: installedFiberSpoolModule,
+            extraMountedMass: interceptModuleComponent?.massKg ?? 0
         )
         // Mass distribution changed (payload mounted/released) — rebuild the
         // physical graph but keep the damage already sustained.
@@ -19679,6 +20317,8 @@ final class DroneSimulationViewModel: ObservableObject {
         vehicleMassProperties = graph.massProperties
         pristineRotorModel = output.rotorModel
         refreshDamagePhysicsModels()
+        // A rebuild starts from the builder's output, which knows nothing about mission equipment.
+        insertInterceptModuleComponent()
     }
 
     /// Bakes graph integrity + active failure modes into the physics-facing
@@ -20000,6 +20640,11 @@ final class DroneSimulationViewModel: ObservableObject {
             cameraConfiguration.mode = .follow
         }
         sceneController.clearDroppedPayloadVisuals()
+        // Anything still in the air belongs to the run being torn down. Left in the runtime it
+        // would keep integrating into the next one and land with no node to show for it.
+        ballisticRuntime.removeAll()
+        dropAimPrediction = nil
+        secondsSinceDropAimUpdate = .greatestFiniteMagnitude
         sceneController.removePayloadVisual()
         refreshPayloadCameraStatus()
         refreshPayloadRuntimeState()

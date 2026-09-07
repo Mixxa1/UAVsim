@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-07",
+  "collection": "Ground vehicles, scenery only",
+  "note": "The same two 6x6 transports as the container launchers, with the launch module left off. Nothing in the app builds these yet — they are here so a scene that needs a truck has one, and so the bundle carries them alongside the launchers they match.",
+  "models": [
+    {
+      "id": "harpy-bonnet-6x6-transport",
+      "file": "harpy-bonnet-6x6-transport.usdz",
+      "dimensions_m": [3.38, 3.1, 8.43],
+      "livery": "sand",
+      "cab": "bonnet"
+    },
+    {
+      "id": "harop-cabover-6x6-transport",
+      "file": "harop-cabover-6x6-transport.usdz",
+      "dimensions_m": [3.39, 3.34, 8.43],
+      "livery": "green",
+      "cab": "cabover"
+    }
+  ]
+}

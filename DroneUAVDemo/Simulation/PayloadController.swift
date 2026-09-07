@@ -63,7 +63,8 @@ enum PayloadController {
         uavProfile: UAVProfile?,
         installedPayload: PayloadConfiguration?,
         payloadState: PayloadState,
-        installedFiberSpool: FiberSpoolModule? = nil
+        installedFiberSpool: FiberSpoolModule? = nil,
+        extraMountedMass: Float = 0
     ) -> VehicleMassModel {
         let payloadMass: Float
         if payloadState == .attached, let installedPayload {
@@ -74,8 +75,11 @@ enum PayloadController {
         // The fiber spool is a control-link module, not mission payload (see
         // `UAVControlLinkType`) — folded into the same total mass for flight-physics purposes
         // (weight/agility), since it occupies its own equipment slot independent of the payload
-        // bay above.
-        let combinedMass = payloadMass + max(0.0, installedFiberSpool?.spoolMassKg ?? 0.0)
+        // bay above. `extraMountedMass` is the same idea for equipment a scenario straps on for
+        // one run — the interception module — which the payload bay knows nothing about.
+        let combinedMass = payloadMass
+            + max(0.0, installedFiberSpool?.spoolMassKg ?? 0.0)
+            + max(0.0, extraMountedMass)
 
         return VehicleMassModel.resolve(
             for: runtimeProfile,

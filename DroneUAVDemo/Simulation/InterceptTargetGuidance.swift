@@ -22,6 +22,15 @@ struct InterceptTargetGuidance {
         var velocity: SIMD3<Float>
         var spawnPosition: SIMD3<Float>
         var attacker: SIMD3<Float>
+        /// How the other aircraft is moving. Only pursuit reads it, and only to aim where the
+        /// quarry will be — a hunter that flies at where its quarry *is* never closes on anything
+        /// faster than a hover.
+        var attackerVelocity: SIMD3<Float> = .zero
+        /// What this aircraft can do, not what it is doing. The collision solve needs the speed the
+        /// hunter will *arrive* at; using the speed it happens to be flying at the instant it is
+        /// asked — a standing start, or the bottom of a turn — puts the meeting point in the wrong
+        /// place and the whole approach is built on it.
+        var cruiseSpeed: Float = 0
         /// Centre of the mission area — the dock the run was launched from.
         var origin: SIMD3<Float>
         var areaRadius: Float
@@ -44,6 +53,30 @@ struct InterceptTargetGuidance {
     static let fixedWingLegLength: Float = 900
     /// Inside this range an evading target considers itself threatened and breaks off.
     static let threatRange: Float = 160
+    /// How far ahead a hunter is willing to aim, in seconds. Bounded because a long lead against a
+    /// quarry that is about to turn points at empty sky.
+    static let maximumPursuitLead: Float = 8
+    /// Speed the collision solve assumes when the hunter is barely moving, so a standing start
+    /// still produces a course rather than a division by nothing.
+    static let minimumPursuitSpeed: Float = 8
+    /// Inside this the hunter stops solving and flies at the aircraft.
+    static let pursuitTerminalRange: Float = 40
+    /// Inside this it stops going round things. Committed is committed: a hunter that breaks off a
+    /// final approach to clear a tree is a hunter the operator can shake by flying past one.
+    static let pursuitCommitRange: Float = 90
+    /// How much harder a hunter turns than a target flying its own business.
+    static let pursuitTurnRateScale: Float = 2.2
+    /// How far past the quarry a hunter aims. Enough that the position controller is still asking
+    /// for a real translation and goes through rather than stopping alongside; short enough that a
+    /// small heading error is a small miss.
+    static let pursuitOvershoot: Float = 12
+    /// Room a committed hunter keeps around a trunk: an airframe's width and a margin, not the
+    /// corridor a patrolling aircraft steers by. Wide enough to survive a wood, narrow enough that
+    /// flying past a tree does not shake the pursuit.
+    static let pursuitObstacleClearance: Float = 7
+    /// How far a hunter clears the top of something it has to hop. Small: it is coming back down
+    /// the other side to a quarry that is under the canopy, not leaving the wood.
+    static let pursuitOverflyClearance: Float = 6
     /// How much an evading rotorcraft climbs at maximum urgency, in metres.
     static let evasiveClimb: Float = 22
     /// Maximum course change, in radians per second at unit agility. Bounded so the target flies
@@ -94,15 +127,52 @@ struct InterceptTargetGuidance {
         )
         let range = simd_length(planarToAttacker)
         let intent = desiredCourse(situation, toAttacker: planarToAttacker, range: range)
-        let heading = steer(toward: avoiding(intent, situation: situation), situation: situation)
-        let reach = situation.isFixedWing
+        // Committed only decides how the *course* is followed. Obstacles are another matter: a
+        // hunter with avoidance switched off flew into trunks and destroyed itself after a few
+        // hundred metres of wood, which is a worse outcome than losing a pursuit.
+        let committed = situation.behavior == .interceptorPursuit && range < Self.pursuitCommitRange
+        // Measured: narrowing the *lateral* clearance for a committed hunter bought nothing — the
+        // approach to a quarry under the canopy stayed the same width — and cost it robustness on
+        // a long transit through the wood. What actually reaches down through a wood is the
+        // altitude rule below, so lateral avoidance is left exactly as every other aircraft flies.
+        let requested = avoiding(intent, situation: situation)
+        // On the final approach the solution is followed exactly rather than turned towards at a
+        // bounded rate. Smoothing is what a course *holder* needs; a hunter closing the last fifty
+        // metres that lags its own solution by a fraction of a second arrives beside the aircraft
+        // instead of through it, which is what "flies imprecisely" looks like from the cockpit.
+        let heading = committed ? { course = requested; return requested }() : steer(toward: requested, situation: situation)
+        let held = altitude(situation, range: range)
+        return SIMD3<Float>(
+            situation.position.x + heading.x * aimDistance(situation, range: range),
+            situation.behavior == .interceptorPursuit
+                ? clearedAltitude(
+                    held,
+                    situation: situation,
+                    heading: heading,
+                    lateralClearance: Self.pursuitObstacleClearance,
+                    overflyClearance: Self.pursuitOverflyClearance
+                  )
+                : clearedAltitude(held, situation: situation),
+            situation.position.z + heading.z * aimDistance(situation, range: range)
+        )
+    }
+
+    /// How far along the chosen heading the aim point is put.
+    ///
+    /// For a hunter this shortens as the range closes, and it is the difference between a pass and
+    /// a hit. The aim point is a lever: the aircraft flies at *it*, so a heading that is half a
+    /// degree off puts the commanded point — and therefore the aircraft — `distance × sin(error)`
+    /// to one side of the quarry. Measured against a hovering aircraft with a fixed 95 m aim point,
+    /// approaches went past at 14, 7 and 5 metres before one finally connected. Aiming just beyond
+    /// the quarry instead divides that error by the same factor the distance shrank by, while
+    /// staying far enough ahead that the position controller still asks for full speed and drives
+    /// *through* rather than flaring to a stop alongside.
+    private func aimDistance(_ situation: Situation, range: Float) -> Float {
+        let cruise = situation.isFixedWing
             ? max(Self.fixedWingLegLength, situation.areaRadius * 2.5)
             : Self.rotorcraftAimDistance * max(0.5, situation.agility)
-        return SIMD3<Float>(
-            situation.position.x + heading.x * reach,
-            clearedAltitude(altitude(situation, range: range), situation: situation),
-            situation.position.z + heading.z * reach
-        )
+        guard situation.behavior == .interceptorPursuit, !situation.isFixedWing else { return cruise }
+        return min(cruise, range + Self.pursuitOvershoot)
     }
 
     // MARK: - Obstacles
@@ -112,19 +182,24 @@ struct InterceptTargetGuidance {
     /// A sideways push, not a replanned route: the target is flying a patrol or breaking off an
     /// interceptor, and what it needs is to not hit the tree it is about to reach. The push grows
     /// as the obstacle gets closer and as the course points more squarely at it.
-    private func avoiding(_ heading: SIMD3<Float>, situation: Situation) -> SIMD3<Float> {
-        let lookahead = obstacleLookahead(situation)
+    private func avoiding(
+        _ heading: SIMD3<Float>,
+        situation: Situation,
+        lookahead requestedLookahead: Float? = nil,
+        clearance: Float = InterceptTargetGuidance.obstacleClearance
+    ) -> SIMD3<Float> {
+        let lookahead = requestedLookahead ?? obstacleLookahead(situation)
         var push = SIMD3<Float>.zero
         for obstacle in situation.obstacles {
             // Anything the aircraft is comfortably above is not in the way.
-            guard obstacle.topY > situation.position.y - Self.obstacleOverflyClearance else { continue }
+            guard obstacle.topY > situation.position.y - clearance else { continue }
             let offset = SIMD3<Float>(
                 obstacle.center.x - situation.position.x,
                 0,
                 obstacle.center.z - situation.position.z
             )
             let distance = simd_length(offset)
-            let reach = obstacle.radius + Self.obstacleClearance
+            let reach = obstacle.radius + clearance
             guard distance > 0.001, distance < lookahead + reach else { continue }
             let toObstacle = offset / distance
             let ahead = simd_dot(heading, toObstacle)
@@ -146,7 +221,21 @@ struct InterceptTargetGuidance {
 
     /// Raises the aim point over anything tall enough to matter. Cheaper and more reliable than
     /// threading between trees, and what an aircraft with height to spare would actually do.
-    private func clearedAltitude(_ requested: Float, situation: Situation) -> Float {
+    /// `heading` narrows this to what is actually in the aircraft's path.
+    ///
+    /// Without it the rule is "anything within the lookahead, in any direction" — which in a wood
+    /// is every trunk, all the time, so the aim point sits permanently above the canopy. For a
+    /// patrolling target that is the right answer and stays the default. For a hunter it is fatal
+    /// to the mission: measured against a quarry hovering below the canopy, the hunter circled
+    /// overhead and never got closer than 21 m. Given a heading it lifts over the trunk it is about
+    /// to hit and comes back down behind it.
+    private func clearedAltitude(
+        _ requested: Float,
+        situation: Situation,
+        heading: SIMD3<Float>? = nil,
+        lateralClearance: Float = InterceptTargetGuidance.obstacleClearance,
+        overflyClearance: Float = InterceptTargetGuidance.obstacleOverflyClearance
+    ) -> Float {
         let lookahead = obstacleLookahead(situation)
         var floor = requested
         for obstacle in situation.obstacles {
@@ -157,7 +246,14 @@ struct InterceptTargetGuidance {
             )
             let distance = simd_length(offset)
             guard distance < lookahead + obstacle.radius else { continue }
-            floor = max(floor, obstacle.topY + Self.obstacleOverflyClearance)
+            if let heading, distance > 0.001 {
+                let toObstacle = offset / distance
+                let ahead = simd_dot(heading, toObstacle)
+                guard ahead > 0 else { continue }
+                let lateral = abs(distance * sqrt(max(0, 1 - ahead * ahead)))
+                guard lateral < obstacle.radius + lateralClearance else { continue }
+            }
+            floor = max(floor, obstacle.topY + overflyClearance)
         }
         return floor
     }
@@ -201,7 +297,57 @@ struct InterceptTargetGuidance {
             ))
             let away = range > 0.001 ? simd_normalize(-toAttacker) : outward
             return Self.planar(outward + away * 0.6)
+        case .interceptorPursuit:
+            // A collision course, not a lead guess and not a tail chase.
+            //
+            // Not contained by the boundary either. A hunter that broke off at the fence would hand
+            // the operator a corner of the map to sit in, which is not a mission.
+            guard range > 0.001 else { return course ?? initialCourse(situation) }
+            // Inside knife range the solution is noise — the geometry changes faster than a course
+            // can be turned — so it stops solving and simply goes for the aircraft.
+            guard range > Self.pursuitTerminalRange else { return Self.planar(toAttacker) }
+            return Self.planar(collisionCourse(situation, toAttacker: toAttacker, range: range))
         }
+    }
+
+    /// Where to point to arrive at the same place as the quarry at the same time.
+    ///
+    /// Solves |R + V·t| = S·t for the earliest positive `t` — the constant-bearing course an
+    /// interceptor actually flies, which cuts the corner on a turning quarry and heads off one
+    /// running for a zone. A fixed lead time, which this replaced, aims at a point the quarry has
+    /// no intention of passing through, and pure pursuit against anything moving is a stern chase
+    /// that only ends if the hunter is much the faster aircraft.
+    ///
+    /// With no solution — a quarry faster than the hunter, opening the range — the best available
+    /// answer is to aim at where it will be at the longest lead worth taking and hope it turns.
+    private func collisionCourse(
+        _ situation: Situation,
+        toAttacker: SIMD3<Float>,
+        range: Float
+    ) -> SIMD3<Float> {
+        let quarry = SIMD3<Float>(situation.attackerVelocity.x, 0, situation.attackerVelocity.z)
+        let speed = max(
+            Self.minimumPursuitSpeed,
+            situation.cruiseSpeed,
+            simd_length(SIMD3<Float>(situation.velocity.x, 0, situation.velocity.z))
+        )
+        let a = simd_length_squared(quarry) - speed * speed
+        let b = 2 * simd_dot(toAttacker, quarry)
+        let c = range * range
+
+        var time: Float?
+        if abs(a) < 1e-4 {
+            if b < -1e-4 { time = -c / b }
+        } else {
+            let discriminant = b * b - 4 * a * c
+            if discriminant >= 0 {
+                let root = sqrt(discriminant)
+                let candidates = [(-b - root) / (2 * a), (-b + root) / (2 * a)].filter { $0 > 0 }
+                time = candidates.min()
+            }
+        }
+        let lead = min(Self.maximumPursuitLead, time ?? (range / speed))
+        return toAttacker + quarry * lead
     }
 
     /// The patrol itself: cross the area, turn, cross it back. Expressed as a point to fly to
@@ -262,7 +408,11 @@ struct InterceptTargetGuidance {
     /// of turning through it.
     private mutating func steer(toward desired: SIMD3<Float>, situation: Situation) -> SIMD3<Float> {
         let current = course ?? initialCourse(situation)
-        let maxTurn = Self.courseTurnRate * max(0.0001, situation.deltaTime) * max(0.2, situation.agility)
+        // A hunter turns harder than an aircraft going about its own business. It is flying to a
+        // solution that moves whenever the quarry does, and at a target's turn rate it arrives
+        // permanently one correction behind.
+        let scale = situation.behavior == .interceptorPursuit ? Self.pursuitTurnRateScale : 1
+        let maxTurn = Self.courseTurnRate * scale * max(0.0001, situation.deltaTime) * max(0.2, situation.agility)
         let cosine = max(-1, min(1, simd_dot(current, desired)))
         let angle = acos(cosine)
         let turned: SIMD3<Float>
@@ -360,6 +510,15 @@ struct InterceptTargetGuidance {
     /// Altitude the target holds. A rotorcraft climbs a little while breaking off, which is what
     /// turns a close pass into a miss rather than a graze.
     private func altitude(_ situation: Situation, range: Float) -> Float {
+        // A hunter goes where its quarry is going to be, in height as well as on the ground.
+        // Holding the quarry's *current* altitude leaves it permanently one climb behind, and
+        // holding its own spawn altitude leaves it circling overhead while the operator flies
+        // underneath it.
+        if situation.behavior == .interceptorPursuit {
+            let speed = max(Self.minimumPursuitSpeed, situation.cruiseSpeed)
+            let lead = min(Self.maximumPursuitLead, range / speed)
+            return situation.attacker.y + situation.attackerVelocity.y * lead
+        }
         let base = situation.spawnPosition.y
         guard situation.behavior == .evasiveBasic,
               !situation.isFixedWing,

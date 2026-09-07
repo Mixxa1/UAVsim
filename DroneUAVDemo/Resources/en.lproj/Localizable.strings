@@ -217,6 +217,7 @@
 "payload.capsule.remaining" = "CAPSULES %d";
 "payload.capsule.empty" = "No capsules remaining";
 "payload.capsule.dropped_status" = "Capsule dropped";
+"payload.capsule.impact_water" = "Capsule fell into water — no suppression";
 "payload.capsule.recharge_countdown" = "RELOAD %.1fs";
 
 // Agricultural sprayer
@@ -3322,9 +3323,6 @@
 "intercept.target.payload" = "Target carries a module";
 "intercept.target.inert" = "Target module is inert";
 "intercept.target.inert.hint" = "An inert module produces no secondary effect, whatever happens to the target.";
-"intercept.effect.profile" = "Module effect";
-"intercept.effect.contactOnly" = "Contact only";
-"intercept.effect.equipmentDisruption" = "Equipment disruption";
 "intercept.confirmation" = "Confirmation";
 "intercept.confirmation.authoritativeWorld" = "World state";
 "intercept.confirmation.observerRequired" = "Observer";
@@ -3334,12 +3332,12 @@
 "intercept.behavior.evasiveBasic" = "Vary course and altitude";
 "intercept.behavior.escapeBoundary" = "Leave mission area";
 "intercept.behavior.damagedRecovery" = "Attempt hover after damage";
+"intercept.behavior.interceptorPursuit" = "Pursuit";
 
 /* HUD */
 "intercept.hud.range" = "%.0f m";
 "intercept.hud.attempts" = "Approaches: %lld";
 "intercept.hud.attempts_limited" = "Approaches: %lld / %lld";
-"intercept.hud.score" = "%lld pts";
 "intercept.success" = "Mission completed";
 "intercept.failure" = "Mission failed";
 
@@ -3363,6 +3361,23 @@
 "intercept.result.assessmentExpired" = "Result could not be confirmed in time";
 "intercept.result.attemptsExhausted" = "Approach limit reached";
 "intercept.result.payloadUnavailable" = "Attached module is unavailable";
+"intercept.result.payloadDelivered" = "Load delivered to the zone";
+"intercept.result.payloadLost" = "Load did not reach the zone";
+"intercept.panel.hint.delivery" = "Get clear of the interceptor and put the load down inside the zone. Only where the load ends up counts: a wrecked aircraft whose load arrived is a success, an untouched one that missed is not.";
+"intercept.panel.delivery" = "Load";
+"intercept.release" = "Release load";
+"intercept.side" = "Role";
+"intercept.side.interceptor" = "Interception";
+"intercept.side.delivery" = "Delivery";
+"intercept.side.interceptor.hint" = "We run down another aircraft and work it with the attached module.";
+"intercept.side.delivery.hint" = "The mission the other way round: another aircraft hunts us, and we have to carry a load to a zone and put it down there. The load alone decides the run.";
+"intercept.delivery.carried" = "Load aboard";
+"intercept.delivery.falling" = "Load in flight";
+"intercept.delivery.landedInside" = "Load in the zone";
+"intercept.delivery.landedOutside" = "Load outside the zone";
+"intercept.delivery.destroyed" = "Load lost";
+"intercept.setup.zone_radius" = "Drop zone radius";
+"intercept.setup.zone_radius.hint" = "How precisely the load has to be put down. The zone is marked in the world by a ring and a mast.";
 
 /* Phases */
 "intercept.phase.idle" = "Idle";
@@ -3517,4 +3532,18 @@
 "controls.source.dpadX" = "D-pad, horizontal";
 "controls.source.dpadY" = "D-pad, vertical";
 "settings.section.controls" = "Controls";
-"mission.setup.uav.payload_too_heavy" = "Cannot carry the selected payload.";
+"intercept.module.title" = "Module";
+"intercept.module.charge" = "Charge";
+"intercept.module.charge.detail" = "0.35 kg. The lightest option, and the one the aircraft barely notices in the air. Takes both airframes apart — the target's and your own. You are not getting this one home.";
+"intercept.module.net" = "Net";
+"intercept.module.net.detail" = "0.9 kg. Fouls rotors rather than striking an airframe — the target's, and your own on the way out. Both aircraft come down; neither is destroyed. The heaviest and bulkiest of the four.";
+"intercept.module.kineticSlug" = "Kinetic slug";
+"intercept.module.kineticSlug.detail" = "0.75 kg. Nothing explosive in it: it takes the target apart by arriving at one point. Your own aircraft is left without rotors and with a wrecked frame — it comes down, but it is not scattered. The cleanest of the large options in the air.";
+"intercept.module.ballast" = "Ballast";
+"intercept.module.ballast.detail" = "0.6 kg of inert mass for practice. Flies like a loaded aircraft, does nothing on contact beyond the collision itself, and does not cut the link — you watch the whole approach through.";
+"intercept.module.supplyCrate" = "Supply crate";
+"intercept.module.supplyCrate.detail" = "2.4 kg. The heaviest load on the list: not every airframe will lift it, and one that does is slow off the mark and slow in a turn. It does nothing — it only has to arrive.";
+"intercept.module.medicalPack" = "Medical pack";
+"intercept.module.medicalPack.detail" = "1.6 kg. Bulky rather than dense: it drags on the mount and drifts noticeably when released at speed. Inert.";
+"intercept.module.sensorPod" = "Sensor pod";
+"intercept.module.sensorPod.detail" = "1.1 kg. A station left behind at the zone. The lightest and smallest of the cargo, and the most forgiving to place. Inert.";

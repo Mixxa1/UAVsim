@@ -153,11 +153,6 @@ struct MissionScenarioHUDView: View {
                     .font(.caption.weight(.bold))
                     .foregroundStyle(.white)
                 Spacer()
-                if result.success {
-                    Text(String(format: NSLocalizedString("intercept.hud.score", comment: ""), result.score))
-                        .font(.caption2.monospacedDigit())
-                        .foregroundStyle(GroundControlPalette.success)
-                }
             }
             Text(LocalizedStringKey(result.reason.titleKey))
                 .font(.caption2)

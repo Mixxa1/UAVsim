@@ -1,9 +1,10 @@
 import SceneKit
 import SwiftUI
 
-/// Live, auto-framed, lit, slowly-rotating SceneKit preview of a single UAV, built from the exact
-/// same procedural node factory used in-game (`UAVVisualFactory`) — guaranteed to match what you
-/// fly, with zero new art assets. Deliberately much simpler than `DroneSceneViewRepresentable`:
+/// Live, auto-framed, lit, slowly-rotating SceneKit preview of a single UAV, built through the
+/// exact same node factory used in-game (`UAVVisualFactory`, which serves the authored USDZ
+/// airframe when one exists and its procedural silhouette otherwise) — so the card is guaranteed
+/// to show what you actually fly. Deliberately much simpler than `DroneSceneViewRepresentable`:
 /// no gestures, no camera control, no render-frame callbacks, no coupling to the main viewport's
 /// performance-policy/quality-tier machinery. Cheap enough to embed dozens of instances in a
 /// scrollable card grid.
@@ -115,8 +116,14 @@ private enum UAVPreviewSceneBuilder {
         let cameraNode = SCNNode()
         let camera = SCNCamera()
         camera.fieldOfView = 40.0
-        camera.zNear = 0.01
-        camera.zFar = 20.0
+        // Both planes follow the framing distance instead of being fixed. The card
+        // grid used to hold nothing bigger than a three-metre procedural stand-in, so
+        // a 0.01–20 m frustum covered every aircraft; the authored models are at true
+        // scale, and an MQ-9B needs the camera thirty-four metres back. A fixed far
+        // plane simply clipped the aeroplane away, and a fixed 1 cm near plane against
+        // a far plane that large spends the whole depth buffer on the first metre.
+        camera.zNear = Double(max(0.01, distance * 0.02))
+        camera.zFar = Double(max(20.0, distance * 4.0))
         cameraNode.camera = camera
         cameraNode.position = SCNVector3(
             center.x + distance * 0.55,

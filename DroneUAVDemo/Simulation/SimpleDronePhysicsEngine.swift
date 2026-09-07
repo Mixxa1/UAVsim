@@ -2149,6 +2149,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.equivalentAirspeedMps = flow.equivalentAirspeedMps
         next.waveDragCoefficient = aero.waveDragCoefficient(alphaRad: alpha, mach: mach)
         next.propulsionThrustNewtons = thrustMagnitude
+        next.referenceWingAreaM2 = aero.wingArea
         next.inletPressureRecovery = context.fuelPropulsion?.inlet
             .pressureRecovery(mach: mach, angleOfAttackRad: alpha) ?? 1.0
         // Load factor, n = L/W. The *body-vertical component* of the non-gravitational

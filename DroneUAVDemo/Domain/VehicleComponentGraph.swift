@@ -287,6 +287,33 @@ struct VehicleComponent: Hashable {
 
     var isDestroyed: Bool { integrity <= 0.0001 }
     var isAttached: Bool { attachmentState != .detached }
+
+    /// Reference area and stalling force coefficient, if this component is a lifting
+    /// surface at all. `nil` for everything that does not make lift.
+    ///
+    /// This lives on the component because two places need the same answer and must not
+    /// be allowed to drift: `UAVStructuralLoadSolver` charges each surface its share of
+    /// the airframe's lift, and `makeConnections` sizes the joint that has to hold that
+    /// share. When the two disagree, joints are sized for a load the solver never applies
+    /// and surfaces fail with nothing to hit.
+    var liftingSurface: (area: Float, maximumCoefficient: Float)? {
+        let half = boundingHalfExtents
+        switch kind {
+        case .wingSection:
+            return (max(0.005, half.x * half.z * 4.0), 1.15)
+        case .horizontalTail:
+            return (max(0.003, half.x * half.z * 4.0), 0.72)
+        case .verticalTail:
+            return (max(0.003, half.y * half.z * 4.0), 0.72)
+        case .elevator:
+            return (max(0.002, half.x * half.z * 4.0), 0.48)
+        case .rudder:
+            return (max(0.002, half.y * half.z * 4.0), 0.48)
+        case .motor, .propeller, .frame, .fuselage, .arm, .tailSection, .battery,
+             .flightController, .esc, .radio, .cameraGimbal, .payloadMount, .landingGear:
+            return nil
+        }
+    }
 }
 
 // MARK: - Mass properties
@@ -333,7 +360,16 @@ struct VehicleComponentGraph: Hashable {
     init(
         components: [VehicleComponent],
         structuralConnections: [VehicleStructuralConnection]? = nil,
-        massPropertiesRevision: UInt64 = 0
+        massPropertiesRevision: UInt64 = 0,
+        /// The aircraft's takeoff mass, for sizing the joints that carry flight loads.
+        ///
+        /// ⚠️ Not the same number as the components add up to, and the difference is not
+        /// small: the graph's own budget leaves out fuel and payload, so an RQ-7B whose
+        /// components total 77 kg is a 170 kg aircraft and an MQ-9B's 2,650 kg of structure
+        /// belongs to a 5,670 kg one. Sizing a mount off the structural budget would size
+        /// it for half an aircraft. Zero means "not supplied" and the mount keeps the
+        /// strength its impact energy gives it.
+        designTakeoffMassKg: Float = 0.0
     ) {
         self.components = components
         self.massPropertiesRevision = massPropertiesRevision
@@ -344,7 +380,8 @@ struct VehicleComponentGraph: Hashable {
         }
         self.indexByID = index
 
-        let resolvedConnections = structuralConnections ?? Self.makeConnections(for: components)
+        let resolvedConnections = structuralConnections
+            ?? Self.makeConnections(for: components, designTakeoffMassKg: designTakeoffMassKg)
         self.structuralConnections = resolvedConnections
         var connectionIndex: [String: Int] = [:]
         connectionIndex.reserveCapacity(resolvedConnections.count)
@@ -834,6 +871,20 @@ struct VehicleComponentGraph: Hashable {
 
     /// Detaches a joint's entire dependent subtree and returns the rigid-body
     /// properties needed by the visual/physics detached-part manager.
+    /// Takes every joint on the airframe to zero, so `failedConnectionRootIDs` reports the whole
+    /// structure as having come apart.
+    ///
+    /// Integrity and joint strength are separate: `setIntegrity(0, …)` on every component leaves
+    /// the connections untouched, which is how an aircraft could be reported destroyed and still
+    /// be sitting on screen in one piece. Anything that means "this airframe is no longer an
+    /// airframe" has to say so here as well.
+    mutating func failAllConnections() {
+        for index in structuralConnections.indices where structuralConnections[index].state != .detached {
+            structuralConnections[index].residualStrength = 0
+            structuralConnections[index].stiffnessScale = 0
+        }
+    }
+
     mutating func detachSubtree(rootComponentID: String) -> VehicleDetachedSubtree? {
         guard let detachedPart = detachedSubtreePreview(rootComponentID: rootComponentID) else {
             return nil
@@ -895,13 +946,118 @@ struct VehicleComponentGraph: Hashable {
         }
     }
 
-    private static func makeConnections(for components: [VehicleComponent]) -> [VehicleStructuralConnection] {
+    /// Load factor every airframe's lifting joints are sized to carry, and the factor
+    /// between that and outright failure.
+    ///
+    /// ⚠️ Without these, nothing in the strength chain knows what a joint is *for*.
+    /// `strengthJ` is an impact energy — the joules that destroy a component in one hit —
+    /// and the connection limits were derived from it by dividing by the component's
+    /// largest half-extent. That is dimensionally a force, but its magnitude is an
+    /// accident of the part's shape: the X-10's wing root is 5.4 m deep in chord, so the
+    /// division left it able to hold 156 kN while its own wing carries 168 kN in a 2.5 g
+    /// turn. Measured across the fleet, the resulting margins ranged from 1.8 g to over
+    /// 8 g with no pattern — the large-chord and large-span aircraft were the weak ones.
+    ///
+    /// 2.5 g is the limit load factor for the transport category (CS-25/FAR-25) — the
+    /// lowest in civil use, so it is the conservative choice for a mixed fleet, and the
+    /// light-aircraft categories are stressed higher still. 1.5 is the standard factor
+    /// between limit load and ultimate load. Together they are a *floor*: an airframe
+    /// whose joints already come out stronger keeps its own numbers, so the fleet's
+    /// spread survives and only the aircraft that could not hold their own weight move.
+    private static let designLimitLoadFactor: Float = 2.5
+    private static let ultimateLoadFactor: Float = 1.5
+
+    private static func makeConnections(
+        for components: [VehicleComponent],
+        designTakeoffMassKg: Float = 0.0
+    ) -> [VehicleStructuralConnection] {
         let byID = Dictionary(uniqueKeysWithValues: components.map { ($0.id, $0) })
+        let totalMass = max(0.05, components.reduce(Float(0.0)) { $0 + $1.massKg })
+        let totalLiftingArea = components.reduce(Float(0.0)) { $0 + ($1.liftingSurface?.area ?? 0.0) }
+
+        /// What one rotor mount has to hold before it fails.
+        ///
+        /// ⚠️ A propeller mount that cannot carry its own engine's thrust is not a weak
+        /// mount, it is a contradiction: transmitting that thrust to the airframe is the
+        /// only thing the mount is for. It was derived from impact energy like every other
+        /// joint, and measured standing still on the runway with the throttle up and
+        /// nothing hit, the fleet came out at: RQ-7B 1,370 N of thrust against a 1,062 N
+        /// mount, MQ-9A 14,465 against 13,181, MQ-9B 14,857 against 14,188, with the three
+        /// IAI loitering munitions at 0.88–0.93 of their limit. The operator's MQ-9B threw
+        /// its propeller onto the runway at zero airspeed — which is exactly where a
+        /// propeller makes its greatest thrust, and the one condition the flight probes
+        /// had never covered.
+        ///
+        /// Sized at the aircraft's full takeoff weight per rotor, times the same 1.5
+        /// ultimate factor the lifting joints use. That is a static thrust-to-weight of 1.0
+        /// at limit load, comfortably above anything in the catalogue — the measured spread
+        /// is 0.27 (MQ-9B) to 0.82 (RQ-7B) — and generous on purpose, because this is a
+        /// floor whose job is to stop a mount being weaker than its own engine.
+        let designRotorLoad: Float = {
+            guard designTakeoffMassKg > 0.05 else { return 0.0 }
+            let rotors = components.reduce(Float(0.0)) { total, component in
+                if case .propeller = component.kind { return total + 1.0 }
+                return total
+            }
+            guard rotors >= 1.0 else { return 0.0 }
+            return Self.ultimateLoadFactor * designTakeoffMassKg * 9.81 / rotors
+        }()
+
+        /// The flight load this joint has to carry at the design load factor: the lift its
+        /// subtree's share of the airframe's lifting area is charged, plus the subtree's own
+        /// inertia. This mirrors `UAVStructuralLoadSolver`'s `force` term by construction —
+        /// same area shares, same mass, same load factor — which is the point: the joint is
+        /// sized for the load the solver will actually put through it.
+        func designFlightLoad(for child: VehicleComponent) -> (force: Float, lever: Float)? {
+            guard totalLiftingArea > 0.0001 else { return nil }
+            var subtree: [VehicleComponent] = []
+            for candidate in components {
+                var cursor: VehicleComponent? = candidate
+                var depth = 0
+                while let current = cursor, depth < 16 {
+                    if current.id == child.id { subtree.append(candidate); break }
+                    cursor = current.parentID.flatMap { byID[$0] }
+                    depth += 1
+                }
+            }
+            let liftingArea = subtree.reduce(Float(0.0)) { $0 + ($1.liftingSurface?.area ?? 0.0) }
+            guard liftingArea > 0.0001 else { return nil }
+            let subtreeMass = max(0.001, subtree.reduce(Float(0.0)) { $0 + $1.massKg })
+            let centre = subtree.reduce(SIMD3<Float>(repeating: 0.0)) {
+                $0 + $1.localPosition * $1.massKg
+            } / subtreeMass
+            guard let parentID = child.parentID, let parent = byID[parentID] else { return nil }
+            let lever = max(0.01, simd_distance(centre, parent.localPosition))
+            let carried = totalMass * (liftingArea / totalLiftingArea) + subtreeMass
+            let force = Self.ultimateLoadFactor * Self.designLimitLoadFactor * 9.81 * carried
+            return (force, lever)
+        }
+
         return components.compactMap { child in
             guard let parentID = child.parentID, let parent = byID[parentID] else { return nil }
             let span = max(0.025, simd_distance(parent.localPosition, child.localPosition))
             let characteristic = max(0.025, max(child.boundingHalfExtents.x, child.boundingHalfExtents.y, child.boundingHalfExtents.z))
-            let baseForce = max(8.0, child.strengthJ / characteristic)
+            var baseForce = max(8.0, child.strengthJ / characteristic)
+            var bendingLimit = max(0.4, child.strengthJ * min(1.5, span / characteristic))
+            if let design = designFlightLoad(for: child) {
+                // `shearLimitN` is the smaller of the two force limits, so it is the one
+                // that has to clear the design load for the joint to hold.
+                baseForce = max(baseForce, design.force / 0.82)
+                bendingLimit = max(bendingLimit, design.force * design.lever)
+            }
+            switch child.kind {
+            case .propeller, .motor:
+                // A motor carries its own propeller's thrust through to the airframe, so
+                // both joints in that chain are sized for it.
+                if designRotorLoad > 0.0 {
+                    baseForce = max(baseForce, designRotorLoad / 0.82)
+                    bendingLimit = max(bendingLimit, designRotorLoad * span)
+                }
+            case .wingSection, .horizontalTail, .verticalTail, .elevator, .rudder, .frame,
+                 .fuselage, .arm, .tailSection, .battery, .flightController, .esc, .radio,
+                 .cameraGimbal, .payloadMount, .landingGear:
+                break
+            }
             let connectionType: VehicleConnectionType
             switch child.kind {
             case .propeller, .motor:
@@ -921,17 +1077,46 @@ struct VehicleComponentGraph: Hashable {
             default:
                 connectionType = .rigid
             }
+            // ⚠️ No two joints are equally strong, and here that is the difference
+            // between a failure and a stunt.
+            //
+            // A left and a right wing root are built from mirrored numbers, so under a
+            // symmetric load their ratios cross 1.0 on the same tick and the aircraft
+            // sheds both wings in one event — the operator's log read
+            // `parts=[wing.left.root,wing.right.root]`, and on screen the two panels
+            // slid out together as though pulled. Real structures do not do that: build
+            // scatter decides which side goes first, the load transfers to what is left,
+            // and the second failure follows.
+            //
+            // ±4% is the spread, which is at the tight end of what is published for
+            // bonded composite joints (5–10% coefficient of variation is typical) —
+            // deliberately conservative, because its job is to break the tie rather than
+            // to make aircraft fragile. It is derived from the connection's own id, so a
+            // given airframe always fails the same way and a replay stays a replay.
+            let scatter = 1.0 + 0.04 * Self.unitJitter(for: "connection.\(parentID)->\(child.id)")
             return VehicleStructuralConnection(
                 id: "connection.\(parentID)->\(child.id)",
                 parentComponentID: parentID,
                 childComponentID: child.id,
                 connectionType: connectionType,
-                tensileLimitN: baseForce * 1.15,
-                shearLimitN: baseForce * 0.82,
-                bendingLimitNm: max(0.4, child.strengthJ * min(1.5, span / characteristic)),
-                torsionLimitNm: max(0.25, child.strengthJ * 0.65)
+                tensileLimitN: baseForce * 1.15 * scatter,
+                shearLimitN: baseForce * 0.82 * scatter,
+                bendingLimitNm: bendingLimit * scatter,
+                torsionLimitNm: max(0.25, child.strengthJ * 0.65) * scatter
             )
         }
+    }
+
+    /// A stable −1...1 drawn from a string, so build scatter is a property of the
+    /// airframe rather than of when it happened to be built. FNV-1a, because the point
+    /// is reproducibility, not cryptography.
+    private static func unitJitter(for key: String) -> Float {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in key.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return Float(Double(hash % 20_001) / 10_000.0 - 1.0)
     }
 
     private static func attachmentState(residualStrength: Float) -> VehicleAttachmentState {

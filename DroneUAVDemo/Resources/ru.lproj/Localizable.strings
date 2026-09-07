@@ -217,6 +217,7 @@
 "payload.capsule.remaining" = "КАПСУЛЫ %d";
 "payload.capsule.empty" = "Капсулы закончились";
 "payload.capsule.dropped_status" = "Капсула сброшена";
+"payload.capsule.impact_water" = "Капсула упала в воду — тушения нет";
 "payload.capsule.recharge_countdown" = "ЗАРЯДКА %.1fс";
 
 // Аграрный опрыскиватель
@@ -3317,9 +3318,6 @@
 "intercept.target.payload" = "Модуль на цели";
 "intercept.target.inert" = "Инертный модуль цели";
 "intercept.target.inert.hint" = "Инертный модуль не даёт вторичного эффекта, что бы с целью ни случилось.";
-"intercept.effect.profile" = "Эффект модуля";
-"intercept.effect.contactOnly" = "Только контакт";
-"intercept.effect.equipmentDisruption" = "Отказ оборудования";
 "intercept.confirmation" = "Подтверждение";
 "intercept.confirmation.authoritativeWorld" = "Состояние мира";
 "intercept.confirmation.observerRequired" = "Наблюдатель";
@@ -3329,12 +3327,12 @@
 "intercept.behavior.evasiveBasic" = "Изменение курса и высоты";
 "intercept.behavior.escapeBoundary" = "Выход из района";
 "intercept.behavior.damagedRecovery" = "Стабилизация после повреждения";
+"intercept.behavior.interceptorPursuit" = "Преследование";
 
 /* HUD */
 "intercept.hud.range" = "%.0f м";
 "intercept.hud.attempts" = "Заходов: %lld";
 "intercept.hud.attempts_limited" = "Заходов: %lld / %lld";
-"intercept.hud.score" = "%lld очк.";
 "intercept.success" = "Миссия выполнена";
 "intercept.failure" = "Миссия не выполнена";
 
@@ -3342,6 +3340,21 @@
 "intercept.panel.title" = "Перехват";
 "intercept.panel.source" = "Источник наблюдения";
 "intercept.panel.hint" = "Заход начнётся и сам, если подойти к цели во взведённом состоянии. Наблюдатель доступен, пока исправны его камера и канал связи.";
+"intercept.panel.hint.delivery" = "Уйти от перехватчика и сбросить груз в районе. Считается только то, где груз лёг: сбитый аппарат с дошедшим грузом — успех, целый аппарат с промахом — нет.";
+"intercept.panel.delivery" = "Груз";
+"intercept.release" = "Сброс груза";
+"intercept.side" = "Роль в задании";
+"intercept.side.interceptor" = "Перехват";
+"intercept.side.delivery" = "Доставка";
+"intercept.side.interceptor.hint" = "Мы догоняем чужой аппарат и работаем по нему закреплённым модулем.";
+"intercept.side.delivery.hint" = "Обратная задача: чужой аппарат охотится за нами, а нам нужно донести груз до района и сбросить его там. Исход решает только груз.";
+"intercept.delivery.carried" = "Груз на подвеске";
+"intercept.delivery.falling" = "Груз в полёте";
+"intercept.delivery.landedInside" = "Груз в районе";
+"intercept.delivery.landedOutside" = "Груз мимо района";
+"intercept.delivery.destroyed" = "Груз потерян";
+"intercept.setup.zone_radius" = "Радиус района сброса";
+"intercept.setup.zone_radius.hint" = "Насколько точно нужно положить груз. Район отмечен в мире кольцом и мачтой.";
 "intercept.begin" = "Начать заход";
 "intercept.abort" = "Прервать заход";
 "intercept.restart" = "Перезапустить миссию";
@@ -3358,6 +3371,8 @@
 "intercept.result.assessmentExpired" = "Результат не подтверждён за отведённое время";
 "intercept.result.attemptsExhausted" = "Лимит заходов исчерпан";
 "intercept.result.payloadUnavailable" = "Закреплённый модуль недоступен";
+"intercept.result.payloadDelivered" = "Груз доставлен в район";
+"intercept.result.payloadLost" = "Груз не дошёл до района";
 
 /* Фазы */
 "intercept.phase.idle" = "Ожидание";
@@ -3512,4 +3527,18 @@
 "controls.source.dpadX" = "Крестовина, гориз.";
 "controls.source.dpadY" = "Крестовина, верт.";
 "settings.section.controls" = "Управление";
-"mission.setup.uav.payload_too_heavy" = "Не поднимет выбранную нагрузку.";
+"intercept.module.title" = "Припас";
+"intercept.module.charge" = "Заряд";
+"intercept.module.charge.detail" = "0.35 кг. Самый лёгкий вариант, аппарат почти не чувствует его в воздухе. Разносит оба планера — и цель, и свой. Домой на нём не возвращаются.";
+"intercept.module.net" = "Сеть";
+"intercept.module.net.detail" = "0.9 кг. Путает винты, а не бьёт по корпусу: сначала свои, потом цели. Оба аппарата садятся, но ни один не разрушен. Самый тяжёлый и габаритный из четырёх.";
+"intercept.module.kineticSlug" = "Ударный груз";
+"intercept.module.kineticSlug.detail" = "0.75 кг. Взрывчатки нет: разбирает цель тем, что прилетел в одну точку. Свой аппарат при этом остаётся без винтов и с изувеченной рамой — падает, но не разлетается. Самый чистый по аэродинамике из крупных.";
+"intercept.module.ballast" = "Балласт";
+"intercept.module.ballast.detail" = "0.6 кг инертной массы для тренировки. Летит как гружёный аппарат, при контакте не делает ничего сверх самого столкновения и связь не рвёт — заход видно от начала до конца.";
+"intercept.module.supplyCrate" = "Ящик снабжения";
+"intercept.module.supplyCrate.detail" = "2.4 кг. Самый тяжёлый груз списка: поднимет не всякий аппарат, а поднявший будет вялым на разгоне и на развороте. Ничего не делает — его просто надо донести.";
+"intercept.module.medicalPack" = "Медпакет";
+"intercept.module.medicalPack.detail" = "1.6 кг. Габаритный, но не плотный: парусит на подвеске и заметно сносится при сбросе с ходу. Инертен.";
+"intercept.module.sensorPod" = "Датчик";
+"intercept.module.sensorPod.detail" = "1.1 кг. Станция, которую оставляют в районе. Самый лёгкий и компактный из грузов, ошибиться с ним проще всего простить. Инертен.";

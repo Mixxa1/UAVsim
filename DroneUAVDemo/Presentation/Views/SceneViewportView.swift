@@ -129,7 +129,7 @@ struct SceneViewportView: View {
             }
 
             // Kept visible in every OTHER camera mode too (not just the bombardier view) — the
-            // ground-projected blast-radius reticle (`DroneSceneController.setFireCapsuleTargetReticle`)
+            // ground-projected blast-radius reticle (`DroneSceneController.setDropImpactReticle`)
             // is real 3D scene geometry, visible from any camera, so ammo/rig status shouldn't be
             // hidden just because the operator isn't using the dedicated bombardier camera right now.
             if capsuleState.isAvailable, !capsuleOpticsActive {

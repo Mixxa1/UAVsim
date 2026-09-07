@@ -77,6 +77,16 @@ struct MissionSetupView: View {
     /// class) is what matters, not the flat default — so the picker narrows live as the operator
     /// drags the length slider.
     private var compatibleProfiles: [DroneModelProfile] {
+        // The interception mission carries nothing from the payload catalogue, but it does carry
+        // something: the module the operator chose. Its mass is what the airframe has to be able
+        // to lift, so the list narrows live as a heavier one is picked.
+        if kind == .attachedPayloadIntercept {
+            var configuration = PayloadConfiguration(payloadType: .cargoBox)
+            configuration.payloadMass = interception.moduleShape.massKg
+            return availableProfiles.filter {
+                PayloadController.capabilityCheck(for: configuration, profile: $0.resolvedUAVProfile).isAllowed
+            }
+        }
         // Racing mounts nothing, so no aircraft is excluded for being unable to carry it — the
         // pilot may fly a whoop, a Matrice or their own Workbench build through the gates.
         guard kind.requiresPayload else { return availableProfiles }
@@ -86,41 +96,8 @@ struct MissionSetupView: View {
         } else if payload == .fireCapsuleLauncher {
             configuration.payloadMass = FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)
         }
-        return availableProfiles.filter { canCarry(payloadConfiguration: configuration, profile: $0) }
-    }
-
-    private func canCarry(payloadConfiguration: PayloadConfiguration, profile: DroneModelProfile) -> Bool {
-        guard let uav = profile.resolvedUAVProfile else { return true }
-        return PayloadController.capabilityCheck(for: payloadConfiguration, profile: uav).isAllowed
-    }
-
-    private func canCarrySelectedPayload(_ profile: DroneModelProfile) -> Bool {
-        guard kind.requiresPayload else { return true }
-        return canCarry(payloadConfiguration: currentPayloadConfiguration, profile: profile)
-    }
-
-    private var currentPayloadConfiguration: PayloadConfiguration {
-        var configuration = PayloadConfiguration(payloadType: payload)
-        if payload == .fireHose {
-            configuration.payloadMass = hoseDiameterClass.massForLength(Float(hoseLengthMeters))
-        } else if payload == .fireCapsuleLauncher {
-            configuration.payloadMass = FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)
-        }
-        return configuration
-    }
-
-    /// Everything the operator could fly, with the aircraft that can carry the chosen payload
-    /// first and the rest still listed underneath.
-    ///
-    /// A Workbench build is a real aircraft with real numbers, so a light one genuinely fails the
-    /// payload check — but silently deleting it from the picker is how "I cannot find the drone I
-    /// built" happens. The card says why instead, and the choice stays the operator's.
-    private var playerPickerProfiles: [DroneModelProfile] {
-        let compatible = Set(compatibleProfiles.map(\.id))
-        return availableProfiles.sorted { lhs, rhs in
-            let lhsOK = compatible.contains(lhs.id)
-            let rhsOK = compatible.contains(rhs.id)
-            return lhsOK == rhsOK ? lhs.uiDisplayName < rhs.uiDisplayName : lhsOK
+        return availableProfiles.filter {
+            PayloadController.capabilityCheck(for: configuration, profile: $0.resolvedUAVProfile).isAllowed
         }
     }
 
@@ -262,6 +239,14 @@ struct MissionSetupView: View {
                 resolveInterceptProfiles()
             }
             timeLimitMinutes = defaultTimeLimit(for: newValue, difficulty: difficulty)
+        }
+        // Switching sides changes what the aircraft would sensibly be carrying, and the two lists
+        // only partly overlap. Left alone, the picker keeps a selection that is no longer on it.
+        .onChange(of: interception.side) { _, newValue in
+            let allowed = AttachedModuleShape.selectable(for: newValue)
+            if !allowed.contains(interception.moduleShape) {
+                interception.moduleShape = allowed.first ?? .charge
+            }
         }
         .onChange(of: payload) { _, _ in
             if !compatibleProfiles.contains(where: { $0.id == selectedProfileID }) {
@@ -640,14 +625,7 @@ struct MissionSetupView: View {
                                 badgeText: profileBadgeText(for: profile),
                                 badgeTint: profileBadgeTint(for: profile),
                                 isSelected: profile.id == selection(for: slot)
-                            ) {
-                                if slot == .player, !canCarrySelectedPayload(profile) {
-                                    Text("mission.setup.uav.payload_too_heavy")
-                                        .font(.caption2)
-                                        .foregroundStyle(GroundControlPalette.warning)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
+                            )
                         }
                         .buttonStyle(.plain)
                     }
@@ -662,7 +640,7 @@ struct MissionSetupView: View {
 
     private func profiles(for slot: AircraftSlot) -> [DroneModelProfile] {
         switch slot {
-        case .player: return playerPickerProfiles
+        case .player: return compatibleProfiles
         case .target: return interceptTargetProfiles
         case .observer: return interceptObserverProfiles
         }
@@ -690,57 +668,108 @@ struct MissionSetupView: View {
 
             aircraftSlotRow
 
-            if isFixedWingTargetSelected {
+            labeledRow("intercept.side") {
+                Picker("", selection: $interception.side) {
+                    ForEach(InterceptMissionSide.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+            }
+
+            Text(LocalizedStringKey(interception.side.hintKey))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if isFixedWingTargetSelected, interception.side == .interceptor {
                 Text("intercept.setup.fixed_wing.hint")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            labeledRow("intercept.target.behavior") {
-                Picker("", selection: $interception.targetBehavior) {
-                    ForEach(InterceptTargetBehavior.allCases) { value in
-                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+            // The other aircraft's profile is the operator's choice only when they are the one
+            // hunting it. On the delivery side there is exactly one thing it can be doing.
+            if interception.side == .interceptor {
+                labeledRow("intercept.target.behavior") {
+                    Picker("", selection: $interception.targetBehavior) {
+                        ForEach(InterceptTargetBehavior.selectable) { value in
+                            Text(LocalizedStringKey(value.titleKey)).tag(value)
+                        }
                     }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .tint(.white)
                 }
-                .pickerStyle(.menu)
-                .labelsHidden()
-                .tint(.white)
             }
 
-            labeledRow("intercept.effect.profile") {
-                Picker("", selection: $interception.payloadProfile) {
-                    ForEach(AttachedPayloadProfile.allCases) { value in
-                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+            labeledRow("intercept.module.title") {
+                HStack(spacing: 8) {
+                    ForEach(AttachedModuleShape.selectable(for: interception.side)) { shape in
+                        Button {
+                            interception.moduleShape = shape
+                        } label: {
+                            moduleCard(shape)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
             }
 
-            labeledRow("intercept.confirmation") {
-                Picker("", selection: $interception.confirmationPolicy) {
-                    ForEach(InterceptConfirmationPolicy.allCases) { value in
-                        Text(LocalizedStringKey(value.titleKey)).tag(value)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-            }
-
-            Text(LocalizedStringKey(interception.confirmationPolicy.hintKey))
+            Text(LocalizedStringKey(interception.moduleShape.detailKey))
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
 
-            Toggle("intercept.target.payload", isOn: $interception.targetCarriesPayload)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.8))
-            if interception.targetCarriesPayload {
-                Toggle("intercept.target.inert", isOn: $interception.targetPayloadInert)
+            // Who is allowed to call a target neutralised, and what the target carries, are both
+            // questions about hunting something. On the delivery side the run is decided by where
+            // the load comes to rest, and nobody has to confirm anything.
+            if interception.side == .interceptor {
+                labeledRow("intercept.confirmation") {
+                    Picker("", selection: $interception.confirmationPolicy) {
+                        ForEach(InterceptConfirmationPolicy.allCases) { value in
+                            Text(LocalizedStringKey(value.titleKey)).tag(value)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                }
+
+                Text(LocalizedStringKey(interception.confirmationPolicy.hintKey))
+                    .font(.caption2)
+                    .foregroundStyle(.white.opacity(0.55))
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Toggle("intercept.target.payload", isOn: $interception.targetCarriesPayload)
                     .font(.caption)
                     .foregroundStyle(.white.opacity(0.8))
-                Text("intercept.target.inert.hint")
+                if interception.targetCarriesPayload {
+                    Toggle("intercept.target.inert", isOn: $interception.targetPayloadInert)
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.8))
+                    Text("intercept.target.inert.hint")
+                        .font(.caption2)
+                        .foregroundStyle(.white.opacity(0.55))
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else {
+                labeledRow("intercept.setup.zone_radius") {
+                    HStack(spacing: 10) {
+                        Text("\(Int(interception.deliveryZoneRadius)) м")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.white)
+                            .frame(width: 54, alignment: .leading)
+                        Slider(
+                            value: $interception.deliveryZoneRadius,
+                            in: 20...120,
+                            step: 5
+                        )
+                        .labelsHidden()
+                    }
+                }
+                Text("intercept.setup.zone_radius.hint")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
@@ -799,6 +828,36 @@ struct MissionSetupView: View {
         interception.attemptRange = defaults.attemptRange
         interception.targetAgility = defaults.targetAgility
         interception.maximumAttempts = defaults.maximumAttempts
+    }
+
+    /// One module, shown as the object it is. The turning preview is the same geometry the
+    /// mission bolts under the aircraft, so what is picked here is what gets carried.
+    private func moduleCard(_ shape: AttachedModuleShape) -> some View {
+        let isSelected = interception.moduleShape == shape
+        return VStack(spacing: 5) {
+            AttachedModulePreviewView(shape: shape)
+                .frame(height: 66)
+                .background(GroundControlPalette.shell, in: RoundedRectangle(cornerRadius: 7))
+            Text(LocalizedStringKey(shape.titleKey))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(String(format: "%.2f kg", shape.massKg))
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.white.opacity(0.5))
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 9)
+                .fill(isSelected ? GroundControlPalette.accent.opacity(0.22) : Color.white.opacity(0.05))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 9)
+                .stroke(isSelected ? GroundControlPalette.accent : Color.white.opacity(0.1), lineWidth: 1)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 9))
     }
 
     private var isFixedWingTargetSelected: Bool {
@@ -964,7 +1023,11 @@ struct MissionSetupView: View {
                     }
                 }
 
-                if kind.requiresPayload {
+                // The interception mission chooses its module by shape and mass in its own
+                // parameters. The generic payload list names the mounting hardware the simulator
+                // models — "sensor module", "cargo box" — which is not a choice anybody makes when
+                // loading an interceptor, and showing both asks the same question twice.
+                if kind.requiresPayload, kind != .attachedPayloadIntercept {
                     labeledRow("mission.setup.payload") {
                         Picker("", selection: $payload) {
                             ForEach(compatiblePayloads) { type in

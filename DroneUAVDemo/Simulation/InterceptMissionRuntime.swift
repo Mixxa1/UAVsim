@@ -25,9 +25,6 @@ struct InterceptMissionRuntime {
     private var assessmentStarted: TimeInterval?
     private var targetTerminalAt: TimeInterval?
 
-    /// Points for a clean run: full marks, less a penalty per extra approach and per second spent.
-    private static let baseScore = 1000
-    private static let scorePenaltyPerExtraAttempt = 100
     /// An approach counts as flown past once the aircraft is this far outside the attempt range.
     private static let passedRangeMultiplier: Float = 1.5
 
@@ -94,7 +91,8 @@ struct InterceptMissionRuntime {
         vehicles: [InterceptVehicleSnapshot],
         impacts: [InterceptImpactEvent],
         observerCanConfirm: Bool,
-        targetEscaped: Bool = false
+        targetEscaped: Bool = false,
+        delivery: InterceptDeliveryState = .carried
     ) {
         guard isActive, phase != .preparing, deltaTime.isFinite, deltaTime >= 0 else { return }
         elapsed += deltaTime
@@ -107,6 +105,17 @@ struct InterceptMissionRuntime {
 
         guard let attacker = vehicles.first(where: { $0.role == .attacker }),
               let target = vehicles.first(where: { $0.role == .target }) else { return }
+
+        if configuration.side == .delivery {
+            // Impacts on this side are log entries, not approaches. There is no attempt to open:
+            // the operator is not trying to reach anything, they are trying to arrive.
+            for impact in impacts where impact.runID == runID && impact.authorityID == authorityID {
+                guard knownImpacts.insert(impact.id).inserted else { continue }
+                emit(.impact(impact))
+            }
+            resolveDelivery(attacker: attacker, delivery: delivery, vehicles: vehicles)
+            return
+        }
 
         consume(impacts: impacts, attacker: attacker, target: target, vehicles: vehicles)
 
@@ -141,9 +150,53 @@ struct InterceptMissionRuntime {
             resolveApproach(attempt, vehicles: vehicles)
         } else if phase == .reattack || phase == .intercepting {
             if attacker.payloadState?.canTrigger != true {
-                finish(success: false, reason: .payloadUnavailable, vehicles: vehicles)
+                if target.functionalState == .nominal {
+                    finish(success: false, reason: .payloadUnavailable, vehicles: vehicles)
+                } else {
+                    // Nothing left to send at it, but it is not flying like an aircraft that was
+                    // missed either. Watch it down: writing the run off over the target's shoulder
+                    // while it falls is how a success gets recorded as a failure.
+                    assessmentStarted = elapsed
+                    transition(.assessingResult)
+                }
             } else if configuration.maximumAttempts > 0, attempts.count >= configuration.maximumAttempts {
                 finish(success: false, reason: .attemptsExhausted, vehicles: vehicles)
+            }
+        }
+    }
+
+    /// The delivery side's whole rule set: the load decides, and only the load.
+    ///
+    /// Written this way on purpose, because the four cases the mission is specified in reduce to
+    /// one question. A wrecked aircraft whose load still reached the zone succeeded; an untouched
+    /// aircraft whose load did not, failed. What the operator's own airframe went through changes
+    /// how the run is *described* — a load that came down short after the hunter got to them reads
+    /// as a lost aircraft, not a bad drop — but never whether it was won.
+    private mutating func resolveDelivery(
+        attacker: InterceptVehicleSnapshot,
+        delivery: InterceptDeliveryState,
+        vehicles: [InterceptVehicleSnapshot]
+    ) {
+        switch delivery {
+        case .landedInside:
+            finish(success: true, reason: .payloadDelivered, vehicles: vehicles)
+        case .landedOutside, .destroyed:
+            let carrierLost = attacker.functionalState.isTerminal || attacker.functionalState == .uncontrolled
+            finish(success: false, reason: carrierLost ? .attackerLost : .payloadLost, vehicles: vehicles)
+        case .falling:
+            // In the air and still able to arrive. Nothing that happens to the aircraft from here
+            // can change the answer, and the clock must not take it away either — the load is
+            // seconds from the ground and the run is already decided in fact.
+            transition(.assessingResult)
+        case .carried:
+            if remaining <= 0 {
+                finish(success: false, reason: .timeExpired, vehicles: vehicles)
+            } else if attacker.functionalState.isTerminal {
+                // Still aboard a finished aircraft. The session lets go for a wreck that is coming
+                // apart, so reaching here means the load went with it.
+                finish(success: false, reason: .attackerLost, vehicles: vehicles)
+            } else {
+                transition(.intercepting)
             }
         }
     }
@@ -178,15 +231,34 @@ struct InterceptMissionRuntime {
         target: InterceptVehicleSnapshot,
         vehicles: [InterceptVehicleSnapshot]
     ) {
-        if targetTerminalAt == nil, target.functionalState.canAttempt, attacker.payloadState?.canTrigger == true {
+        let spent = attacker.payloadState?.canTrigger != true
+
+        if targetTerminalAt == nil, target.functionalState.canAttempt, !spent {
             assessmentStarted = nil
             transition(.reattack)
-        } else if elapsed - startedAt >= configuration.assessmentTimeout {
-            // Nothing confirmed it in time. That is a failure, never an assumed success.
-            finish(success: false, reason: .assessmentExpired, vehicles: vehicles)
-        } else {
-            transition(.assessingResult)
+            return
         }
+
+        // Nothing left to send at it, and it is flying as if nothing had happened. That — not a
+        // clock — is what ended the run, and the operator has to be told so.
+        //
+        // Only an untouched target counts here. A hit aircraft passes through `damaged` and
+        // `degraded` on its way down, and both of those still answer `canAttempt`: ending the run
+        // the moment one was seen declared a failure while the target was already falling, and the
+        // crash that followed a second later could no longer change the verdict.
+        if targetTerminalAt == nil, spent, target.functionalState == .nominal {
+            finish(success: false, reason: .payloadUnavailable, vehicles: vehicles)
+            return
+        }
+
+        if elapsed - startedAt >= configuration.assessmentTimeout {
+            // Nothing confirmed it in time. That is a failure, never an assumed success — and its
+            // reason is the module, if the module is what the operator has run out of.
+            finish(success: false, reason: spent ? .payloadUnavailable : .assessmentExpired, vehicles: vehicles)
+            return
+        }
+
+        transition(.assessingResult)
     }
 
     /// An approach ends when the aircraft has flown past the target, or when it has been running
@@ -229,15 +301,11 @@ struct InterceptMissionRuntime {
     private mutating func finish(success: Bool, reason: InterceptResultReason, vehicles: [InterceptVehicleSnapshot]) {
         guard result == nil else { return }
         endAttempt(.aborted, vehicles: vehicles)
-        let score = success
-            ? max(0, Self.baseScore - max(0, attempts.count - 1) * Self.scorePenaltyPerExtraAttempt - Int(elapsed))
-            : 0
         let value = InterceptMissionResult(
             success: success,
             reason: reason,
             timestamp: elapsed,
-            attempts: attempts.count,
-            score: score
+            attempts: attempts.count
         )
         result = value
         transition(success ? .completed : .failed)

@@ -14,6 +14,7 @@ struct InterceptMissionPanelView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             header
+            if state.side == .delivery { deliveryRow }
             sourceRow
             approachRow
             hint
@@ -78,11 +79,57 @@ struct InterceptMissionPanelView: View {
         .disabled(!isEnabled)
     }
 
+    // MARK: - Delivery
+
+    /// The delivery side's own readout: where the load is, how far the zone still is, and the one
+    /// command this half of the mission has.
+    ///
+    /// The range is shown against the zone rather than the hunter. What the operator needs to know
+    /// while being chased is how much further they have to carry this, and the hunter is behind
+    /// them where a number cannot help.
+    private var deliveryRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("intercept.panel.delivery")
+                .font(.caption2.weight(.bold))
+                .textCase(.uppercase)
+                .foregroundStyle(.white.opacity(0.55))
+            HStack(spacing: 6) {
+                Text(LocalizedStringKey(state.delivery.titleKey))
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(deliveryTint)
+                Spacer()
+                if !state.hidesRanges, !state.delivery.isResolved {
+                    Text("\(Int(state.deliveryZoneRange)) м")
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(state.isOverDeliveryZone ? GroundControlPalette.success : .white.opacity(0.7))
+                }
+            }
+            if state.result == nil, state.delivery == .carried {
+                actionButton(
+                    "intercept.release",
+                    tint: state.isOverDeliveryZone ? GroundControlPalette.success : GroundControlPalette.accent,
+                    isEnabled: state.canRelease
+                ) {
+                    viewModel.releaseInterceptDelivery()
+                }
+            }
+        }
+    }
+
+    private var deliveryTint: Color {
+        switch state.delivery {
+        case .landedInside: return GroundControlPalette.success
+        case .landedOutside, .destroyed: return GroundControlPalette.warning
+        case .falling: return GroundControlPalette.accent
+        case .carried: return .white.opacity(0.85)
+        }
+    }
+
     // MARK: - Approach
 
     private var approachRow: some View {
         VStack(spacing: 6) {
-            if state.result == nil {
+            if state.result == nil, state.side == .interceptor {
                 if state.phase == .attackRun {
                     actionButton("intercept.abort", tint: GroundControlPalette.warning, isEnabled: true) {
                         viewModel.abortInterceptAttempt()
@@ -121,7 +168,7 @@ struct InterceptMissionPanelView: View {
     }
 
     private var hint: some View {
-        Text("intercept.panel.hint")
+        Text(state.side == .delivery ? "intercept.panel.hint.delivery" : "intercept.panel.hint")
             .font(.caption2)
             .foregroundStyle(.white.opacity(0.5))
             .fixedSize(horizontal: false, vertical: true)

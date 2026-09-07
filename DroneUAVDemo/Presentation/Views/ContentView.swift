@@ -1145,6 +1145,9 @@ struct ContentView: View {
                         .onReceive(lanSessionViewModel.$onlineDiagnostics) { diag in
                             observedViewModel.applyOnlineDiagnostics(diag)
                         }
+                        .onReceive(lanSessionViewModel.$sharedEvents) { events in
+                            observedViewModel.applyOnlineSharedEvents(events)
+                        }
                 }
             } else if isWorkbenchPresented {
                 WorkbenchView(

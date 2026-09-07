@@ -207,10 +207,14 @@ final class DroneSceneController {
     private let fiberTetherPathNode = SCNNode()
     private var agriculturalWetGroundDecals: [SCNNode] = []
     private var lastAgriculturalWetDecalPlanarPosition: SIMD2<Float>?
-    // Capsule bombardier camera — deliberately no yaw/pitch rig unlike the hose/rangefinder above:
-    // the launcher has no aim mechanic at all, it's a fixed nadir view (see `dropFireCapsule`'s
-    // zero-forward-throw fall kinematics, which makes a straight-down view always show the true
-    // impact point at screen center regardless of drone speed).
+    // Capsule bombardier camera. Not an operator-aimable gimbal like the hose/rangefinder above —
+    // there is no yaw/pitch stick input — but no longer welded to nadir either.
+    //
+    // It was fixed straight down for a good reason: the drop had no forward throw, so nadir *was*
+    // the impact point at any speed. Ballistics broke that, and the fix is to keep the invariant
+    // rather than the angle — the rig is driven onto the predicted impact point every tick by
+    // `setCapsuleBombardierAim`, so the centre of this frame is still what gets hit, and in a hover
+    // it is bit-for-bit the nadir view it always was.
     private let capsuleCameraRigNode = SCNNode()
     private var capsuleCameraNode: SCNNode?
     private var capsuleCamera: SCNCamera?
@@ -339,6 +343,11 @@ final class DroneSceneController {
     private var groundReferenceNode: SCNNode
     private var fpvAnchorNode: SCNNode
     private var payloadMountNode: SCNNode
+    /// Where mission equipment that the operator has to be able to *see* is carried. Hung on the
+    /// nose, ahead of the FPV camera, rather than on the belly mount: a module under the belly is
+    /// behind the lens, and the operator flies the entire approach without ever seeing what they
+    /// are carrying. Real interceptors carry it in frame, and so does this one.
+    private let noseMountNode = SCNNode()
     /// Visual nodes for stations beyond the first. The primary station keeps `payloadVisualNode`.
     private var secondaryPayloadNodes: [SCNNode] = []
     /// How the FPV mount is rotated relative to the body. A property of the airframe, so it is
@@ -410,7 +419,15 @@ final class DroneSceneController {
     // fully separate also means a capsule drop can never be picked up by
     // `resolvedPayloadCameraRuntime()`'s "most recent release" fallback and hijack the unrelated
     // `.payload` chase-cam.
+    //
+    // What the two no longer duplicate is the *fall*: both used to carry their own copy of the
+    // same `s = ½gt²` `SCNAction`, and both now take their positions from
+    // `BallisticProjectileRuntime`. Only the node bookkeeping and the camera rules stay separate.
     private var fireCapsuleDropNodes: [UUID: SCNNode] = [:]
+    /// Drops replicated from other LAN participants — see `spawnRemoteDropVisual`.
+    private var remoteDropNodes: [UUID: SCNNode] = [:]
+    /// Releases whose canopy geometry has already been attached.
+    private var parachuteCanopyReleaseIDs: Set<UUID> = []
     private var fireCapsuleTargetReticleNode: SCNNode?
     private var fireCapsuleTargetReticleRingNode: SCNNode?
     private var fireCapsuleTargetReticleDiscNode: SCNNode?
@@ -487,7 +504,7 @@ final class DroneSceneController {
     private var worldObjectFootprints: [UUID: [SIMD2<Float>]] = [:]
     /// `worldNavigationObstacles` keyed by id, for the by-id lookups the risk report drives.
     private var worldNavigationObstaclesByID: [UUID: CollisionObstacle] = [:]
-    private var environmentObstacleIndex = CollisionObstacleSpatialIndex.empty
+    private(set) var environmentObstacleIndex = CollisionObstacleSpatialIndex.empty
     private(set) var environmentMapDescriptors: [EnvironmentObjectDescriptor] = []
     /// The installed world's own buildings and trees, as planning obstacles.
     ///
@@ -522,6 +539,9 @@ final class DroneSceneController {
     private var lastWeatherVisualSignature: Int?
     private var lastComponentOverlaySignature: Int?
     private var undeformedComponentTransforms: [ObjectIdentifier: simd_float4x4] = [:]
+    /// The nodes carrying a deformation right now — the only ones the next pass has to
+    /// restore. Usually empty, which is the point.
+    private var deformedComponentNodes: [SCNNode] = []
     private var lastTerrainConfig: TerrainConfiguration?
     private var lastGeneratedCityKey: CityGenerationKey?
     private let snowDecorationsNode = SCNNode()
@@ -880,6 +900,82 @@ final class DroneSceneController {
         }
         ensureCapsuleCameraRig()
         return capsuleCameraNode
+    }
+
+    /// How far off vertical the bombardier gimbal can be driven.
+    ///
+    /// A physical gimbal has travel limits, and past roughly this angle the "downward" camera is
+    /// looking along the ground rather than at it — the aiming point is far enough downrange that
+    /// a nadir-derived view stops being useful. Reaching the limit is honest feedback: the pilot is
+    /// too fast or too low for the drop they are lining up, and the reticle leaves the frame.
+    private static let capsuleGimbalMaximumTiltRadians: Float = 75.0 * .pi / 180.0
+
+    /// Points the bombardier camera at the predicted impact point.
+    ///
+    /// The camera used to be welded to nadir, and the justification was sound at the time: the drop
+    /// had no forward throw, so straight down *was* the impact point. Now that a capsule inherits
+    /// the carrier's velocity, a fixed nadir view shows the pilot a patch of ground the capsule
+    /// will overfly by tens of metres. Aiming the rig at the solution restores the property the
+    /// original design relied on — what is at the centre of this frame is what gets hit — and in a
+    /// hover it returns exactly the nadir view it always was.
+    ///
+    /// Orientation is set in world space rather than left to the parent mount, so the view is
+    /// stabilised the way a real gimbal is: banking the airframe does not roll the picture.
+    /// The frame's up direction follows the aircraft's heading, so "up" on screen stays "ahead".
+    func setCapsuleBombardierAim(impactPoint: SIMD3<Float>?) {
+        guard capsuleLauncherOpticsAvailable else {
+            return
+        }
+        ensureCapsuleCameraRig()
+
+        let eye = capsuleCameraRigNode.presentation.simdWorldPosition
+        let down = SIMD3<Float>(0.0, -1.0, 0.0)
+
+        // Heading of the airframe, flattened — the reference for which way is "up" in frame.
+        let headingRaw = droneNode.presentation.simdWorldTransform.columns.2
+        var heading = SIMD3<Float>(-headingRaw.x, 0.0, -headingRaw.z)
+        if simd_length_squared(heading) < 1e-6 {
+            heading = SIMD3<Float>(0.0, 0.0, -1.0)
+        } else {
+            heading = simd_normalize(heading)
+        }
+
+        var forward = down
+        if let impactPoint {
+            let toTarget = impactPoint - eye
+            if simd_length_squared(toTarget) > 1e-6 {
+                let direction = simd_normalize(toTarget)
+                // Clamp the tilt away from vertical, rotating within the plane the target lies in.
+                let tilt = acos(simd_clamp(simd_dot(direction, down), -1.0, 1.0))
+                if tilt > Self.capsuleGimbalMaximumTiltRadians {
+                    var lateral = direction - down * simd_dot(direction, down)
+                    if simd_length_squared(lateral) > 1e-6 {
+                        lateral = simd_normalize(lateral)
+                        let limited = Self.capsuleGimbalMaximumTiltRadians
+                        forward = simd_normalize(down * cos(limited) + lateral * sin(limited))
+                    }
+                } else {
+                    forward = direction
+                }
+            }
+        }
+
+        // Camera looks along its own -Z, so +Z is the reverse of the view direction.
+        let zAxis = -forward
+        var upReference = heading - zAxis * simd_dot(heading, zAxis)
+        if simd_length_squared(upReference) < 1e-6 {
+            // Heading is parallel to the view axis — only reachable with the gimbal driven near
+            // horizontal along the flight path. Fall back to world up.
+            let worldUp = SIMD3<Float>(0.0, 1.0, 0.0)
+            upReference = worldUp - zAxis * simd_dot(worldUp, zAxis)
+            if simd_length_squared(upReference) < 1e-6 {
+                return
+            }
+        }
+        let yAxis = simd_normalize(upReference)
+        let xAxis = simd_normalize(simd_cross(yAxis, zAxis))
+        let basis = simd_float3x3(columns: (xAxis, simd_cross(zAxis, xAxis), zAxis))
+        capsuleCameraRigNode.simdWorldOrientation = simd_quatf(basis)
     }
 
     func hoseCameraPointOfView() -> SCNNode? {
@@ -1274,7 +1370,8 @@ final class DroneSceneController {
     func configureOnlineTrialPlaceholders(_ fleetState: OnlineTrialFleetState?) {
         onlineTrialPlaceholderRootNode.childNodes.forEach { $0.removeFromParentNode() }
         replicaProfileCache.removeAll()
-        droneNode.isHidden = fleetState?.isSpectator ?? false
+        localAircraftVisibility.spectator = fleetState?.isSpectator ?? false
+        droneNode.isHidden = localAircraftVisibility.isHidden
 
         guard let fleetState else {
             return
@@ -1561,9 +1658,13 @@ final class DroneSceneController {
             )
         case .catapult(let catapult):
             let supportY = launchPadSupportHeight(at: asset.position)
+            // The authored launcher reports where its own cradle is; the drafted deck
+            // height is the fallback for the procedural rig, which is what it describes.
+            let cradleY = authoredCatapultCradleHeight
+                ?? (LaunchRigMetrics.catapultDeckHeight + LaunchRigMetrics.catapultCradleOffset)
             return SIMD3<Float>(
                 catapult.position.x,
-                supportY + LaunchRigMetrics.catapultDeckHeight + LaunchRigMetrics.catapultCradleOffset,
+                supportY + cradleY,
                 catapult.position.y
             )
         case .canister(let canister):
@@ -1576,6 +1677,21 @@ final class DroneSceneController {
             // the cell it is fired from; the booster carries it out through the
             // rest of the tube on the way.
             let supportY = launchPadSupportHeight(at: asset.position)
+            if let offset = authoredCanisterCellOffset {
+                // The authored transport reports its own cell. Its offset is in the
+                // launcher's frame, so it turns with the launch heading the same way the
+                // node it was measured on does.
+                let yaw = MissionLaunchGeometry.worldYawRadians(
+                    headingDegrees: canister.headingDegrees
+                )
+                let cosYaw = cos(yaw)
+                let sinYaw = sin(yaw)
+                return SIMD3<Float>(
+                    canister.position.x + offset.x * cosYaw + offset.z * sinYaw,
+                    supportY + offset.y,
+                    canister.position.y - offset.x * sinYaw + offset.z * cosYaw
+                )
+            }
             let elevation = canister.elevationDegrees.degreesToRadians
             let muzzle = canister.tubeLengthMeters * 0.32
             let horizontal = MissionLaunchGeometry.horizontalDirection(
@@ -1632,12 +1748,32 @@ final class DroneSceneController {
     /// whenever the view is not first-person, which silently undid the launch
     /// presentation's hiding on the very next tick. Two writers, one property; the
     /// one that runs last wins, and it was not the one that knew.
-    private var canisterRoundSealed = false
+    private var localAircraftVisibility = LocalAircraftPresentationVisibility()
+    private var canisterRoundSealed: Bool {
+        get { localAircraftVisibility.enclosed }
+        set {
+            localAircraftVisibility.enclosed = newValue
+            droneNode.isHidden = localAircraftVisibility.isHidden
+        }
+    }
+
+    /// Height of the built launcher's cradle above the launch pad, when an authored
+    /// launcher is in the scene. `nil` means the procedural rig is standing there and
+    /// `LaunchRigMetrics.catapultDeckHeight` is the right answer, which is what it was
+    /// drafted for. See `CatapultAssetLoader.addCradleAnchor`.
+    private var authoredCatapultCradleHeight: Float?
+
+    /// Where the authored transport's launch cell is, in the launch asset's own frame
+    /// (so the heading yaw is applied at read time, exactly as the drafted geometry's is).
+    /// `nil` means the procedural rig is standing there.
+    private var authoredCanisterCellOffset: SIMD3<Float>?
 
     func setLaunchAsset(_ asset: LaunchAsset?) {
         currentLaunchAsset = asset
         // A round placed on the map is sealed until its launch is commanded.
         canisterRoundSealed = asset?.isCanister == true
+        authoredCatapultCradleHeight = nil
+        authoredCanisterCellOffset = nil
         launchAssetNode.childNodes.forEach { $0.removeFromParentNode() }
 
         guard let asset else {
@@ -1659,9 +1795,30 @@ final class DroneSceneController {
         case .handLaunch(let hand):
             launchAssetNode.addChildNode(makeHandLaunchNode(for: hand))
         case .catapult(let catapult):
-            launchAssetNode.addChildNode(makeCatapultNode(for: catapult))
+            let rig = makeCatapultNode(for: catapult)
+            launchAssetNode.addChildNode(rig)
+            // The seat comes from the rig that was actually built, so the aircraft rests
+            // on this launcher's cradle rather than on a height drafted for another one.
+            if let anchor = rig.childNode(
+                withName: CatapultAssetConstants.cradleAnchorNodeName,
+                recursively: true
+            ) {
+                authoredCatapultCradleHeight = launchAssetNode.simdConvertPosition(
+                    .zero,
+                    from: anchor
+                ).y
+            }
         case .canister(let canister):
-            launchAssetNode.addChildNode(makeCanisterNode(for: canister))
+            let rig = makeCanisterNode(for: canister)
+            launchAssetNode.addChildNode(rig)
+            // Seat the round in the cell the built launcher actually has, rather than at a
+            // pivot height drafted for a different launcher.
+            if let cell = rig.childNode(
+                withName: CanisterAssetConstants.launchCellAnchorNodeName,
+                recursively: true
+            ) {
+                authoredCanisterCellOffset = launchAssetNode.simdConvertPosition(.zero, from: cell)
+            }
         case .runway(let runway):
             launchAssetNode.addChildNode(makeRunwayNode(for: runway))
         case .airLaunch:
@@ -1712,6 +1869,7 @@ final class DroneSceneController {
             // launcher, most obviously at a steep elevation. It appears when the cap
             // comes off and the booster fires, which is when it really appears.
             let sealedInTube = state == .idle || state == .prelaunchCheck || state == .aligning
+                || ((state == .aborted || state == .launchCommit) && clampedProgress <= 0)
             canisterRoundSealed = sealedInTube
             if let cap = launchAssetNode.childNode(withName: "canister_muzzle_cap", recursively: true) {
                 cap.opacity = sealedInTube ? 1.0 : 0.0
@@ -2427,6 +2585,17 @@ final class DroneSceneController {
     }
 
     private func makeCanisterNode(for asset: CanisterLaunchAsset) -> SCNNode {
+        // The authored transport for this aircraft, when the collection has one. Same rule
+        // as the catapult: a launcher is scenery, and a missing model must not stop a
+        // launch, so the procedural rig below stays as the fallback.
+        if let authored = CanisterAssetLoader.shared.makeLauncherNode(
+            profileID: activeProfile.id,
+            elevationDegrees: asset.elevationDegrees
+        ) {
+            authored.addChildNode(makeCanisterEffluxAnchor(on: authored))
+            return authored
+        }
+
         let root = SCNNode()
         let elevation = asset.elevationDegrees.degreesToRadians
         let tubeLength = max(1.6, asset.tubeLengthMeters)
@@ -2472,9 +2641,16 @@ final class DroneSceneController {
 
         // Trunnion and the elevated tube. The tube points along -Z at zero
         // elevation, matching the launch heading applied to the parent node.
+        // ⚠️ The sign raises the muzzle; it used to bury it. Everything on this trunnion
+        // sits at negative Z — the tube runs forward from the pivot — and a rotation of α
+        // about +X sends (0, 0, −L) to y = L·sin α. With `-elevation` the whole pack tipped
+        // nose-down into the deck while `currentLaunchSpawnPoint` put the round at
+        // `+ muzzle · sin(elevation)`, so the airframe hung in the air above a launcher
+        // aimed at the ground. Measured, not reasoned: at 18° a point one metre down the
+        // tube moved to y = −0.309 with the old sign and y = +0.309 with this one.
         let trunnion = SCNNode()
         trunnion.simdPosition = SIMD3<Float>(0.0, pivotHeight, -0.6)
-        trunnion.eulerAngles = SCNVector3(SCNFloat(-elevation), 0.0, 0.0)
+        trunnion.eulerAngles = SCNVector3(SCNFloat(elevation), 0.0, 0.0)
         root.addChildNode(trunnion)
 
         // A single tube was wrong for both aircraft that use this launcher. The
@@ -2574,6 +2750,27 @@ final class DroneSceneController {
         trunnion.addChildNode(effluxAnchor)
 
         return root
+    }
+
+    /// The launcher-side plume for an authored transport, parked on the muzzle the loader
+    /// measured. Same node name and same hidden-until-commit contract as the procedural
+    /// rig's, so `updateLaunchAssetPresentation` needs no special case.
+    private func makeCanisterEffluxAnchor(on launcher: SCNNode) -> SCNNode {
+        let anchor = SCNNode()
+        anchor.name = "canister_booster_efflux"
+        if let muzzle = launcher.childNode(
+            withName: CanisterAssetConstants.muzzleAnchorNodeName,
+            recursively: true
+        ) {
+            // Just clear of the mouth, along the −Z the loader has aimed the cell down.
+            anchor.simdPosition = launcher.simdConvertPosition(
+                SIMD3<Float>(0.0, 0.0, -0.2),
+                from: muzzle
+            )
+        }
+        anchor.addParticleSystem(makeCanisterBoosterPlume())
+        anchor.isHidden = true
+        return anchor
     }
 
     /// The round's own booster, burning behind the airframe after it leaves.
@@ -2678,10 +2875,23 @@ final class DroneSceneController {
     }
 
     private func makeCatapultNode(for asset: CatapultLaunchAsset) -> SCNNode {
-        let root = SCNNode()
         let railPitch = asset.rail.railAngleDegrees.degreesToRadians
         let railLength = max(2.0, asset.rail.railLengthMeters)
         let deckHeight = LaunchRigMetrics.catapultDeckHeight
+
+        // The authored launcher for this aircraft's weight class, when one exists. The
+        // procedural rig below stays as the fallback — a launcher is scenery, and a
+        // missing model must not stop a launch.
+        if let authored = CatapultAssetLoader.shared.makeLauncherNode(
+            takeoffMassKg: activeProfile.takeoffMassKg,
+            railLengthMeters: railLength,
+            railAngleDegrees: asset.rail.railAngleDegrees,
+            deckHeight: deckHeight
+        ) {
+            return authored
+        }
+
+        let root = SCNNode()
 
         let steelMaterial = SCNMaterial()
         steelMaterial.diffuse.contents = NSColor(calibratedRed: 0.52, green: 0.55, blue: 0.57, alpha: 1.0)
@@ -3010,6 +3220,113 @@ final class DroneSceneController {
 
     func currentPayloadMountNode() -> SCNNode {
         payloadMountNode
+    }
+
+    /// Hangs one piece of mission equipment on the nose, in the operator's own field of view, or
+    /// clears whatever is there when passed `nil`. `size` is the equipment's own bounding size in
+    /// metres, which is what decides where it has to sit.
+    ///
+    /// The reach is measured from the same anchor the FPV camera is placed against, so the module
+    /// hangs ahead of the lens on every airframe rather than at a distance tuned for one of them.
+    /// It is then pushed out by half the module's own length plus a clearance that grows with how
+    /// wide and tall the module is: a distance that suits a compact charge puts a half-metre slug
+    /// through the lens, which is exactly what it did — the load filled a third of the picture and
+    /// its near end was behind the camera. Dropped by the same rule, so what the operator sees is
+    /// the module lying along the bottom of the frame rather than blocking the view over it.
+    func setNoseMountedEquipment(_ node: SCNNode?, size: SIMD3<Float> = SIMD3<Float>(repeating: 0.2)) {
+        for child in noseMountNode.childNodes { child.removeFromParentNode() }
+        guard let node else {
+            noseMountNode.removeFromParentNode()
+            return
+        }
+        if noseMountNode.parent !== fpvAnchorNode {
+            noseMountNode.removeFromParentNode()
+            fpvAnchorNode.addChildNode(noseMountNode)
+        }
+        let forward = fpvAnchorLocalForward()
+        let extent = SIMD3<Float>(abs(size.x), abs(size.y), abs(size.z))
+
+        // The module's own length runs along its −Z, the same axis the airframe's nose points down.
+        // Built as a yaw rather than a shortest-arc rotation between the two vectors: the anchor's
+        // forward is planar, so an airframe whose model faces +Z is the antiparallel case, and the
+        // shortest arc between opposed vectors has no defined axis. No pitch: a load taped under a
+        // belly lies along the airframe.
+        let orientation = simd_quatf(angle: atan2(forward.x, -forward.z), axis: SIMD3<Float>(0, 1, 0))
+        noseMountNode.simdOrientation = orientation
+
+        // Directly under the aircraft — the belly mount's own position, so the load hangs where the
+        // airframe actually carries things rather than out in front of it. Biased forward by part
+        // of its own length so a long module still shows along the bottom of the pilot's picture.
+        let belly = fpvAnchorNode.simdConvertPosition(.zero, from: payloadMountNode)
+        noseMountNode.simdPosition = belly
+            - SIMD3<Float>(0, extent.y * 0.5, 0)
+            + simd_act(orientation, SIMD3<Float>(0, 0, -1)) * (extent.z * 0.35)
+
+        noseMountNode.addChildNode(node)
+        for strap in noseMountTape(extent: extent) { noseMountNode.addChildNode(strap) }
+    }
+
+    /// How the load is held on: tape passed right around the airframe. Two strips run up either
+    /// side of the body from under the module and one crosses over the top.
+    ///
+    /// It goes around the aircraft rather than around the load, because what holds a load on is
+    /// what passes between the two. Bands wound decoratively around the module said nothing about
+    /// how it was attached, and a rod standing it off the nose — the version before that — is
+    /// something no interceptor has. Silver-grey, not black: gaffer tape over a dark airframe at
+    /// dusk is invisible if it is painted the same colour as everything else.
+    private func noseMountTape(extent: SIMD3<Float>) -> [SCNNode] {
+        let tape = SCNMaterial()
+        tape.diffuse.contents = NSColor(calibratedWhite: 0.58, alpha: 1)
+        tape.roughness.contents = 0.85
+        tape.metalness.contents = 0.12
+
+        // From just under the load, up past the belly, to just over the airframe.
+        let bottom = -extent.y * 0.54
+        let top = extent.y * 0.5 + max(0.055, visualBoundsSize.y * 0.85)
+        let side = max(extent.x * 0.52, 0.012)
+        let strapWidth = max(0.010, extent.z * 0.16)
+        var nodes: [SCNNode] = []
+
+        for direction in [Float(-1), Float(1)] {
+            let strap = SCNNode(geometry: SCNBox(
+                width: 0.0035,
+                height: CGFloat(top - bottom),
+                length: CGFloat(strapWidth),
+                chamferRadius: 0.001
+            ))
+            strap.geometry?.firstMaterial = tape
+            strap.simdPosition = SIMD3<Float>(direction * side, (top + bottom) * 0.5, 0)
+            strap.name = "nose-mount-tape"
+            nodes.append(strap)
+        }
+
+        // The two runs that close the loop: one over the top of the airframe, one under the load.
+        for height in [top, bottom] {
+            let cross = SCNNode(geometry: SCNBox(
+                width: CGFloat(side * 2),
+                height: 0.0035,
+                length: CGFloat(strapWidth),
+                chamferRadius: 0.001
+            ))
+            cross.geometry?.firstMaterial = tape
+            cross.simdPosition = SIMD3<Float>(0, height, 0)
+            cross.name = "nose-mount-tape"
+            nodes.append(cross)
+        }
+        return nodes
+    }
+
+    /// Where the nose load sits in the airframe's own body frame — the frame the component graph's
+    /// local positions are expressed in, so a caller can put the load into the graph and have its
+    /// mass land in the right place. `nil` when nothing is mounted.
+    func noseMountedEquipmentBodyPosition() -> SIMD3<Float>? {
+        guard noseMountNode.parent != nil, !noseMountNode.childNodes.isEmpty else { return nil }
+        return droneNode.simdConvertPosition(.zero, from: noseMountNode)
+    }
+
+
+    func noseMountedEquipmentNode(named name: String) -> SCNNode? {
+        noseMountNode.childNode(withName: name, recursively: false)
     }
 
     func consumePayloadLifecycleEvents() -> [PayloadLifecycleEvent] {
@@ -3622,14 +3939,25 @@ final class DroneSceneController {
         fiberTetherPathNode.geometry = nil
     }
 
+    /// Detaches the mounted payload and hands it over to the ballistic runtime.
+    ///
+    /// Everything about the *fall* has left this function. It used to run the same hand-written
+    /// `s = ½gt²` `SCNAction` the capsule launcher had its own copy of, with the release point's x
+    /// and z frozen: a payload released at speed landed directly beneath the point of release
+    /// rather than downrange of it, sank through rooftops and terrain to a flat plane at y ≈ 0, and
+    /// felt no wind. What stays here is the part that was never kinematics — detaching the node,
+    /// the dropped-payload runtime the follow camera tracks, and the lifecycle events the view
+    /// model turns into status messages and map markers.
+    ///
+    /// Returns the release id together with the world position it left from, so the caller can
+    /// launch the projectile under the same id and keep one identity for the whole drop.
     @discardableResult
-    func releasePayloadVisual() -> UUID? {
+    func releasePayloadVisual() -> (releaseID: UUID, position: SIMD3<Float>)? {
         guard let attachedPayloadNode = payloadVisualNode else {
             return nil
         }
 
         let releaseID = UUID()
-        let releasedPayloadType = activePayloadConfiguration?.payloadType
         let worldTransform = attachedPayloadNode.presentation.simdWorldTransform
         attachedPayloadNode.removeAllActions()
         attachedPayloadNode.removeFromParentNode()
@@ -3642,14 +3970,6 @@ final class DroneSceneController {
         applyCategoryBitMask(RenderCategory.droppedPayload, to: attachedPayloadNode)
 
         let startPosition = attachedPayloadNode.simdWorldPosition
-        let landedY = min(startPosition.y, max(Float(groundNode.presentation.position.y) + 0.04, 0.04))
-        let dropHeight = max(0.0, startPosition.y - landedY)
-        let gravity: Float = 9.8
-        let unconstrainedDuration = sqrt(max(0.0001, (2.0 * dropHeight) / gravity))
-        let estimatedImpactSpeed = sqrt(max(0.0, 2.0 * gravity * dropHeight))
-        // Keep the payload in continuous visible fall until real impact instead of
-        // truncating the action early and forcing a long teleport in landedAction.
-        let fallDuration = Double(dropHeight > 0.01 ? unconstrainedDuration.clamped(to: 0.18...8.0) : 0.08)
 
         droppedPayloadNodes[releaseID] = attachedPayloadNode
         droppedPayloadRuntime[releaseID] = DroppedPayloadRuntime(
@@ -3661,152 +3981,311 @@ final class DroneSceneController {
             impactTimestamp: nil
         )
 
-        let startFalling = SCNAction.run { [weak self] _ in
-            self?.pendingPayloadLifecycleEvents.append(
-                PayloadLifecycleEvent(
+        pendingPayloadLifecycleEvents.append(
+            PayloadLifecycleEvent(
                 releaseID: releaseID,
                 state: .falling,
                 messageKey: nil,
                 impactPosition: nil,
                 impactSpeedMps: nil
-                )
             )
-        }
-
-        let fallAction = SCNAction.customAction(duration: fallDuration) { node, elapsedTime in
-            let elapsed = Float(elapsedTime)
-            let distance = min(dropHeight, 0.5 * gravity * elapsed * elapsed)
-            let nextY = max(landedY, startPosition.y - distance)
-            node.simdWorldPosition = SIMD3<Float>(startPosition.x, nextY, startPosition.z)
-        }
-
-        let landedAction = SCNAction.run { [weak self] _ in
-            guard let self else {
-                return
-            }
-            attachedPayloadNode.simdWorldPosition = SIMD3<Float>(startPosition.x, landedY, startPosition.z)
-            self.spawnPayloadImpactVisual(
-                releaseID: releaseID,
-                position: SIMD3<Float>(startPosition.x, landedY, startPosition.z),
-                payloadType: releasedPayloadType,
-                impactSpeedMps: estimatedImpactSpeed
-            )
-            if var runtime = self.droppedPayloadRuntime[releaseID] {
-                runtime.lastSampledPosition = attachedPayloadNode.presentation.simdWorldPosition
-                runtime.verticalSpeed = 0.0
-                runtime.state = .impact
-                runtime.impactTimestamp = CACurrentMediaTime()
-                self.droppedPayloadRuntime[releaseID] = runtime
-            }
-            self.pendingPayloadLifecycleEvents.append(
-                PayloadLifecycleEvent(
-                    releaseID: releaseID,
-                    state: .landed,
-                    messageKey: "payload.message.dropped_successfully",
-                    impactPosition: SIMD3<Float>(startPosition.x, landedY, startPosition.z),
-                    impactSpeedMps: estimatedImpactSpeed
-                )
-            )
-        }
-
-        let cleanupAction = SCNAction.run { [weak self, weak attachedPayloadNode] _ in
-            guard let self else {
-                return
-            }
-            attachedPayloadNode?.removeAllActions()
-            attachedPayloadNode?.removeFromParentNode()
-            self.droppedPayloadNodes.removeValue(forKey: releaseID)
-            self.droppedPayloadRuntime.removeValue(forKey: releaseID)
-            if self.payloadCameraFocusReleaseID == releaseID {
-                self.payloadCameraFocusReleaseID = nil
-            }
-            self.pendingPayloadLifecycleEvents.append(
-                PayloadLifecycleEvent(
-                    releaseID: releaseID,
-                    state: .cleanedUp,
-                    messageKey: "payload.message.cleanup_completed",
-                    impactPosition: nil,
-                    impactSpeedMps: nil
-                )
-            )
-        }
-
-        attachedPayloadNode.runAction(
-            .sequence([
-                .wait(duration: 0.06),
-                startFalling,
-                fallAction,
-                landedAction,
-                .wait(duration: 1.2),
-                cleanupAction
-            ]),
-            forKey: "payloadDropLifecycle"
         )
 
-        return releaseID
+        return (releaseID, startPosition)
     }
 
-    /// Fires one capsule from the (still-mounted) fire-capsule launcher — deliberately independent
-    /// of `releasePayloadVisual()` above: that function's whole design is single-ownership (attach
-    /// once, drop once, the payload is gone for good), while the launcher stays mounted and this
-    /// gets called repeatedly, once per remaining round of ammo. The fall kinematics are the same
-    /// technique (constant-gravity `SCNAction.customAction`, no real physics body) but kept as an
-    /// independent copy rather than a shared refactor, to avoid touching the already-proven
-    /// cargo/hose drop path at all.
-    @discardableResult
-    func dropFireCapsule(size: FireCapsuleSize, onImpact: @escaping (SIMD3<Float>) -> Void) -> UUID {
-        let dropID = UUID()
-        let capsuleNode = makeFireCapsuleProjectileNode()
-        let startPosition = payloadMountNode.presentation.simdWorldPosition
-        capsuleNode.simdWorldPosition = startPosition
-        scene.rootNode.addChildNode(capsuleNode)
-        applyCategoryBitMask(RenderCategory.droppedPayload, to: capsuleNode)
-        fireCapsuleDropNodes[dropID] = capsuleNode
-
-        let landedY = min(startPosition.y, max(Float(groundNode.presentation.position.y) + 0.04, 0.04))
-        let dropHeight = max(0.0, startPosition.y - landedY)
-        let gravity: Float = 9.8
-        let unconstrainedDuration = sqrt(max(0.0001, (2.0 * dropHeight) / gravity))
-        let fallDuration = Double(dropHeight > 0.01 ? unconstrainedDuration.clamped(to: 0.18...8.0) : 0.08)
-
-        let fallAction = SCNAction.customAction(duration: fallDuration) { node, elapsedTime in
-            let elapsed = Float(elapsedTime)
-            let distance = min(dropHeight, 0.5 * gravity * elapsed * elapsed)
-            let nextY = max(landedY, startPosition.y - distance)
-            node.simdWorldPosition = SIMD3<Float>(startPosition.x, nextY, startPosition.z)
+    /// Moves a falling payload to the position and attitude the ballistic runtime computed.
+    ///
+    /// A deployed canopy both stops the tumble and gets a visual: the load hangs upright under it,
+    /// which is the readable difference between "this is coming down hard" and "this is coming down
+    /// safely" from any camera.
+    func updateReleasedPayloadVisual(
+        id: UUID,
+        position: SIMD3<Float>,
+        orientation: simd_quatf,
+        isParachuteDeployed: Bool
+    ) {
+        guard let node = droppedPayloadNodes[id] else {
+            return
         }
-
-        let landedAction = SCNAction.run { [weak self] _ in
-            guard let self else { return }
-            let impactPosition = SIMD3<Float>(startPosition.x, landedY, startPosition.z)
-            capsuleNode.simdWorldPosition = impactPosition
-            self.spawnFireCapsuleBurstVisual(at: impactPosition, blastRadiusMeters: size.blastRadiusMeters)
-            // `SCNAction.run` closures are NOT guaranteed to execute on the main thread (same
-            // hazard as `SCNSceneRendererDelegate.renderer(_:updateAtTime:)`, see
-            // `handleSceneRenderFrame`'s own hop for the same reason). `onImpact` mutates the view
-            // model's `@Published` state — calling it directly here caused exactly the crash this
-            // comment is warning about: Combine's "Publishing changes from background threads is
-            // not allowed" + the app hanging with the main thread stuck in `__ulock_wait2`,
-            // contending with a background thread for the same object's internal lock. Hopping to
-            // the main thread here, at the one place this closure is actually invoked from a
-            // non-main context, is more robust than trusting every future caller to hop themselves.
-            DispatchQueue.main.async {
-                onImpact(impactPosition)
-            }
+        node.simdWorldPosition = position
+        if isParachuteDeployed {
+            node.simdWorldOrientation = simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+            ensureParachuteCanopy(on: node, releaseID: id)
+        } else {
+            node.simdWorldOrientation = orientation
         }
+    }
 
-        let cleanupAction = SCNAction.run { [weak self, weak capsuleNode] _ in
-            capsuleNode?.removeAllActions()
-            capsuleNode?.removeFromParentNode()
-            self?.fireCapsuleDropNodes.removeValue(forKey: dropID)
+    /// Attaches the canopy geometry once, the first tick after inflation.
+    private func ensureParachuteCanopy(on node: SCNNode, releaseID: UUID) {
+        guard !parachuteCanopyReleaseIDs.contains(releaseID) else {
+            return
         }
+        parachuteCanopyReleaseIDs.insert(releaseID)
 
-        capsuleNode.runAction(
-            .sequence([fallAction, landedAction, .wait(duration: 0.5), cleanupAction]),
-            forKey: "fireCapsuleDropLifecycle"
+        let canopyMaterial = SCNMaterial()
+        canopyMaterial.lightingModel = .physicallyBased
+        canopyMaterial.diffuse.contents = NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.18, alpha: 1.0)
+        canopyMaterial.roughness.contents = 0.85
+        canopyMaterial.isDoubleSided = true
+
+        let canopy = SCNSphere(radius: 0.9)
+        canopy.segmentCount = 16
+        canopy.firstMaterial = canopyMaterial
+
+        let canopyNode = SCNNode(geometry: canopy)
+        canopyNode.name = "payload.parachute.canopy"
+        // Hemisphere: scaled flat and lifted so only the dome reads above the load.
+        canopyNode.simdScale = SIMD3<Float>(1.0, 0.55, 1.0)
+        canopyNode.simdPosition = SIMD3<Float>(0.0, 1.3, 0.0)
+        canopyNode.castsShadow = true
+
+        let riggingMaterial = SCNMaterial()
+        riggingMaterial.diffuse.contents = NSColor(calibratedWhite: 0.85, alpha: 0.9)
+        riggingMaterial.lightingModel = .constant
+        let rigging = SCNCylinder(radius: 0.012, height: 1.0)
+        rigging.firstMaterial = riggingMaterial
+        let riggingNode = SCNNode(geometry: rigging)
+        riggingNode.simdPosition = SIMD3<Float>(0.0, 0.65, 0.0)
+        riggingNode.castsShadow = false
+
+        node.addChildNode(riggingNode)
+        node.addChildNode(canopyNode)
+        applyCategoryBitMask(RenderCategory.droppedPayload, to: canopyNode)
+        applyCategoryBitMask(RenderCategory.droppedPayload, to: riggingNode)
+    }
+
+    /// Removes a released payload the ballistic runtime gave up on.
+    ///
+    /// Emits the same `cleanedUp` event a landed payload does, because to everything downstream —
+    /// the follow camera, the status line — the drop is equally over. What it must not emit is
+    /// `landed`: nothing landed, and reporting an impact position here would put a false marker on
+    /// the map.
+    func discardReleasedPayloadVisual(id: UUID) {
+        guard let node = droppedPayloadNodes.removeValue(forKey: id) else {
+            return
+        }
+        node.removeAllActions()
+        node.removeFromParentNode()
+        droppedPayloadRuntime.removeValue(forKey: id)
+        if payloadCameraFocusReleaseID == id {
+            payloadCameraFocusReleaseID = nil
+        }
+        pendingPayloadLifecycleEvents.append(
+            PayloadLifecycleEvent(
+                releaseID: id,
+                state: .cleanedUp,
+                messageKey: "payload.message.cleanup_completed",
+                impactPosition: nil,
+                impactSpeedMps: nil
+            )
+        )
+    }
+
+    /// Settles a payload at its impact point, marks the runtime, and schedules the cleanup.
+    func finishReleasedPayloadVisual(
+        id: UUID,
+        at position: SIMD3<Float>,
+        payloadType: PayloadType?,
+        impactSpeedMps: Float
+    ) {
+        guard let node = droppedPayloadNodes[id] else {
+            return
+        }
+        node.simdWorldPosition = position
+        spawnPayloadImpactVisual(
+            releaseID: id,
+            position: position,
+            payloadType: payloadType,
+            impactSpeedMps: impactSpeedMps
+        )
+        if var runtime = droppedPayloadRuntime[id] {
+            runtime.lastSampledPosition = position
+            runtime.verticalSpeed = 0.0
+            runtime.state = .impact
+            runtime.impactTimestamp = CACurrentMediaTime()
+            droppedPayloadRuntime[id] = runtime
+        }
+        pendingPayloadLifecycleEvents.append(
+            PayloadLifecycleEvent(
+                releaseID: id,
+                state: .landed,
+                messageKey: "payload.message.dropped_successfully",
+                impactPosition: position,
+                impactSpeedMps: impactSpeedMps
+            )
         )
 
-        return dropID
+        node.runAction(
+            .sequence([
+                .wait(duration: 1.2),
+                .run { [weak self, weak node] _ in
+                    guard let self else {
+                        return
+                    }
+                    node?.removeAllActions()
+                    node?.removeFromParentNode()
+                    self.droppedPayloadNodes.removeValue(forKey: id)
+                    self.droppedPayloadRuntime.removeValue(forKey: id)
+                    if self.payloadCameraFocusReleaseID == id {
+                        self.payloadCameraFocusReleaseID = nil
+                    }
+                    self.pendingPayloadLifecycleEvents.append(
+                        PayloadLifecycleEvent(
+                            releaseID: id,
+                            state: .cleanedUp,
+                            messageKey: "payload.message.cleanup_completed",
+                            impactPosition: nil,
+                            impactSpeedMps: nil
+                        )
+                    )
+                }
+            ]),
+            forKey: "payloadDropCleanup"
+        )
+    }
+
+    /// World-space point a payload leaves the aircraft from.
+    ///
+    /// `presentation` rather than the model node: the release has to come from where the aircraft
+    /// is actually being drawn this frame, not from where the model expects to be.
+    var payloadReleaseWorldPosition: SIMD3<Float> {
+        payloadMountNode.presentation.simdWorldPosition
+    }
+
+    /// Creates the visual for one capsule fired from the (still-mounted) launcher.
+    ///
+    /// The capsule's *motion* is no longer this layer's business. It used to be: a
+    /// constant-gravity `SCNAction.customAction` walked the node down a `s = ½gt²` curve with the
+    /// release point's x and z frozen for the whole fall, so a capsule dropped at 15 m/s landed
+    /// directly under the point of release instead of ~40 m ahead of it. The trajectory now comes
+    /// from `BallisticProjectileRuntime` on the simulation tick, and this node is moved to
+    /// wherever the runtime says the capsule is.
+    ///
+    /// The impact callback is gone with it, and that is a second fix rather than a side effect:
+    /// it ran inside `SCNAction.run`, which is not guaranteed to be the main thread, so it had to
+    /// hop to the main actor by hand after shipping a deadlock — the main thread stuck in
+    /// `__ulock_wait2` against a background thread holding the same object's lock. Impacts are
+    /// now returned to the caller on the tick it already owns.
+    func spawnFireCapsuleVisual(id: UUID, at position: SIMD3<Float>) {
+        let capsuleNode = makeFireCapsuleProjectileNode()
+        capsuleNode.simdWorldPosition = position
+        scene.rootNode.addChildNode(capsuleNode)
+        applyCategoryBitMask(RenderCategory.droppedPayload, to: capsuleNode)
+        fireCapsuleDropNodes[id] = capsuleNode
+    }
+
+    /// Moves an in-flight capsule to the position and attitude the ballistic runtime computed.
+    func updateFireCapsuleVisual(id: UUID, position: SIMD3<Float>, orientation: simd_quatf) {
+        guard let node = fireCapsuleDropNodes[id] else {
+            return
+        }
+        node.simdWorldPosition = position
+        node.simdWorldOrientation = orientation
+    }
+
+    // MARK: - Replicated drops
+
+    /// Another participant's drop, played from the initial conditions they sent.
+    ///
+    /// Kept in its own dictionary rather than reusing the capsule or released-payload ones: those
+    /// two are wired to local mechanics — ammo state, the payload chase camera, the mission's own
+    /// impact marker — and a remote drop must reach none of them. All it is here is something
+    /// falling that everyone can see.
+    func spawnRemoteDropVisual(id: UUID, kind: BallisticProjectile.Kind, at position: SIMD3<Float>) {
+        let node: SCNNode
+        switch kind {
+        case .fireCapsule:
+            node = makeFireCapsuleProjectileNode()
+        case .releasedPayload, .debris:
+            // Debris is never replicated over LAN — the intercept scene flies its own wreckage
+            // locally — but the case has to be answered, and a neutral box is the right stand-in
+            // for both a crate and a fragment.
+            let material = SCNMaterial()
+            material.lightingModel = .physicallyBased
+            material.diffuse.contents = NSColor(calibratedWhite: 0.66, alpha: 1.0)
+            material.roughness.contents = 0.8
+            let box = SCNBox(width: 0.22, height: 0.22, length: 0.22, chamferRadius: 0.02)
+            box.firstMaterial = material
+            node = SCNNode(geometry: box)
+            node.castsShadow = true
+        }
+        node.name = "online.remote_drop.\(id.uuidString)"
+        node.simdWorldPosition = position
+        scene.rootNode.addChildNode(node)
+        applyCategoryBitMask(RenderCategory.droppedPayload, to: node)
+        remoteDropNodes[id] = node
+    }
+
+    func updateRemoteDropVisual(id: UUID, position: SIMD3<Float>, orientation: simd_quatf) {
+        guard let node = remoteDropNodes[id] else {
+            return
+        }
+        node.simdWorldPosition = position
+        node.simdWorldOrientation = orientation
+    }
+
+    /// Lands a replicated drop. No burst and no suppression — those belong to the participant who
+    /// released it, and are applied on their machine.
+    func finishRemoteDropVisual(id: UUID, at position: SIMD3<Float>) {
+        guard let node = remoteDropNodes.removeValue(forKey: id) else {
+            return
+        }
+        node.simdWorldPosition = position
+        node.runAction(
+            .sequence([
+                .wait(duration: 0.6),
+                .run { [weak node] _ in
+                    node?.removeAllActions()
+                    node?.removeFromParentNode()
+                }
+            ]),
+            forKey: "remoteDropCleanup"
+        )
+    }
+
+    func discardRemoteDropVisual(id: UUID) {
+        guard let node = remoteDropNodes.removeValue(forKey: id) else {
+            return
+        }
+        node.removeAllActions()
+        node.removeFromParentNode()
+    }
+
+    /// Removes a capsule the ballistic runtime gave up on, with no burst — nothing was hit.
+    func discardFireCapsuleVisual(id: UUID) {
+        guard let node = fireCapsuleDropNodes.removeValue(forKey: id) else {
+            return
+        }
+        node.removeAllActions()
+        node.removeFromParentNode()
+    }
+
+    /// Bursts a capsule at its impact point and clears the node.
+    func finishFireCapsuleVisual(
+        id: UUID,
+        at position: SIMD3<Float>,
+        size: FireCapsuleSize,
+        isWater: Bool
+    ) {
+        guard let capsuleNode = fireCapsuleDropNodes.removeValue(forKey: id) else {
+            return
+        }
+        capsuleNode.simdWorldPosition = position
+        if !isWater {
+            spawnFireCapsuleBurstVisual(at: position, blastRadiusMeters: size.blastRadiusMeters)
+        }
+        capsuleNode.runAction(
+            .sequence([
+                .wait(duration: 0.5),
+                .run { [weak capsuleNode] _ in
+                    capsuleNode?.removeAllActions()
+                    capsuleNode?.removeFromParentNode()
+                }
+            ]),
+            forKey: "fireCapsuleDropCleanup"
+        )
     }
 
     private func makeFireCapsuleProjectileNode() -> SCNNode {
@@ -3836,8 +4315,25 @@ final class DroneSceneController {
     /// not a screen-space camera overlay, so it's visible from every camera mode automatically
     /// with none of the render-category/shadow-quality/blur coupling a dedicated payload-optics
     /// camera mode would need. `dronePlanarPosition == nil` hides it (no capsule launcher mounted).
-    func setFireCapsuleTargetReticle(dronePlanarPosition: SIMD2<Float>?, radiusMeters: Float) {
-        guard let dronePlanarPosition else {
+    ///
+    /// Takes a full 3D impact point rather than the aircraft's planar position. It used to draw the
+    /// circle directly beneath the aircraft, which was honest only in a perfect hover — and the
+    /// drop was wrong in exactly the same way, so the two agreed and the error was invisible. Now
+    /// that a capsule inherits the carrier's velocity, the reticle has to be a continuously
+    /// computed impact point or the mission becomes unaimable: at 15 m/s from 60 m the capsule
+    /// lands about 50 m ahead of where the old circle sat. The y coordinate matters too — the
+    /// predicted point can be a rooftop, not the ground plane.
+    ///
+    /// Shared by the capsule launcher and by plain payload drops: both are now the same mechanic —
+    /// an object released on a ballistic arc — and both are unaimable without this. For a capsule
+    /// the radius is its blast radius; for a payload it is a small mark, because what the pilot
+    /// needs there is the point, and the delivery zone is already drawn separately.
+    func setDropImpactReticle(
+        impactPoint: SIMD3<Float>?,
+        radiusMeters: Float,
+        isReliable: Bool
+    ) {
+        guard let impactPoint else {
             fireCapsuleTargetReticleNode?.isHidden = true
             return
         }
@@ -3880,8 +4376,20 @@ final class DroneSceneController {
         (fireCapsuleTargetReticleRingNode?.geometry as? SCNTorus)?.ringRadius = CGFloat(radiusMeters)
         (fireCapsuleTargetReticleDiscNode?.geometry as? SCNCylinder)?.radius = CGFloat(radiusMeters)
 
-        let groundY = max(Float(groundNode.presentation.position.y) + 0.03, 0.03)
-        node.simdPosition = SIMD3<Float>(dronePlanarPosition.x, groundY, dronePlanarPosition.y)
+        // A prediction that ran out of trajectory instead of hitting anything — over a streamed-out
+        // chunk, or off the edge of the world — is drawn faint rather than hidden. Hiding it would
+        // read as "no launcher"; faint reads as "I do not know where this lands", which is true.
+        let ringAlpha: CGFloat = isReliable ? 0.65 : 0.22
+        let discAlpha: CGFloat = isReliable ? 0.14 : 0.05
+        fireCapsuleTargetReticleRingNode?.geometry?.firstMaterial?.diffuse.contents =
+            NSColor.systemOrange.withAlphaComponent(ringAlpha)
+        fireCapsuleTargetReticleRingNode?.geometry?.firstMaterial?.emission.contents =
+            NSColor.systemOrange.withAlphaComponent(isReliable ? 0.35 : 0.10)
+        fireCapsuleTargetReticleDiscNode?.geometry?.firstMaterial?.diffuse.contents =
+            NSColor.systemOrange.withAlphaComponent(discAlpha)
+
+        // Sit just above the predicted surface, whatever height that is.
+        node.simdPosition = SIMD3<Float>(impactPoint.x, impactPoint.y + 0.03, impactPoint.z)
         node.isHidden = false
     }
 
@@ -3898,6 +4406,12 @@ final class DroneSceneController {
             node.removeAllActions()
             node.removeFromParentNode()
         }
+        for node in remoteDropNodes.values {
+            node.removeAllActions()
+            node.removeFromParentNode()
+        }
+        remoteDropNodes.removeAll(keepingCapacity: false)
+        parachuteCanopyReleaseIDs.removeAll(keepingCapacity: false)
         droppedPayloadNodes.removeAll(keepingCapacity: false)
         droppedPayloadRuntime.removeAll(keepingCapacity: false)
         payloadImpactNodes.removeAll(keepingCapacity: false)
@@ -4045,9 +4559,34 @@ final class DroneSceneController {
         // physical fallback bounds for the fragment and retain the root.
         let fullyDetachedLegacyComponents = part.legacyComponents
             .subtracting(retainedLegacyComponents)
-        let sourceNodes = detachedVisualSourceNodes(for: fullyDetachedLegacyComponents)
+        var sourceNodes = detachedVisualSourceNodes(for: fullyDetachedLegacyComponents)
         detachedVehicleComponentIDs.formUnion(part.componentIDs)
         detachedVehicleLegacyComponents.formUnion(fullyDetachedLegacyComponents)
+
+        // A wing that breaks halfway out still has to be a wing on the ground.
+        //
+        // The four legacy arm buckets cannot express half of one: the graph splits a
+        // wing into `wing.left.root` and `wing.left.outer` and both carry `.armFL`, so
+        // when only the outer panel fails the bucket is still retained, the subtraction
+        // above comes out empty, and the fragment fell back to a bare box with the debris
+        // material — a grey rectangle sliding across the runway where an outer wing panel
+        // should be. Selecting by the geometry that actually lies inside the detached
+        // subtree's own volume asks the question the buckets cannot: not "did this whole
+        // bucket leave" but "which meshes went with it".
+        var geometricallyDetachedNodes: [SCNNode] = []
+        if sourceNodes.isEmpty {
+            geometricallyDetachedNodes = visualNodes(
+                within: part.localBoundsCenter,
+                halfExtents: part.localBoundsHalfExtents,
+                ownedBy: part.legacyComponents
+            )
+            sourceNodes = geometricallyDetachedNodes
+            // They left with the fragment, so they stop being drawn on the aircraft.
+            for node in geometricallyDetachedNodes {
+                detachedVehicleVisualNodeIDs.insert(ObjectIdentifier(node))
+                node.isHidden = true
+            }
+        }
 
         let minimumHalfExtent: Float = 0.018
         let halfExtents = simd_max(
@@ -4571,16 +5110,26 @@ final class DroneSceneController {
     /// transform every frame. The component graph remains authoritative;
     /// pristine/reset graphs restore the exact original node transforms.
     func applyVehicleComponentDeformations(_ graph: VehicleComponentGraph) {
-        for nodes in componentNodes.values {
-            for node in nodes {
-                let key = ObjectIdentifier(node)
-                if let baseline = undeformedComponentTransforms[key] {
-                    node.simdTransform = baseline
-                } else {
-                    undeformedComponentTransforms[key] = node.simdTransform
-                }
+        // ⚠️ Only the nodes that were actually bent last time get their transform put
+        // back, not every mapped node on the aircraft.
+        //
+        // This runs on every physics tick once anything at all is damaged
+        // (`refreshDamagePhysicsModels` is called from the failure runtime's tick), and
+        // the authored models map an order of magnitude more nodes than the procedural
+        // rigs did — 117 on an MQ-9B against about fifteen. Rewriting all of them 90
+        // times a second to the value they already hold is pure cost.
+        //
+        // It was also wrong. The propeller spin nodes are mapped like any other
+        // geometry, so the reset overwrote the rotation `updatePropellers` had just
+        // written and a damaged aircraft's propellers stopped turning. Deformation is
+        // redirected to the rotor's mount — the parent that carries its position and
+        // shaft aim — which bends the propeller with its pod and leaves the spin alone.
+        for node in deformedComponentNodes {
+            if let baseline = undeformedComponentTransforms[ObjectIdentifier(node)] {
+                node.simdTransform = baseline
             }
         }
+        deformedComponentNodes.removeAll(keepingCapacity: true)
 
         var strongestByLegacy: [DamageComponent: VehicleComponentDeformation] = [:]
         for component in graph.components where component.isAttached {
@@ -4598,15 +5147,40 @@ final class DroneSceneController {
 
         for (legacy, deformation) in strongestByLegacy {
             let rawAngle = simd_length(deformation.bendRadians)
-            for node in componentNodes[legacy] ?? [] {
-                if rawAngle > 0.0001 {
+            let hasBend = rawAngle > 0.0001
+            let hasShift = simd_length_squared(deformation.translationMeters) > 1e-10
+            guard hasBend || hasShift else { continue }
+
+            for mapped in componentNodes[legacy] ?? [] {
+                guard let node = deformationTarget(for: mapped) else { continue }
+                let key = ObjectIdentifier(node)
+                if undeformedComponentTransforms[key] == nil {
+                    undeformedComponentTransforms[key] = node.simdTransform
+                }
+                if hasBend {
                     let angle = min(Float(25.0) * .pi / 180.0, rawAngle)
                     let axis = deformation.bendRadians / rawAngle
                     node.simdOrientation = node.simdOrientation * simd_quatf(angle: angle, axis: axis)
                 }
                 node.simdPosition += deformation.translationMeters
+                deformedComponentNodes.append(node)
             }
         }
+    }
+
+    /// Where a component's bend is actually applied.
+    ///
+    /// For most geometry that is the node itself. A propeller is the exception: the node
+    /// mapped into the damage buckets is the one the simulator spins, so writing a
+    /// deformation onto it puts the two in a fight the spin loses. The rotor mount above
+    /// it carries the same pose without being touched every frame, so the pod bends and
+    /// the disc keeps turning. A propeller with no such mount — the procedural rigs
+    /// attach theirs straight to the airframe root — is left alone rather than bending
+    /// the whole aircraft.
+    private func deformationTarget(for node: SCNNode) -> SCNNode? {
+        guard propellerNodes.contains(where: { $0 === node }) else { return node }
+        guard let mount = node.parent, mount.name?.hasPrefix("rotorMount.") == true else { return nil }
+        return mount
     }
 
     func dollyFreeCamera(by step: Float) {
@@ -4697,11 +5271,16 @@ final class DroneSceneController {
         groundReferenceNode = droneVisual.groundReferenceNode
         fpvAnchorNode = droneVisual.fpvAnchorNode
         cachedFPVAnchorForward = nil
+        // The old airframe took the nose mount's parent with it. Whoever owns the equipment hangs
+        // it back on the new one; nothing stale is carried across.
+        setNoseMountedEquipment(nil)
         payloadMountNode = droneVisual.payloadMountNode
         propellerNodes = droneVisual.propellerNodes
         spinDirections = droneVisual.propellerSpinDirections
         componentNodes = droneVisual.componentNodes
         undeformedComponentTransforms.removeAll(keepingCapacity: false)
+        // The old aircraft's nodes are gone; nothing here is still bent.
+        deformedComponentNodes.removeAll(keepingCapacity: false)
         spinAngles = Array(repeating: 0.0, count: propellerNodes.count)
         tiltPivotNodes = droneVisual.tiltPivotNodes
         visualBoundsCenter = droneVisual.visualBoundsCenter
@@ -5785,7 +6364,7 @@ final class DroneSceneController {
         // FPV camera, especially behind the wide lens, the props are in shot.
         visualRootNode.isHidden = false
         if camera.mode != .fpv {
-            droneNode.isHidden = canisterRoundSealed
+            droneNode.isHidden = localAircraftVisibility.isHidden
             droneNode.opacity = 1.0
         }
         applyPayloadFPVPresentation()
@@ -8157,7 +8736,7 @@ final class DroneSceneController {
     }
 
     private func restoreAfterFPVIfNeeded() {
-        droneNode.isHidden = canisterRoundSealed
+        droneNode.isHidden = localAircraftVisibility.isHidden
         droneNode.opacity = 1.0
         visualRootNode.isHidden = false
         fpvObstructionHidingActive = false
@@ -8216,11 +8795,10 @@ final class DroneSceneController {
     ) {
         let impactNode = SCNNode()
         impactNode.name = "payloadImpactVisual_\(releaseID.uuidString)"
-        impactNode.simdPosition = SIMD3<Float>(
-            position.x,
-            max(Float(groundNode.presentation.position.y) + 0.012, position.y),
-            position.z
-        )
+        // Sits on whatever was actually struck. Clamping to the ground plane was right only while
+        // every impact happened there; the impact point can now be a rooftop, or a quay below sea
+        // level on imported terrain, and the mark belongs at the surface either way.
+        impactNode.simdPosition = SIMD3<Float>(position.x, position.y + 0.012, position.z)
 
         let markColor = NSColor(calibratedWhite: 0.74, alpha: 0.52)
         let plumeColor = NSColor(calibratedWhite: 0.88, alpha: 0.20)
@@ -10593,6 +11171,43 @@ final class DroneSceneController {
     /// Select only the highest mapped nodes. Some builders map a parent and
     /// one of its children to the same legacy damage component; cloning both
     /// would duplicate the child geometry in the detached proxy.
+    /// The aircraft's own meshes that lie inside a detached subtree's volume.
+    ///
+    /// Restricted to the buckets the subtree claims, so a wing fragment can only take
+    /// wing geometry — the box is in the flight-root frame and a generous one, and
+    /// without that restriction a fuselage panel standing inside the same volume would
+    /// fly away with the wing. Membership is by the node's centre rather than by overlap:
+    /// a mesh is either mostly inside the broken-off section or it is not, and a wing
+    /// skin that straddles the fracture belongs to the half that holds most of it.
+    private func visualNodes(
+        within center: SIMD3<Float>,
+        halfExtents: SIMD3<Float>,
+        ownedBy legacyComponents: Set<DamageComponent>
+    ) -> [SCNNode] {
+        let limits = simd_max(halfExtents, SIMD3<Float>(repeating: 0.02))
+        var seen: Set<ObjectIdentifier> = []
+        var selected: [SCNNode] = []
+        for legacy in legacyComponents.sorted(by: { $0.rawValue < $1.rawValue }) {
+            for node in componentNodes[legacy] ?? [] {
+                guard node.geometry != nil,
+                      seen.insert(ObjectIdentifier(node)).inserted,
+                      !detachedVehicleVisualNodeIDs.contains(ObjectIdentifier(node)) else { continue }
+                let box = node.boundingBox
+                let localCenter = SIMD3<Float>(
+                    Float(box.min.x + box.max.x) * 0.5,
+                    Float(box.min.y + box.max.y) * 0.5,
+                    Float(box.min.z + box.max.z) * 0.5
+                )
+                let inFlightFrame = droneNode.simdConvertPosition(localCenter, from: node)
+                let offset = simd_abs(inFlightFrame - center)
+                if offset.x <= limits.x, offset.y <= limits.y, offset.z <= limits.z {
+                    selected.append(node)
+                }
+            }
+        }
+        return selected
+    }
+
     private func detachedVisualSourceNodes(
         for legacyComponents: Set<DamageComponent>
     ) -> [SCNNode] {

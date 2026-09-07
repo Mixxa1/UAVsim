@@ -58,7 +58,10 @@ enum DroneModelBuilder {
                 rawModel.rootNode.eulerAngles.y = CGFloat(Float.pi)
             }
         } else if let uavProfile = profile.resolvedUAVProfile {
-            rawModel = UAVVisualFactory.build(profile: uavProfile)
+            rawModel = UAVVisualFactory.build(
+                profile: uavProfile,
+                modelScale: authoredModelScale(runtime: profile, catalog: uavProfile)
+            )
             if profile.airframeClass == .multirotor {
                 // Keep new real-world rotorcraft aligned with the legacy chase-camera frame.
                 rawModel.rootNode.eulerAngles.y = CGFloat(Float.pi)
@@ -101,6 +104,23 @@ enum DroneModelBuilder {
             rawModel.rootNode.eulerAngles.y = CGFloat(Float.pi)
         }
         return wrapVisualModel(rawModel, for: profile)
+    }
+
+    /// How far the size the simulation flies is from the size the catalogue publishes.
+    ///
+    /// The authored USDZ models are built to catalogue dimensions, so this is 1.0 for
+    /// every aircraft in the catalogue as it stands. It exists because it did not use
+    /// to be: three aircraft carried a `runtimeSceneDimensionsOverride` that shrank a
+    /// twenty-four-metre aeroplane to three metres of runtime footprint, and an
+    /// authored model dropped in at true scale would have rendered seven times larger
+    /// than the thing being flown. Should such an override ever return, the visual
+    /// follows it instead of silently disagreeing with it.
+    private static func authoredModelScale(runtime: DroneModelProfile, catalog: UAVProfile) -> Float {
+        let catalogSpanMm = catalog.dimensions
+            .resolvedUnfoldedMillimeters(fallback: runtime.dimensionsUnfoldedMm).x
+        let runtimeSpanMm = runtime.dimensionsUnfoldedMm.x
+        guard catalogSpanMm > 1.0, runtimeSpanMm > 1.0 else { return 1.0 }
+        return runtimeSpanMm / catalogSpanMm
     }
 
     private static func buildMini(profile: DroneModelProfile) -> DroneVisualModel {
@@ -1169,7 +1189,22 @@ enum DroneModelBuilder {
     }
 
     private static func wrapVisualModel(_ rawModel: DroneVisualModel, for profile: DroneModelProfile) -> DroneVisualModel {
-        let bounds = measureStaticVisualBounds(of: rawModel.rootNode)
+        // ⚠️ Measured through a stand-in parent, not in the raw model's own space.
+        //
+        // `rawModel.rootNode` has just been yawed by π (the legacy chase-camera flip), and
+        // measuring inside its own frame is measuring *before* that rotation — the extents
+        // survive a half turn about Y, but the centre comes out with x and z negated. That
+        // centre is then published as `visualBoundsCenter` and consumed downstream in the
+        // flight-root frame: `VehicleComponentGraphBuilder` splits motors into quadrants by
+        // comparing each propeller's body-frame position against it, and the chase camera
+        // anchors on it. On a symmetric airframe the centre is near zero and the error is
+        // invisible; on one whose bounds are offset — the Matrice 350's are, by 0.1 m,
+        // because its blades are frozen at an azimuth — it moves the quadrant boundary.
+        let measuringParent = SCNNode()
+        measuringParent.addChildNode(rawModel.rootNode)
+        let bounds = measureStaticVisualBounds(of: measuringParent)
+        rawModel.rootNode.removeFromParentNode()
+
         let groundLift = max(0.0, -bounds.min.y)
         let adjustedMin = bounds.min + SIMD3<Float>(0.0, groundLift, 0.0)
         let adjustedMax = bounds.max + SIMD3<Float>(0.0, groundLift, 0.0)

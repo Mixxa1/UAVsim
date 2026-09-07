@@ -64,7 +64,12 @@ struct DigitalVideoRFMapper: Sendable {
         }
         let deliveryStress = max(healthFloor, packetStress, bitrateStress)
 
-        let detailLoss = pow(bitrateStress, 0.76)
+        // Detail is the last thing an adaptive encoder gives up, not the first. Everything inside
+        // the preset's headroom is absorbed by re-encoding and never reaches the screen — without
+        // this, a link running at 90% of nominal was already visibly soft.
+        let detailHeadroom = clamp(linkPreset.detailPreservingBitrateHeadroom)
+        let detailStress = clamp((bitrateStress - detailHeadroom) / max(0.05, 1 - detailHeadroom))
+        let detailLoss = pow(detailStress, 0.76)
         let detailScale = max(
             linkPreset.minimumDetailScale,
             1 - detailLoss * (1 - linkPreset.minimumDetailScale)
@@ -75,9 +80,11 @@ struct DigitalVideoRFMapper: Sendable {
                 * (linkPreset.nominalFrameRateFPS - linkPreset.minimumAdaptiveFrameRateFPS)
 
         // A healthy digital link is visually clean. Do not leak low-level RF noise into pixels.
+        // A healthy link with bitrate to spare is simply clean. The threshold follows the
+        // preset's own headroom, so a system built to hold a picture is allowed to hold one.
         if !state.isFrozen,
            state.health == .healthy,
-           bitrateRatio >= 0.94,
+           detailStress <= 0.001,
            rawPacketStress < artifactDeadZone {
             return .clean(frameRateFPS: linkPreset.nominalFrameRateFPS)
         }

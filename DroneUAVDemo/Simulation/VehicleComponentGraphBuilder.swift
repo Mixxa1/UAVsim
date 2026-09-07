@@ -191,7 +191,16 @@ enum VehicleComponentGraphBuilder {
             )
         }
 
-        let graph = VehicleComponentGraph(components: components)
+        // ⚠️ The catalogue's takeoff mass, not the live one and not the structural budget.
+        // A mount is designed for the heaviest the aircraft is ever allowed to be, and
+        // these three numbers are far apart: an RQ-7B's components add up to 77 kg, its
+        // `resolvedCurrentTotalMass` is 78, and it is a 170 kg aircraft. Sizing from the
+        // live mass left its propeller mount at 1,150 N against the 1,370 N of thrust its
+        // own engine makes standing still, so it still threw the propeller.
+        let graph = VehicleComponentGraph(
+            components: components,
+            designTakeoffMassKg: max(totalMass, profile.takeoffMassKg)
+        )
         let contactProfile = contactProfile(
             for: profile,
             geometry: geometry,
@@ -299,13 +308,24 @@ enum VehicleComponentGraphBuilder {
     }
 
     /// Quadrant naming in the physics body frame: nose toward -Z, +X right.
+    ///
+    /// `size` is the airframe's bounding extent, and it is here only to set a dead band
+    /// around the centreline. A part sitting *on* the axis — a tail pusher, a nose
+    /// tractor, the middle motors of a hex — has no side, and the yaw flip the visual
+    /// goes through leaves about half a micron of rounding on its x, so the comparison
+    /// was picking a side out of floating-point noise. The visual makes the same call
+    /// independently (`UAVModelAssetLibrary.corner`) and was landing on the other one,
+    /// which is how a propeller ended up in a bucket holding no geometry. One part per
+    /// thousand of span is three orders above that noise and two below any real motor
+    /// offset; inside it both sides resolve to the same answer, right and rear.
     private static func quadrantSlot(
         of position: SIMD3<Float>,
         center: SIMD3<Float>,
+        size: SIMD3<Float>,
         index: Int
     ) -> (slot: String, motor: DamageComponent, propeller: DamageComponent, arm: DamageComponent) {
-        let front = position.z < center.z
-        let left = position.x < center.x
+        let front = position.z - center.z < -max(1e-4, size.z * 1e-3)
+        let left = position.x - center.x < -max(1e-4, size.x * 1e-3)
         if index < 4 {
             switch (front, left) {
             case (true, true): return ("FL", .motorFL, .propellerFL, .armFL)
@@ -344,7 +364,7 @@ enum VehicleComponentGraphBuilder {
         var usedSlots: Set<String> = []
         var nextExtraSlot = 5
         for (index, prop) in geometry.propellers.enumerated() {
-            var quadrant = quadrantSlot(of: prop.center, center: center, index: index)
+            var quadrant = quadrantSlot(of: prop.center, center: center, size: size, index: index)
             if usedSlots.contains(quadrant.slot) {
                 while usedSlots.contains("M\(nextExtraSlot)") {
                     nextExtraSlot += 1
@@ -529,7 +549,7 @@ enum VehicleComponentGraphBuilder {
             let motorLegacy: DamageComponent?
             let propLegacy: DamageComponent?
             if isLiftRotor {
-                let quadrant = quadrantSlot(of: prop.center, center: center, index: index)
+                let quadrant = quadrantSlot(of: prop.center, center: center, size: size, index: index)
                 if usedSlots.contains(quadrant.slot) {
                     while usedSlots.contains("M\(nextExtraSlot)") {
                         nextExtraSlot += 1
@@ -549,8 +569,18 @@ enum VehicleComponentGraphBuilder {
                     suffix += 1
                 }
                 slot = cruiseSlot
-                motorLegacy = .motorFL
-                propLegacy = .propellerFL
+                // ⚠️ The legacy bucket comes from where the propeller actually is, not
+                // from a fixed corner. It used to be hard-coded to .motorFL/.propellerFL,
+                // and on a single-engine aeroplane whose propeller sits at the tail that
+                // named a bucket holding no geometry at all: when the component detached,
+                // `DroneSceneController` found nothing to clone and fell back to a bare
+                // box with the red debris material, so a part that was never on the
+                // aircraft dropped onto the runway while the real propeller stayed put.
+                // The slot name stays "cruise" — that is what the rotor model and the
+                // failure runtime key on.
+                let quadrant = quadrantSlot(of: prop.center, center: center, size: size, index: index)
+                motorLegacy = quadrant.motor
+                propLegacy = quadrant.propeller
             }
             usedSlots.insert(slot)
             rotorSlots.append((slot, prop))

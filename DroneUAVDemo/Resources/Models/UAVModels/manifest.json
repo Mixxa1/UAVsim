@@ -1,0 +1,5721 @@
+{
+  "schema_version": 3,
+  "date": "2026-09-07",
+  "generator": "Tools/UAVModelAssets/build_models.py",
+  "intended_use": "Exterior visualization in USD-aware viewers; not manufacturing, photogrammetry or flight-dynamics geometry.",
+  "models": [
+    {
+      "id": "dji-matrice-350-rtk",
+      "name": "DJI Matrice 350 RTK",
+      "kind": "real",
+      "file": "models/dji-matrice-350-rtk.usdz",
+      "source": "sources/dji-matrice-350-rtk.usda",
+      "preview": "previews/dji-matrice-350-rtk.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.32849599999999995,
+        -0.28612000000000004,
+        -0.6130357326569111
+      ],
+      "bounds_max_m": [
+        0.5278189168249307,
+        0.13875200000000001,
+        0.614036898780421
+      ],
+      "bounds_size_m": [
+        0.8563149168249307,
+        0.424872,
+        1.2270726314373321
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          810.0,
+          670.0,
+          430.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 184,
+      "triangles": 23012,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.284,
+            -0.030016,
+            0.346
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.267,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.284,
+            -0.030016,
+            0.346
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.267,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.284,
+            -0.030016,
+            -0.346
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.267,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.284,
+            -0.030016,
+            -0.346
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.267,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        }
+      ],
+      "geometry_sha256": "e4823af75a661b6d5fcf07d13efde95a5a45aa84cacab0b19e957195825d66b3",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 580476,
+      "sha256": "b5c46ca38d89a0ad28c9604c0de67db26775846ebe46e4479d4d3e502cd65b34",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-flycart-30",
+      "name": "DJI FlyCart 30",
+      "kind": "real",
+      "file": "models/dji-flycart-30.usdz",
+      "source": "sources/dji-flycart-30.usda",
+      "preview": "previews/dji-flycart-30.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.291907939362938,
+        -0.657544,
+        -1.3916920082457915
+      ],
+      "bounds_max_m": [
+        1.4728108813376024,
+        0.4501200000000001,
+        1.394269917271683
+      ],
+      "bounds_size_m": [
+        2.7647188207005406,
+        1.1076640000000002,
+        2.7859619255174746
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          2800.0,
+          3085.0,
+          947.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 184,
+      "triangles": 20392,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.845,
+            0.094908,
+            0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            -0.845,
+            -0.130515,
+            0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.845,
+            0.094908,
+            0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            0.845,
+            -0.130515,
+            0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.845,
+            0.094908,
+            -0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_07",
+          "center": [
+            -0.845,
+            -0.130515,
+            -0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.845,
+            0.094908,
+            -0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_08",
+          "center": [
+            0.845,
+            -0.130515,
+            -0.7041
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.6875,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "ae3d866ec8a1d3d07dbcc68cfc29c7e935a3cbd682dc6b8374d94f456d701f68",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_06",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_07",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_08"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 594101,
+      "sha256": "b637d89991e50b69eec1451144ef729e58621ec25202b26aa52027ad44f7d645",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-mavic-3t",
+      "name": "DJI Mavic 3T",
+      "kind": "real",
+      "file": "models/dji-mavic-3t.usdz",
+      "source": "sources/dji-mavic-3t.usda",
+      "preview": "previews/dji-mavic-3t.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.13782119206295923,
+        -0.0649,
+        -0.26641592579090795
+      ],
+      "bounds_max_m": [
+        0.22866835618789044,
+        0.04237825860794473,
+        0.26686213840775314
+      ],
+      "bounds_size_m": [
+        0.3664895482508497,
+        0.10727825860794474,
+        0.5332780641986611
+      ],
+      "catalogue_dimensions": {
+        "diagonalWheelbaseMillimeters": 380.1,
+        "unfoldedMillimeters": [
+          347.5,
+          283.0,
+          107.7
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 160,
+      "triangles": 17384,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.12,
+            0.0014784000000000012,
+            0.1474
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.12,
+            0.0014784000000000012,
+            0.1474
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.12,
+            0.028538400000000002,
+            -0.1474
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.12,
+            0.028538400000000002,
+            -0.1474
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "53eab4bb423d50428dfca2c01179cc04aafbe0e0d56d16d84c14f9d099bed97a",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 460494,
+      "sha256": "9ef4d6d9d2d09b87a39b9a5a81e5797acc570658297d9266db9e894190ad8595",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-matrice-4t",
+      "name": "DJI Matrice 4T",
+      "kind": "real",
+      "file": "models/dji-matrice-4t.usdz",
+      "source": "sources/dji-matrice-4t.usda",
+      "preview": "previews/dji-matrice-4t.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.196952,
+        -0.07908,
+        -0.2520165949417864
+      ],
+      "bounds_max_m": [
+        0.2912342535067094,
+        0.076,
+        0.25248155598791083
+      ],
+      "bounds_size_m": [
+        0.4881862535067094,
+        0.15508,
+        0.5044981509296973
+      ],
+      "catalogue_dimensions": {
+        "diagonalWheelbaseMillimeters": 438.8,
+        "unfoldedMillimeters": [
+          307.0,
+          387.5,
+          149.5
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 167,
+      "triangles": 19636,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.178,
+            0.001792000000000002,
+            0.128
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.124,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.178,
+            0.001792000000000002,
+            0.128
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.124,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.178,
+            0.034592,
+            -0.128
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.124,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.178,
+            0.034592,
+            -0.128
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.124,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "e94a32915090c9b3ed7366b0244144a7feb9fa06e6f2bf539003ba153d702841",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 487470,
+      "sha256": "83ceb4fe3152c477fd011a2234c6fd30b56e7398a1391c81ddfd9e0935df5f6a",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-matrice-30t",
+      "name": "DJI Matrice 30T",
+      "kind": "real",
+      "file": "models/dji-matrice-30t.usdz",
+      "source": "sources/dji-matrice-30t.usda",
+      "preview": "previews/dji-matrice-30t.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.301715,
+        -0.19080000000000003,
+        -0.38502342028074693
+      ],
+      "bounds_max_m": [
+        0.4198064061586625,
+        0.11099999999999999,
+        0.3856796153055193
+      ],
+      "bounds_size_m": [
+        0.7215214061586626,
+        0.3018,
+        0.7707030355862663
+      ],
+      "catalogue_dimensions": {
+        "diagonalWheelbaseMillimeters": 668.0,
+        "unfoldedMillimeters": [
+          470.0,
+          585.0,
+          215.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 173,
+      "triangles": 21972,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.26,
+            -0.02814,
+            0.21
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.175,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.26,
+            -0.02814,
+            0.21
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.175,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.26,
+            -0.02814,
+            -0.21
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.175,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.26,
+            -0.02814,
+            -0.21
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.175,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        }
+      ],
+      "geometry_sha256": "e3b3aa4c95edbdada8d973b493e48580fff595e54fb11b5c19829aa0ea9b82c5",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 509723,
+      "sha256": "6908b4850f97a5a106c3a3cd634b01bc24a9d91b5d527490bcd8488ecee68eb8",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-matrice-400",
+      "name": "DJI Matrice 400",
+      "kind": "real",
+      "file": "models/dji-matrice-400.usdz",
+      "source": "sources/dji-matrice-400.usda",
+      "preview": "previews/dji-matrice-400.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.38262,
+        -0.30713999999999997,
+        -0.725040149052709
+      ],
+      "bounds_max_m": [
+        0.6009538391291356,
+        0.17344,
+        0.7261650548094617
+      ],
+      "bounds_size_m": [
+        0.9835738391291355,
+        0.48058,
+        1.4512052038621706
+      ],
+      "catalogue_dimensions": {
+        "diagonalWheelbaseMillimeters": 1070.0,
+        "unfoldedMillimeters": [
+          980.0,
+          760.0,
+          480.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 188,
+      "triangles": 24216,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.327,
+            -0.037520000000000005,
+            0.425
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.3,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.327,
+            -0.037520000000000005,
+            0.425
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.3,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.327,
+            -0.037520000000000005,
+            -0.425
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.3,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.327,
+            -0.037520000000000005,
+            -0.425
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.3,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1
+        }
+      ],
+      "geometry_sha256": "185f8d1256f7c04b9c4780f9ebb7e393fb11559aa892713842e2db9da7a70ba8",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 595496,
+      "sha256": "ea72c108e9d03f506b9b0989612e64372e41fd271faa3a8592100447f53c4dc2",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fotokite-sigma",
+      "name": "Fotokite Sigma",
+      "kind": "real",
+      "file": "models/fotokite-sigma.usdz",
+      "source": "sources/fotokite-sigma.usda",
+      "preview": "previews/fotokite-sigma.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.2834884597822839,
+        -0.09,
+        -0.29001003726317726
+      ],
+      "bounds_max_m": [
+        0.2834884597822839,
+        0.052,
+        0.29001003726317726
+      ],
+      "bounds_size_m": [
+        0.5669769195645677,
+        0.142,
+        0.5800200745263545
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          520.0,
+          520.0,
+          180.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 157,
+      "triangles": 13124,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.215,
+            0.011439999999999999,
+            -0.215
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.075,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.215,
+            0.011439999999999999,
+            -0.215
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.075,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            0.215,
+            0.011439999999999999,
+            0.215
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.075,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            -0.215,
+            0.011439999999999999,
+            0.215
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.075,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            0.0,
+            0.011439999999999999,
+            -0.215
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.075,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            0.0,
+            0.011439999999999999,
+            0.215
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.075,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "ec85f7fe1b20b97b8135ea9a453a7271796e278fe7b3f271cb50ff296ab32acc",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_06"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 369975,
+      "sha256": "e078c20a885b4d2d9bb3952c7e7e0bee305117be8fc2ed1a51c4c4b2c43e3a4c",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "everdrone-first-on-scene",
+      "name": "Everdrone First on Scene",
+      "kind": "real",
+      "file": "models/everdrone-first-on-scene.usdz",
+      "source": "sources/everdrone-first-on-scene.usda",
+      "preview": "previews/everdrone-first-on-scene.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.7045293217715525,
+        -0.32935000000000003,
+        -0.6647895847922178
+      ],
+      "bounds_max_m": [
+        0.55678,
+        0.057,
+        0.6647895847922181
+      ],
+      "bounds_size_m": [
+        1.2613093217715525,
+        0.38635,
+        1.329579169584436
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 187,
+      "triangles": 19652,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            0.53,
+            0.022879999999999998,
+            0.0
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.205,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.26500000000000007,
+            0.022879999999999998,
+            0.45899346400575247
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.205,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.2649999999999999,
+            0.022879999999999998,
+            0.4589934640057525
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.205,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            -0.53,
+            0.022879999999999998,
+            6.490628035480972e-17
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.205,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            -0.26500000000000024,
+            0.022879999999999998,
+            -0.45899346400575236
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.205,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            0.26500000000000007,
+            0.022879999999999998,
+            -0.45899346400575247
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.205,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "daece410bd7d3e2fa42b6de675817d7213f2d6005bdb5af14b7577c352768e1e",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_06"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 501995,
+      "sha256": "9e3b4bd4e1b4b76248ac83c7a758286eaaa87d414f10a1c98ca3eea6f7076ea0",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "zipline-platform-1",
+      "name": "Zipline Platform 1",
+      "kind": "real",
+      "file": "models/zipline-platform-1.usdz",
+      "source": "sources/zipline-platform-1.usda",
+      "preview": "previews/zipline-platform-1.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.675,
+        -0.08564154987106831,
+        -1.079294593219025
+      ],
+      "bounds_max_m": [
+        1.675,
+        0.3469345272742572,
+        0.720705406780975
+      ],
+      "bounds_size_m": [
+        3.35,
+        0.43257607714532553,
+        1.8
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 3350.0,
+        "fuselageLengthMillimeters": 1800.0,
+        "heightMillimeters": 420.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 42,
+      "triangles": 9564,
+      "rotors": [
+        {
+          "name": "Pusher_1",
+          "center": [
+            0.0,
+            0.25638031772843123,
+            -0.5777083022609404
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.2352891421539434,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Pusher_2",
+          "center": [
+            0.0,
+            0.25638031772843123,
+            -0.637767086159355
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.2352891421539434,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "b4dc499b7a3727dfd24457aed2ef153d8c7fba328ee4bf9a9b05cd9cd6bf8ea7",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher_1",
+        "/Aircraft/Geometry/Pusher_2"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 326099,
+      "sha256": "942e3458af9b9e5212f07f990b1b0ebb4071a02a24d3cb96c58bd8b5c74913d0",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "wingcopter-198",
+      "name": "Wingcopter 198",
+      "kind": "real",
+      "file": "models/wingcopter-198.usdz",
+      "source": "sources/wingcopter-198.usda",
+      "preview": "previews/wingcopter-198.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.99,
+        -0.39421378818625574,
+        -0.8338398705722567
+      ],
+      "bounds_max_m": [
+        0.99,
+        0.25578621181374434,
+        0.6853544544717589
+      ],
+      "bounds_size_m": [
+        1.98,
+        0.6500000000000001,
+        1.5191943250440156
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 1980.0,
+        "fuselageLengthMillimeters": 1520.0,
+        "heightMillimeters": 650.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 217,
+      "triangles": 28028,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.3761232176744526,
+            -0.04868030494158943,
+            -0.5632076318777525
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.22149304048693402,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1,
+          "pivot": "VTOLTilt_Motor_01"
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            -0.7334402744651826,
+            -0.02774968463774475,
+            -0.329147317331154
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.14766202699128933,
+          "direction": 1,
+          "preview_rpm": 120,
+          "motor_side": 1,
+          "preview_cruise_spin": false
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            -0.3761232176744526,
+            0.04868030494158943,
+            0.5632076318777525
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.22149304048693402,
+          "direction": -1,
+          "preview_rpm": 120,
+          "pivot": "VTOLTilt_Motor_02"
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            -0.7334402744651826,
+            0.038444578511490156,
+            0.1755452359099488
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.14766202699128933,
+          "direction": -1,
+          "preview_rpm": 120,
+          "preview_cruise_spin": false
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            0.3761232176744526,
+            -0.04868030494158943,
+            -0.5632076318777525
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.22149304048693402,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1,
+          "pivot": "VTOLTilt_Motor_03"
+        },
+        {
+          "name": "Rotor_07",
+          "center": [
+            0.7334402744651826,
+            -0.02774968463774475,
+            -0.329147317331154
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.14766202699128933,
+          "direction": -1,
+          "preview_rpm": 120,
+          "motor_side": 1,
+          "preview_cruise_spin": false
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.3761232176744526,
+            0.04868030494158943,
+            0.5632076318777525
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.22149304048693402,
+          "direction": 1,
+          "preview_rpm": 120,
+          "pivot": "VTOLTilt_Motor_04"
+        },
+        {
+          "name": "Rotor_08",
+          "center": [
+            0.7334402744651826,
+            0.038444578511490156,
+            0.1755452359099488
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.14766202699128933,
+          "direction": 1,
+          "preview_rpm": 120,
+          "preview_cruise_spin": false
+        }
+      ],
+      "geometry_sha256": "bf470aa6e07f9a4d30b9a53e1e0fb9b7c57f54ea650e5017b6a26f366a18d225",
+      "transition": {
+        "mechanism": "tilt_rotor",
+        "duration_seconds": 12,
+        "pivots": [
+          {
+            "name": "VTOLTilt_Motor_01",
+            "center": [
+              -0.3761232176744526,
+              -0.01425985849832721,
+              -0.5632076318777525
+            ],
+            "hover_degrees": 0,
+            "cruise_degrees": -90,
+            "rotors": [
+              "Rotor_01"
+            ],
+            "parts": [
+              "TiltMotorCarrier_01",
+              "MotorCase_01",
+              "MotorBell_01",
+              "MotorCoolingGroove_01",
+              "MotorCoolingGroove_02",
+              "MotorCoolingGroove_03",
+              "MotorCoolingGroove_04",
+              "MotorCoolingGroove_05",
+              "MotorCoolingGroove_06",
+              "MotorCoolingGroove_07",
+              "MotorCoolingGroove_08",
+              "MotorCoolingGroove_09",
+              "MotorCoolingGroove_10",
+              "MotorCoolingGroove_11",
+              "MotorCoolingGroove_12"
+            ]
+          },
+          {
+            "name": "VTOLTilt_Motor_02",
+            "center": [
+              -0.3761232176744526,
+              -0.01425985849832721,
+              0.5632076318777525
+            ],
+            "hover_degrees": 0,
+            "cruise_degrees": 90,
+            "rotors": [
+              "Rotor_02"
+            ],
+            "parts": [
+              "TiltMotorCarrier_02",
+              "MotorCase_03",
+              "MotorBell_03",
+              "MotorCoolingGroove_25",
+              "MotorCoolingGroove_26",
+              "MotorCoolingGroove_27",
+              "MotorCoolingGroove_28",
+              "MotorCoolingGroove_29",
+              "MotorCoolingGroove_30",
+              "MotorCoolingGroove_31",
+              "MotorCoolingGroove_32",
+              "MotorCoolingGroove_33",
+              "MotorCoolingGroove_34",
+              "MotorCoolingGroove_35",
+              "MotorCoolingGroove_36"
+            ]
+          },
+          {
+            "name": "VTOLTilt_Motor_03",
+            "center": [
+              0.3761232176744526,
+              -0.01425985849832721,
+              -0.5632076318777525
+            ],
+            "hover_degrees": 0,
+            "cruise_degrees": -90,
+            "rotors": [
+              "Rotor_03"
+            ],
+            "parts": [
+              "TiltMotorCarrier_03",
+              "MotorCase_05",
+              "MotorBell_05",
+              "MotorCoolingGroove_49",
+              "MotorCoolingGroove_50",
+              "MotorCoolingGroove_51",
+              "MotorCoolingGroove_52",
+              "MotorCoolingGroove_53",
+              "MotorCoolingGroove_54",
+              "MotorCoolingGroove_55",
+              "MotorCoolingGroove_56",
+              "MotorCoolingGroove_57",
+              "MotorCoolingGroove_58",
+              "MotorCoolingGroove_59",
+              "MotorCoolingGroove_60"
+            ]
+          },
+          {
+            "name": "VTOLTilt_Motor_04",
+            "center": [
+              0.3761232176744526,
+              -0.01425985849832721,
+              0.5632076318777525
+            ],
+            "hover_degrees": 0,
+            "cruise_degrees": 90,
+            "rotors": [
+              "Rotor_04"
+            ],
+            "parts": [
+              "TiltMotorCarrier_04",
+              "MotorCase_07",
+              "MotorBell_07",
+              "MotorCoolingGroove_73",
+              "MotorCoolingGroove_74",
+              "MotorCoolingGroove_75",
+              "MotorCoolingGroove_76",
+              "MotorCoolingGroove_77",
+              "MotorCoolingGroove_78",
+              "MotorCoolingGroove_79",
+              "MotorCoolingGroove_80",
+              "MotorCoolingGroove_81",
+              "MotorCoolingGroove_82",
+              "MotorCoolingGroove_83",
+              "MotorCoolingGroove_84"
+            ]
+          }
+        ]
+      },
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 12,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 721,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/VTOLTilt_Motor_01/Rotor_01",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/VTOLTilt_Motor_02/Rotor_02",
+        "/Aircraft/Geometry/Rotor_06",
+        "/Aircraft/Geometry/VTOLTilt_Motor_03/Rotor_03",
+        "/Aircraft/Geometry/Rotor_07",
+        "/Aircraft/Geometry/VTOLTilt_Motor_04/Rotor_04",
+        "/Aircraft/Geometry/Rotor_08"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 633076,
+      "sha256": "1c236968aeda12ca311e5dd3bc6b0c3f03a52029a7efc4093e20f7c8f9247a44",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "matternet-m2",
+      "name": "Matternet M2",
+      "kind": "real",
+      "file": "models/matternet-m2.usdz",
+      "source": "sources/matternet-m2.usda",
+      "preview": "previews/matternet-m2.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.34,
+        -0.225,
+        -0.43002275112986854
+      ],
+      "bounds_max_m": [
+        0.43524050883984355,
+        0.13,
+        0.4306601977253617
+      ],
+      "bounds_size_m": [
+        0.7752405088398435,
+        0.355,
+        0.8606829488552302
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          720.0,
+          720.0,
+          320.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 104,
+      "triangles": 15124,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.28,
+            0.10200000000000001,
+            0.26
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.17,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.28,
+            0.10200000000000001,
+            0.26
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.17,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.28,
+            0.10200000000000001,
+            -0.26
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.17,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.28,
+            0.10200000000000001,
+            -0.26
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.17,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "72f7b6c50d8a3d9f910736a3e8efabf41fbdeefc0401b9157692e44fd9b0c78f",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 219902,
+      "sha256": "da528a7cac1f757f23896b5eef7d9493e1e5e647337251e9dc5da30381a15ccc",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "skydio-x10",
+      "name": "Skydio X10",
+      "kind": "real",
+      "file": "models/skydio-x10.usdz",
+      "source": "sources/skydio-x10.usda",
+      "preview": "previews/skydio-x10.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.3101474358525916,
+        -0.09220999999999999,
+        -0.3950826115735394
+      ],
+      "bounds_max_m": [
+        0.31327922760811105,
+        0.05202227993338268,
+        0.39552427466425777
+      ],
+      "bounds_size_m": [
+        0.6234266634607026,
+        0.14423227993338267,
+        0.7906068862377972
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          351.0,
+          351.0,
+          160.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 166,
+      "triangles": 17808,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.19,
+            0.0018816000000000024,
+            0.26
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.135,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.19,
+            0.0018816000000000024,
+            0.26
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.135,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.19,
+            0.0363216,
+            -0.26
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.135,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.19,
+            0.0363216,
+            -0.26
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.135,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "3bb874a89445cc5c3f25351fedb779b60ee3aa65b1104a88a8e8c53c244671af",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 495186,
+      "sha256": "eb7f01d1a152f68bbb6e70a6a9c397c52b5033efa4acf929580cafbf6ab9b2a0",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-matrice-4td-dock-3",
+      "name": "DJI Matrice 4TD + Dock 3",
+      "kind": "real",
+      "file": "models/dji-matrice-4td-dock-3.usdz",
+      "source": "sources/dji-matrice-4td-dock-3.usda",
+      "preview": "previews/dji-matrice-4td-dock-3.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.2105852,
+        -0.10486612598207813,
+        -0.30801927154530034
+      ],
+      "bounds_max_m": [
+        0.3164978427819851,
+        0.1026,
+        0.3085592263085416
+      ],
+      "bounds_size_m": [
+        0.5270830427819851,
+        0.20746612598207814,
+        0.616578497853842
+      ],
+      "catalogue_dimensions": {
+        "diagonalWheelbaseMillimeters": 498.5,
+        "unfoldedMillimeters": [
+          377.7,
+          416.2,
+          212.5
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 167,
+      "triangles": 19636,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.185,
+            0.0024192000000000033,
+            0.164
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.144,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.185,
+            0.0024192000000000033,
+            0.164
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.144,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.185,
+            0.0466992,
+            -0.164
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.144,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.185,
+            0.0466992,
+            -0.164
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.144,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "1ff43aeef1b50b6d63d418efa799ebfccd5baf19f0c52318b699e4fe7ef3bf15",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 488465,
+      "sha256": "4e9678708202b83000fbc4ae5b8730229cc2051e60a1fd3733a2974a04ea19e4",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "brinc-lemur-2",
+      "name": "BRINC Lemur 2",
+      "kind": "real",
+      "file": "models/brinc-lemur-2.usdz",
+      "source": "sources/brinc-lemur-2.usda",
+      "preview": "previews/brinc-lemur-2.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.2025,
+        -0.04236864406779661,
+        -0.166
+      ],
+      "bounds_max_m": [
+        0.2025,
+        0.0566313559322034,
+        0.166
+      ],
+      "bounds_size_m": [
+        0.405,
+        0.099,
+        0.332
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          406.4,
+          330.2,
+          101.6
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 204,
+      "triangles": 21420,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.12,
+            0.009228813559322034,
+            0.08172307692307693
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.07530230769230768,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.12,
+            0.009228813559322034,
+            0.08172307692307693
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.07530230769230768,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.12,
+            0.009228813559322034,
+            -0.08172307692307693
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.07530230769230768,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.12,
+            0.009228813559322034,
+            -0.08172307692307693
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.07530230769230768,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "e04e4e6cddf32a352a95f9e22a447c0e3e38c6681ee0420038f4061bc7119267",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 514488,
+      "sha256": "43aa11a8d7e2e38d61a4ccd9295a4fda779d493740531cb929c1f5d3c92f371d",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-mavic-4-pro",
+      "name": "DJI Mavic 4 Pro",
+      "kind": "real",
+      "file": "models/dji-mavic-4-pro.usdz",
+      "source": "sources/dji-mavic-4-pro.usda",
+      "preview": "previews/dji-mavic-4-pro.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.1754782,
+        -0.08351999999999998,
+        -0.265016327281435
+      ],
+      "bounds_max_m": [
+        0.2684078945791818,
+        0.04791596260646434,
+        0.2654737889558478
+      ],
+      "bounds_size_m": [
+        0.4438860945791818,
+        0.13143596260646434,
+        0.5304901162372828
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 147,
+      "triangles": 15312,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.157,
+            0.0017472000000000026,
+            0.143
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.122,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.157,
+            0.0017472000000000026,
+            0.143
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.122,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.157,
+            0.0337272,
+            -0.143
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.122,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.157,
+            0.0337272,
+            -0.143
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.122,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "8c29968eb6468312dba12a37f9c2a66354c3a29998fc44fc5e35edf107e5bfb2",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 436495,
+      "sha256": "4e81e03210bfa07ebefba26ef266032206b6e9b24bad40dc7577807ebdaf3f60",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-neo",
+      "name": "DJI Neo",
+      "kind": "real",
+      "file": "models/dji-neo.usdz",
+      "source": "sources/dji-neo.usda",
+      "preview": "previews/dji-neo.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.0785,
+        -0.02786740331491713,
+        -0.06472387080652214
+      ],
+      "bounds_max_m": [
+        0.0785,
+        0.020632596685082875,
+        0.06527612919347786
+      ],
+      "bounds_size_m": [
+        0.157,
+        0.0485,
+        0.13
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          130.0,
+          157.0,
+          48.5
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 192,
+      "triangles": 33308,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.047628653113087685,
+            0.0012861878453038678,
+            0.03248578746798276
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.025560522441381076,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.047628653113087685,
+            0.0012861878453038678,
+            0.03248578746798276
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.025560522441381076,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.047628653113087685,
+            0.0012861878453038678,
+            -0.03248578746798276
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.025560522441381076,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.047628653113087685,
+            0.0012861878453038678,
+            -0.03248578746798276
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.025560522441381076,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "1bdc64186503dcd57206c82cb8c482a552d664ceb0e14114fb7507dc9aa84551",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 405245,
+      "sha256": "e36567843cf008d96c2f514548e55d5579a5f0904a783caac309e2d822b178b9",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "dji-phantom-3-standard",
+      "name": "DJI Phantom 3 Standard",
+      "kind": "real",
+      "file": "models/dji-phantom-3-standard.usdz",
+      "source": "sources/dji-phantom-3-standard.usda",
+      "preview": "previews/dji-phantom-3-standard.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.14182119206295923,
+        -0.129,
+        -0.24301592579090792
+      ],
+      "bounds_max_m": [
+        0.23266835618789045,
+        0.05379985860794472,
+        0.24346213840775316
+      ],
+      "bounds_size_m": [
+        0.3744895482508497,
+        0.18279985860794473,
+        0.4864780641986611
+      ],
+      "catalogue_dimensions": {
+        "diagonalWheelbaseMillimeters": 350.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 164,
+      "triangles": 20172,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.124,
+            0.03996,
+            0.124
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.124,
+            0.03996,
+            0.124
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.124,
+            0.03996,
+            -0.124
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.124,
+            0.03996,
+            -0.124
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.119,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "8e497761bb08b7589c89f2f9894aa7a512f006bb6843f6f61eea4a4f925d16b9",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 300662,
+      "sha256": "fbd913a299cdc54a3a8ae5b525c49ef4342f97f32130d0a407de2cd479325544",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fpv-tiny-whoop-65",
+      "name": "Tiny Whoop 65",
+      "kind": "class",
+      "file": "models/fpv-tiny-whoop-65.usdz",
+      "source": "sources/fpv-tiny-whoop-65.usda",
+      "preview": "previews/fpv-tiny-whoop-65.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.0408969703885628,
+        -0.006664,
+        -0.0408969703885628
+      ],
+      "bounds_max_m": [
+        0.0408969703885628,
+        0.02156,
+        0.0408969703885628
+      ],
+      "bounds_size_m": [
+        0.0817939407771256,
+        0.028224,
+        0.0817939407771256
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          98.0,
+          98.0,
+          42.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 142,
+      "triangles": 17308,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.022980970388562793,
+            0.00448448,
+            0.022980970388562793
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0155,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.022980970388562793,
+            0.00448448,
+            0.022980970388562793
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0155,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.022980970388562793,
+            0.00448448,
+            -0.022980970388562793
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0155,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.022980970388562793,
+            0.00448448,
+            -0.022980970388562793
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0155,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "a7aa3aeb9dece9378965dbd94f060574263d99c88901fc856ece3e58b453c143",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 515433,
+      "sha256": "8838424b94fcf3927c85123b64f95900e360d21f8a5bfe73d9c1922bd0b5acc1",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fpv-micro-racer-25",
+      "name": "Micro Racer 2.5\"",
+      "kind": "class",
+      "file": "models/fpv-micro-racer-25.usdz",
+      "source": "sources/fpv-micro-racer-25.usda",
+      "preview": "previews/fpv-micro-racer-25.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.07320689695051691,
+        -0.004523999999999999,
+        -0.07671942901822129
+      ],
+      "bounds_max_m": [
+        0.07394344797450018,
+        0.0377,
+        0.07682330163400136
+      ],
+      "bounds_size_m": [
+        0.1471503449250171,
+        0.042224,
+        0.15354273065222265
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          145.0,
+          145.0,
+          46.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 135,
+      "triangles": 14228,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.04495,
+            0.006635199999999999,
+            0.04495
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.03175,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.04495,
+            0.006635199999999999,
+            0.04495
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.03175,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.04495,
+            0.006635199999999999,
+            -0.04495
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.03175,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.04495,
+            0.006635199999999999,
+            -0.04495
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.03175,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "1e7742ab64cc0becbceffe68b9559638e8e977f3c056bbb0df9fc96e7f0dca09",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 490469,
+      "sha256": "69c8fe9fe5a2950c481ffd6ec556be0cb1241347db423cc7b13718e437062b18",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fpv-racer-5",
+      "name": "Racer 5-inch",
+      "kind": "class",
+      "file": "models/fpv-racer-5.usdz",
+      "source": "sources/fpv-racer-5.usda",
+      "preview": "previews/fpv-racer-5.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.13401379390103382,
+        -0.0078,
+        -0.14103885803644262
+      ],
+      "bounds_max_m": [
+        0.13548689594900037,
+        0.065,
+        0.1412466032680027
+      ],
+      "bounds_size_m": [
+        0.26950068985003417,
+        0.0728,
+        0.2822854613044453
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          250.0,
+          250.0,
+          62.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 135,
+      "triangles": 14228,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.0775,
+            0.011439999999999999,
+            0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.0775,
+            0.011439999999999999,
+            0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.0775,
+            0.011439999999999999,
+            -0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.0775,
+            0.011439999999999999,
+            -0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "63cd27d6518a592c6e5e1cf127ba953e23f74181f4d329b62304d21c10a5bcbb",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 490352,
+      "sha256": "580d01acdcc7275a3b2e39bfa8bd641fd193fc36377b41b1d39be8001d92cfac",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fpv-spec-5",
+      "name": "Spec 5-inch",
+      "kind": "class",
+      "file": "models/fpv-spec-5.usdz",
+      "source": "sources/fpv-spec-5.usda",
+      "preview": "previews/fpv-spec-5.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.13401379390103382,
+        -0.0078,
+        -0.14103885803644262
+      ],
+      "bounds_max_m": [
+        0.13548689594900037,
+        0.065,
+        0.1412466032680027
+      ],
+      "bounds_size_m": [
+        0.26950068985003417,
+        0.0728,
+        0.2822854613044453
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          250.0,
+          250.0,
+          62.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 135,
+      "triangles": 14228,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.0775,
+            0.011439999999999999,
+            0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.0775,
+            0.011439999999999999,
+            0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.0775,
+            0.011439999999999999,
+            -0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.0775,
+            0.011439999999999999,
+            -0.0775
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0635,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "ba5586fbec578d049b803edeb46d182069e87907a06c330072d028b7fbc2a1c6",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 490478,
+      "sha256": "dcfe31e9062f534c909bab47fc0ae598f3d40d81b7244fb08525cc1c9f88ed19",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fpv-long-range-7",
+      "name": "Long Range 7-inch",
+      "kind": "class",
+      "file": "models/fpv-long-range-7.usdz",
+      "source": "sources/fpv-long-range-7.usda",
+      "preview": "previews/fpv-long-range-7.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.12361040000000001,
+        -0.010608000000000001,
+        -0.21012189750261945
+      ],
+      "bounds_max_m": [
+        0.18658165432860055,
+        0.0884,
+        0.21045524457520381
+      ],
+      "bounds_size_m": [
+        0.31019205432860053,
+        0.09900800000000001,
+        0.42057714207782326
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          340.0,
+          340.0,
+          78.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 136,
+      "triangles": 14336,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.10540000000000001,
+            0.015558400000000002,
+            0.12121
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.0889,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.10540000000000001,
+            0.015558400000000002,
+            0.12121
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.0889,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.10540000000000001,
+            0.015558400000000002,
+            -0.12121
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.0889,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.10540000000000001,
+            0.015558400000000002,
+            -0.12121
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.0889,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "88f49a235117c6ef20682a3901ec401c194bd8d7c6032f69e1155dbc524b62e2",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 475236,
+      "sha256": "719a08ac403d3ca007a6f35e4882ec2a2aca161c3428aff607e2dc4715be64d3",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fpv-open-class",
+      "name": "Open Class 10-inch",
+      "kind": "class",
+      "file": "models/fpv-open-class.usdz",
+      "source": "sources/fpv-open-class.usda",
+      "preview": "previews/fpv-open-class.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.2618275878020676,
+        -0.014976,
+        -0.2758777160728852
+      ],
+      "bounds_max_m": [
+        0.26477379189800077,
+        0.1248,
+        0.2762932065360054
+      ],
+      "bounds_size_m": [
+        0.5266013797000684,
+        0.13977599999999998,
+        0.5521709226088907
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          480.0,
+          480.0,
+          115.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 140,
+      "triangles": 15312,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.1488,
+            0.0219648,
+            0.1488
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.127,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.1488,
+            0.0219648,
+            0.1488
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.127,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.1488,
+            0.0219648,
+            -0.1488
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.127,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.1488,
+            0.0219648,
+            -0.1488
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.127,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "67533e28dd6a046c1b349ff65631d4b916a0bf9b9b728d7726f8e0938fde6338",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 511048,
+      "sha256": "32e185c77d88b202981d17977b339381adbcf1a0926140f2a404689bb7ae8367",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "fpv-cinewhoop-3",
+      "name": "Cinewhoop 3-inch",
+      "kind": "class",
+      "file": "models/fpv-cinewhoop-3.usdz",
+      "source": "sources/fpv-cinewhoop-3.usda",
+      "preview": "previews/fpv-cinewhoop-3.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.09906300000000001,
+        -0.006084,
+        -0.09906300000000001
+      ],
+      "bounds_max_m": [
+        0.09906300000000001,
+        0.06981,
+        0.09906300000000001
+      ],
+      "bounds_size_m": [
+        0.19812600000000002,
+        0.075894,
+        0.19812600000000002
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          195.0,
+          195.0,
+          72.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 156,
+      "triangles": 20464,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.055575,
+            0.0089232,
+            0.055575
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0381,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.055575,
+            0.0089232,
+            0.055575
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0381,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.055575,
+            0.0089232,
+            -0.055575
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0381,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.055575,
+            0.0089232,
+            -0.055575
+          ],
+          "axis": "y",
+          "blades": 3,
+          "radius_m": 0.0381,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "5b12023364d040ab1b9e02ad9aec2f120968a9aa8f04ababde3a7fa5c862a9a0",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 564732,
+      "sha256": "366291fb3a5ea2c186451bd9fe0608d37eeab009bdaae906054587f2458976ed",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "freefly-alta-x",
+      "name": "Freefly Alta X",
+      "kind": "real",
+      "file": "models/freefly-alta-x.usdz",
+      "source": "sources/freefly-alta-x.usda",
+      "preview": "previews/freefly-alta-x.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.780748567011596,
+        -0.48816,
+        -1.137056074843617
+      ],
+      "bounds_max_m": [
+        1.100622195317026,
+        0.15785000000000002,
+        1.1386271932172147
+      ],
+      "bounds_size_m": [
+        1.881370762328622,
+        0.64601,
+        2.2756832680608317
+      ],
+      "catalogue_dimensions": {
+        "unfoldedMillimeters": [
+          2273.0,
+          2273.0,
+          387.0
+        ]
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 116,
+      "triangles": 10324,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.718,
+            0.04026400000000001,
+            0.718
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.419,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.718,
+            0.04026400000000001,
+            0.718
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.419,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.718,
+            0.04026400000000001,
+            -0.718
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.419,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.718,
+            0.04026400000000001,
+            -0.718
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.419,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "70e00cd9cd1af05895173127c04db4886f1f86a09d9e1996d31a2032ad13f87e",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 436592,
+      "sha256": "d4a92776918cf6348dc1c8cd04701781afba820478f704fd9e35eba8fc98e088",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "griff-30",
+      "name": "Griff 30",
+      "kind": "real",
+      "file": "models/griff-30.usdz",
+      "source": "sources/griff-30.usda",
+      "preview": "previews/griff-30.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.9303862207528643,
+        -0.46747500000000003,
+        -1.1700629001825775
+      ],
+      "bounds_max_m": [
+        1.2891943479689791,
+        0.22836,
+        1.1718252525348232
+      ],
+      "bounds_size_m": [
+        2.2195805687218435,
+        0.695835,
+        2.3418881527174005
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 144,
+      "triangles": 16904,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.86,
+            0.06614800000000001,
+            0.7
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.47,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.86,
+            0.06614800000000001,
+            0.7
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.47,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.86,
+            0.06614800000000001,
+            -0.7
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.47,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.86,
+            0.06614800000000001,
+            -0.7
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.47,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "714e0488d2bd79a1eddd5ab707b83cc18e521011eae7ff4a22bc323347aec1d5",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 455975,
+      "sha256": "64ca9e228c59dd6d5d94166500f694361f7bb57cdcd77fe48812c3fb22c0bfb8",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "griff-60",
+      "name": "Griff 60",
+      "kind": "real",
+      "file": "models/griff-60.usdz",
+      "source": "sources/griff-60.usda",
+      "preview": "previews/griff-60.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.321025872372344,
+        -0.5691,
+        -1.3600722682948763
+      ],
+      "bounds_max_m": [
+        1.4631169104324442,
+        0.27744,
+        1.3620970986570309
+      ],
+      "bounds_size_m": [
+        2.784142782804788,
+        0.8465400000000001,
+        2.722169366951907
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 172,
+      "triangles": 19928,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            -0.97,
+            0.08052800000000002,
+            0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            -0.97,
+            -0.11074000000000002,
+            0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.97,
+            0.08052800000000002,
+            0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            0.97,
+            -0.11074000000000002,
+            0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.97,
+            0.08052800000000002,
+            -0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_07",
+          "center": [
+            -0.97,
+            -0.11074000000000002,
+            -0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            0.97,
+            0.08052800000000002,
+            -0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_08",
+          "center": [
+            0.97,
+            -0.11074000000000002,
+            -0.82
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.54,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "d59ff68040cb5292231a8d6851da01d189bdf08ad22dc270cc3a8a1f4a335e9e",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_06",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_07",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_08"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 534308,
+      "sha256": "ee5c8f03e37db4e15a820754a961776bb9aa6471c18a64b9124340e078481aed",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "wildfire-ember-40",
+      "name": "Wildfire Robotics Ember 40",
+      "kind": "concept",
+      "file": "models/wildfire-ember-40.usdz",
+      "source": "sources/wildfire-ember-40.usda",
+      "preview": "previews/wildfire-ember-40.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.160516938839488,
+        -0.463464,
+        -1.0866112193116455
+      ],
+      "bounds_max_m": [
+        0.9407880000000001,
+        0.09000000000000001,
+        1.0866112193116457
+      ],
+      "bounds_size_m": [
+        2.101304938839488,
+        0.553464,
+        2.1732224386232915
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 144,
+      "triangles": 9872,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            0.9,
+            0.034848000000000004,
+            0.0
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.30600000000000005,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.4500000000000001,
+            0.034848000000000004,
+            0.7794228634059948
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.30600000000000005,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.44999999999999984,
+            0.034848000000000004,
+            0.7794228634059949
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.30600000000000005,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            -0.9,
+            0.034848000000000004,
+            1.1021821192326179e-16
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.30600000000000005,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            -0.4500000000000004,
+            0.034848000000000004,
+            -0.7794228634059945
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.30600000000000005,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            0.4500000000000001,
+            0.034848000000000004,
+            -0.7794228634059948
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.30600000000000005,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "d08b6d43ef6c0fd8ca993c50e977f7b5766f1bd39207fdc1a4adc73b55ad3825",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_06"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 373672,
+      "sha256": "e0023a3cfbd4b5fbfd030532d9fdefaf7fc8f31b9ce6236dbe0b5b85f74f06c4",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "pyrolift-talon-60",
+      "name": "Pyrolift Systems Talon 60",
+      "kind": "concept",
+      "file": "models/pyrolift-talon-60.usdz",
+      "source": "sources/pyrolift-talon-60.usda",
+      "preview": "previews/pyrolift-talon-60.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.6118290817215113,
+        -0.6437,
+        -1.5091822490439522
+      ],
+      "bounds_max_m": [
+        1.30665,
+        0.125,
+        1.5091822490439526
+      ],
+      "bounds_size_m": [
+        2.9184790817215114,
+        0.7687,
+        3.0183644980879047
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 144,
+      "triangles": 9872,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            1.25,
+            0.0484,
+            0.0
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.42500000000000004,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            0.6250000000000001,
+            0.0484,
+            1.0825317547305482
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.42500000000000004,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -0.6249999999999998,
+            0.0484,
+            1.0825317547305484
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.42500000000000004,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            -1.25,
+            0.0484,
+            1.5308084989341916e-16
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.42500000000000004,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            -0.6250000000000006,
+            0.0484,
+            -1.082531754730548
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.42500000000000004,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            0.6250000000000001,
+            0.0484,
+            -1.0825317547305482
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.42500000000000004,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "1709675e8e8eb864bf7e7c3f654575366ce5dc34a6505508c9dcbd236da50de4",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_06"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 373547,
+      "sha256": "bb33e3a420e93fb9f4b5fac8df1315b00bf9c239ea9b1af5aa948e43d88384dc",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "colossus-ca8-vulcan",
+      "name": "Colossus Aerial CA-8 Vulcan",
+      "kind": "concept",
+      "file": "models/colossus-ca8-vulcan.usdz",
+      "source": "sources/colossus-ca8-vulcan.usda",
+      "preview": "previews/colossus-ca8-vulcan.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.9931400931275127,
+        -1.02992,
+        -2.0968543532745416
+      ],
+      "bounds_max_m": [
+        1.9931400931275127,
+        0.2,
+        2.0968543532745416
+      ],
+      "bounds_size_m": [
+        3.9862801862550254,
+        1.22992,
+        4.193708706549083
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 130,
+      "triangles": 10536,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            1.4142135623730951,
+            0.07744000000000001,
+            1.414213562373095
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            1.4142135623730951,
+            -0.26,
+            1.414213562373095
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            -1.414213562373095,
+            0.07744000000000001,
+            1.4142135623730951
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            -1.414213562373095,
+            -0.26,
+            1.4142135623730951
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -1.4142135623730954,
+            0.07744000000000001,
+            -1.414213562373095
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_07",
+          "center": [
+            -1.4142135623730954,
+            -0.26,
+            -1.414213562373095
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            1.4142135623730947,
+            0.07744000000000001,
+            -1.4142135623730954
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_08",
+          "center": [
+            1.4142135623730947,
+            -0.26,
+            -1.4142135623730954
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.68,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "206b3f49cace14f4f47ee3eae9d12d783e8b13b0e978729b846b2703a17ee648",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_06",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_07",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_08"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 390955,
+      "sha256": "8f97b17524dd95edd0775d0a115672ff4cb11d2699b7ab8fdfc7948e78ad1fa9",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "colossus-ca12-atlas",
+      "name": "Colossus Aerial CA-12 Atlas",
+      "kind": "concept",
+      "file": "models/colossus-ca12-atlas.usdz",
+      "source": "sources/colossus-ca12-atlas.usda",
+      "preview": "previews/colossus-ca12-atlas.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -3.2236581634430226,
+        -1.2874,
+        -3.0183644980879043
+      ],
+      "bounds_max_m": [
+        2.767104463563841,
+        0.25,
+        3.018364498087905
+      ],
+      "bounds_size_m": [
+        5.9907626270068635,
+        1.5374,
+        6.0367289961758095
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 186,
+      "triangles": 14408,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            2.5,
+            0.0968,
+            0.0
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_07",
+          "center": [
+            2.5,
+            -0.325,
+            0.0
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            1.2500000000000002,
+            0.0968,
+            2.1650635094610964
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_08",
+          "center": [
+            1.2500000000000002,
+            -0.325,
+            2.1650635094610964
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -1.2499999999999996,
+            0.0968,
+            2.165063509461097
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_09",
+          "center": [
+            -1.2499999999999996,
+            -0.325,
+            2.165063509461097
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            -2.5,
+            0.0968,
+            3.061616997868383e-16
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_10",
+          "center": [
+            -2.5,
+            -0.325,
+            3.061616997868383e-16
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            -1.250000000000001,
+            0.0968,
+            -2.165063509461096
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_11",
+          "center": [
+            -1.250000000000001,
+            -0.325,
+            -2.165063509461096
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            1.2500000000000002,
+            0.0968,
+            -2.1650635094610964
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_12",
+          "center": [
+            1.2500000000000002,
+            -0.325,
+            -2.1650635094610964
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.8500000000000001,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "edb5df4b9cd429c8428eea219b21d243e98f4c5c212e384a27cd905a249e6fdb",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_07",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_08",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_09",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_10",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_11",
+        "/Aircraft/Geometry/Rotor_06",
+        "/Aircraft/Geometry/Rotor_12"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 418992,
+      "sha256": "cbed9e40263611941d41f75da973e441df1ba219ab9ce54e5ee6b5a375d68626",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "agrowing-titan-at40",
+      "name": "AgroWing Titan AT-40",
+      "kind": "concept",
+      "file": "models/agrowing-titan-at40.usdz",
+      "source": "sources/agrowing-titan-at40.usda",
+      "preview": "previews/agrowing-titan-at40.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.4948550698456347,
+        -0.77244,
+        -1.572640764955906
+      ],
+      "bounds_max_m": [
+        1.4948550698456344,
+        0.21000000000000002,
+        1.572640764955906
+      ],
+      "bounds_size_m": [
+        2.989710139691269,
+        0.98244,
+        3.145281529911812
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 137,
+      "triangles": 11292,
+      "rotors": [
+        {
+          "name": "Rotor_01",
+          "center": [
+            1.0606601717798214,
+            0.058080000000000014,
+            1.0606601717798212
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_05",
+          "center": [
+            1.0606601717798214,
+            -0.19500000000000003,
+            1.0606601717798212
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_02",
+          "center": [
+            -1.0606601717798212,
+            0.058080000000000014,
+            1.0606601717798214
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_06",
+          "center": [
+            -1.0606601717798212,
+            -0.19500000000000003,
+            1.0606601717798214
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_03",
+          "center": [
+            -1.0606601717798214,
+            0.058080000000000014,
+            -1.0606601717798212
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_07",
+          "center": [
+            -1.0606601717798214,
+            -0.19500000000000003,
+            -1.0606601717798212
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_04",
+          "center": [
+            1.060660171779821,
+            0.058080000000000014,
+            -1.0606601717798214
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_08",
+          "center": [
+            1.060660171779821,
+            -0.19500000000000003,
+            -1.0606601717798214
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.51,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "6f6fe0841c32e6a6b3626b620cd87706b7d4f89b6f385ffd60fca63e77510614",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_01",
+        "/Aircraft/Geometry/Rotor_05",
+        "/Aircraft/Geometry/Rotor_02",
+        "/Aircraft/Geometry/Rotor_06",
+        "/Aircraft/Geometry/Rotor_03",
+        "/Aircraft/Geometry/Rotor_07",
+        "/Aircraft/Geometry/Rotor_04",
+        "/Aircraft/Geometry/Rotor_08"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 401897,
+      "sha256": "c4bcf52c95eeefcb33501da4e1097f97c2fd414c347eb3ac16547df518afc087",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "avidrone-490tl",
+      "name": "Avidrone 490TL",
+      "kind": "real",
+      "file": "models/avidrone-490tl.usdz",
+      "source": "sources/avidrone-490tl.usda",
+      "preview": "previews/avidrone-490tl.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.7042094479688558,
+        -0.5780000000000001,
+        -1.0356
+      ],
+      "bounds_max_m": [
+        0.7042094479688558,
+        0.44373695964470755,
+        1.042
+      ],
+      "bounds_size_m": [
+        1.4084188959377115,
+        1.0217369596447077,
+        2.0776000000000003
+      ],
+      "catalogue_dimensions": {},
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 68,
+      "triangles": 8464,
+      "rotors": [
+        {
+          "name": "Rotor_Rear",
+          "center": [
+            0.0,
+            0.36,
+            -0.74
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.72,
+          "direction": 1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_Front",
+          "center": [
+            0.0,
+            0.36,
+            0.74
+          ],
+          "axis": "y",
+          "blades": 2,
+          "radius_m": 0.72,
+          "direction": -1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "33ccf07ddf3a4d6d0b62536048fb5208a831cf77f13e2d195c05832f575b0d54",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_Rear",
+        "/Aircraft/Geometry/Rotor_Front"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 347704,
+      "sha256": "717661556967cf89e539d0f3240c60d94b1be247d2cec1d65acae8dbae2f61e8",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "wingtraone-gen-ii",
+      "name": "WingtraOne GEN II",
+      "kind": "real",
+      "file": "models/wingtraone-gen-ii.usdz",
+      "source": "sources/wingtraone-gen-ii.usda",
+      "preview": "previews/wingtraone-gen-ii.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.625,
+        -0.23721988205115424,
+        -0.57
+      ],
+      "bounds_max_m": [
+        0.625,
+        0.26,
+        0.36
+      ],
+      "bounds_size_m": [
+        1.25,
+        0.49721988205115425,
+        0.9299999999999999
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 1250.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 47,
+      "triangles": 8900,
+      "rotors": [
+        {
+          "name": "Rotor_Left",
+          "center": [
+            -0.29987262102967155,
+            0.0,
+            0.335
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.1699639092917403,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Rotor_Right",
+          "center": [
+            0.29987262102967155,
+            0.0,
+            0.335
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.1699639092917403,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "1342b6aefd101b7b138990680e37fa04f3594a17da4e6d3fcc5d44a62d4e9929",
+      "transition": {
+        "mechanism": "tailsitter",
+        "duration_seconds": 12,
+        "pivots": [],
+        "body_node": "Geometry",
+        "hover_degrees": -90,
+        "cruise_degrees": 0
+      },
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 12,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 721,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Rotor_Left",
+        "/Aircraft/Geometry/Rotor_Right"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 341063,
+      "sha256": "de4f4463208e3029bbf26b3e3948a850265d5c98c0fe4a9f3bfac8a2194aa328",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "quantum-systems-trinity-pro",
+      "name": "Quantum Systems Trinity Pro",
+      "kind": "real",
+      "file": "models/quantum-systems-trinity-pro.usdz",
+      "source": "sources/quantum-systems-trinity-pro.usda",
+      "preview": "previews/quantum-systems-trinity-pro.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.197,
+        -0.12859875,
+        -0.8103260869565218
+      ],
+      "bounds_max_m": [
+        1.197,
+        0.4013228992195257,
+        0.6806739130434782
+      ],
+      "bounds_size_m": [
+        2.394,
+        0.5299216492195257,
+        1.491
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 2394.0,
+        "fuselageLengthMillimeters": 1491.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 61,
+      "triangles": 18416,
+      "rotors": [
+        {
+          "name": "Rotor_Left",
+          "center": [
+            -0.5146518939601867,
+            0.017,
+            0.3695086956521739
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.20587237879203732,
+          "direction": -1,
+          "preview_rpm": 120,
+          "preview_cruise_spin": false,
+          "pivot": "VTOLTilt_Left"
+        },
+        {
+          "name": "Rotor_Right",
+          "center": [
+            0.5146518939601867,
+            0.017,
+            0.3695086956521739
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.20587237879203732,
+          "direction": 1,
+          "preview_rpm": 120,
+          "preview_cruise_spin": false,
+          "pivot": "VTOLTilt_Right"
+        },
+        {
+          "name": "Rotor_Tail",
+          "center": [
+            0.0,
+            0.3497886,
+            -0.4732304347826087
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.20587237879203732,
+          "direction": -1,
+          "preview_rpm": 120,
+          "pivot": "VTOLTilt_Tail"
+        }
+      ],
+      "geometry_sha256": "2f5fc11768d957eee4f937a448b5999c5f7b2f5949ffc7bafb2d134967aa074e",
+      "transition": {
+        "mechanism": "tilt_rotor",
+        "duration_seconds": 12,
+        "pivots": [
+          {
+            "name": "VTOLTilt_Left",
+            "center": [
+              -0.5146518939601867,
+              0.017,
+              0.2852347826086956
+            ],
+            "hover_degrees": -90,
+            "cruise_degrees": 0,
+            "rotors": [
+              "Rotor_Left"
+            ],
+            "parts": [
+              "TiltBearing_01",
+              "TractorMotor_01"
+            ]
+          },
+          {
+            "name": "VTOLTilt_Right",
+            "center": [
+              0.5146518939601867,
+              0.017,
+              0.2852347826086956
+            ],
+            "hover_degrees": -90,
+            "cruise_degrees": 0,
+            "rotors": [
+              "Rotor_Right"
+            ],
+            "parts": [
+              "TiltBearing_02",
+              "TractorMotor_02"
+            ]
+          },
+          {
+            "name": "VTOLTilt_Tail",
+            "center": [
+              0.0,
+              0.3497886,
+              -0.5672282608695652
+            ],
+            "hover_degrees": -90,
+            "cruise_degrees": 0,
+            "rotors": [
+              "Rotor_Tail"
+            ],
+            "parts": [
+              "TiltBearing_03",
+              "TailMotor_01"
+            ]
+          }
+        ]
+      },
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 12,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 721,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/VTOLTilt_Left/Rotor_Left",
+        "/Aircraft/Geometry/VTOLTilt_Right/Rotor_Right",
+        "/Aircraft/Geometry/VTOLTilt_Tail/Rotor_Tail"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 465453,
+      "sha256": "cda0be36546d0f8d2b6665be2cdacdea1125c30dfb12f984113bcac58b6eab57",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "mq-9b-skyguardian",
+      "name": "MQ-9B SkyGuardian",
+      "kind": "real",
+      "file": "models/mq-9b-skyguardian.usdz",
+      "source": "sources/mq-9b-skyguardian.usda",
+      "preview": "previews/mq-9b-skyguardian.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -12.0,
+        -2.6582399999999997,
+        -6.066889199892584
+      ],
+      "bounds_max_m": [
+        12.0,
+        1.788462,
+        5.637739122054642
+      ],
+      "bounds_size_m": [
+        24.0,
+        4.446702,
+        11.704628321947226
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 24000.0,
+        "fuselageLengthMillimeters": 11700.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 117,
+      "triangles": 22080,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -5.919626078157374
+          ],
+          "axis": "z",
+          "blades": 4,
+          "radius_m": 1.3387556521382686,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "77df47032faf9dc0e3d83eb25f7282928842b30efe541082db0318566df57aa8",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 507526,
+      "sha256": "a8e0d1a33d54e447b4b1fbf172c4c6786c69b5ffaec81747d8c43c6f42eaa434",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "hermes-900",
+      "name": "Hermes 900",
+      "kind": "real",
+      "file": "models/hermes-900.usdz",
+      "source": "sources/hermes-900.usda",
+      "preview": "previews/hermes-900.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -7.5,
+        -2.0448,
+        -4.838846222597316
+      ],
+      "bounds_max_m": [
+        7.5,
+        1.37574,
+        4.5
+      ],
+      "bounds_size_m": [
+        15.0,
+        3.42054,
+        9.338846222597315
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 15000.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 113,
+      "triangles": 21800,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -4.7250000000000005
+          ],
+          "axis": "z",
+          "blades": 3,
+          "radius_m": 1.0349656599755916,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "46aec7c45e46ab1a3c2328309407b167d24183824bddc40bd122851da25ee8bf",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 499161,
+      "sha256": "bc43f9244f9bc8581c852657bd41ad417a7d98b090a39038ac94c65ba12f2f7d",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "ft5-los",
+      "name": "FT5 Łoś",
+      "kind": "real",
+      "file": "models/ft5-los.usdz",
+      "source": "sources/ft5-los.usda",
+      "preview": "previews/ft5-los.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -3.2,
+        -0.7037,
+        -1.8
+      ],
+      "bounds_max_m": [
+        3.2,
+        0.6014,
+        1.3
+      ],
+      "bounds_size_m": [
+        6.4,
+        1.3051,
+        3.1
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 6400.0,
+        "fuselageLengthMillimeters": 3100.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 113,
+      "triangles": 35856,
+      "rotors": [
+        {
+          "name": "Propeller_1",
+          "center": [
+            -0.8639971690580028,
+            0.23560000000000003,
+            0.8769230769230768
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.5579990858416466,
+          "direction": -1,
+          "preview_rpm": 120
+        },
+        {
+          "name": "Propeller_2",
+          "center": [
+            0.8639971690580028,
+            0.23560000000000003,
+            0.8769230769230768
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.5579990858416466,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "04ab8ce0fe155c3ebbaf7adabc5647546df1870e594af1ac238024857e21b522",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Propeller_1",
+        "/Aircraft/Geometry/Propeller_2"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 635087,
+      "sha256": "3a4c00e0a8c5b056aea8203447a1264ae841c04b8c37fd93d5106f18ee5cf40f",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "sensefly-ebee-tac",
+      "name": "senseFly eBee TAC",
+      "kind": "real",
+      "file": "models/sensefly-ebee-tac.usdz",
+      "source": "sources/sensefly-ebee-tac.usda",
+      "preview": "previews/sensefly-ebee-tac.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.58,
+        -0.0644,
+        -0.3572916666666667
+      ],
+      "bounds_max_m": [
+        0.58,
+        0.0665,
+        0.34270833333333334
+      ],
+      "bounds_size_m": [
+        1.16,
+        0.13090000000000002,
+        0.7
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 1160.0,
+        "fuselageLengthMillimeters": 700.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 31,
+      "triangles": 9620,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.02,
+            -0.2041666666666667
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.10786398182980768,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "afdcdabf0dca3cb7a2f7b0a684783964dbbbea72c9fbaf16865ff1139eb78a26",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 1153888,
+      "sha256": "d6e3845b669bf0399cddf04e24fdc49fc157bae2f52504aa88086a57ab86a822",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "rq-21-integrator",
+      "name": "RQ-21 Integrator",
+      "kind": "real",
+      "file": "models/rq-21-integrator.usdz",
+      "source": "sources/rq-21-integrator.usda",
+      "preview": "previews/rq-21-integrator.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -2.45,
+        -0.33543999999999996,
+        -1.6857142857142857
+      ],
+      "bounds_max_m": [
+        2.45,
+        0.6215999999999999,
+        1.1142857142857143
+      ],
+      "bounds_size_m": [
+        4.9,
+        0.9570399999999999,
+        2.8
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 4900.0,
+        "fuselageLengthMillimeters": 2800.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 45,
+      "triangles": 18144,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -1.0628571428571427
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.3919992423812055,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "24665248eab621e15382517ac7bf9368e8ccede7d5cddde2ea2f4d0450191d49",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 413996,
+      "sha256": "5c44bfd64ab9f6e5b4f3d4e239cbf552e832dcb2fed473c2c5c10471145a6688",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "aerosonde-mk-4-7",
+      "name": "Aerosonde Mk 4.7",
+      "kind": "real",
+      "file": "models/aerosonde-mk-4-7.usdz",
+      "source": "sources/aerosonde-mk-4-7.usda",
+      "preview": "previews/aerosonde-mk-4-7.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.8,
+        -0.17934131736526945,
+        -1.143877551020408
+      ],
+      "bounds_max_m": [
+        1.8,
+        0.3206586826347305,
+        0.7561224489795917
+      ],
+      "bounds_size_m": [
+        3.6,
+        0.5,
+        1.8999999999999997
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 3600.0,
+        "fuselageLengthMillimeters": 1900.0,
+        "heightMillimeters": 500.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 43,
+      "triangles": 18120,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -0.7212244897959182
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.237789944333032,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "633e9abe316b6b637d1ebd887882551256437090136fcef525e5c1f7ea5c4c93",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 412991,
+      "sha256": "6fc49d87c808650c5de7c9b6494c82b732cebddc20c9ef8b91061b8813eafdf7",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "rq-7b-shadow",
+      "name": "RQ-7B Shadow 200",
+      "kind": "real",
+      "file": "models/rq-7b-shadow.usdz",
+      "source": "sources/rq-7b-shadow.usda",
+      "preview": "previews/rq-7b-shadow.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -2.135,
+        -0.5366430260047281,
+        -2.0460000000000003
+      ],
+      "bounds_max_m": [
+        2.135,
+        0.46335697399527176,
+        1.364
+      ],
+      "bounds_size_m": [
+        4.27,
+        0.9999999999999999,
+        3.41
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 4270.0,
+        "fuselageLengthMillimeters": 3410.0,
+        "heightMillimeters": 1000.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 104,
+      "triangles": 26364,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -1.301046153846154
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.4041833441260368,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "8addb3ad08777edd4e66f74161d2ee5fccd968cf2a0b6bd60f1ad4c62abdca36",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 540899,
+      "sha256": "90437bdc1773014fbfc66a6e95a8cbd060736b412c42eadb5815186081118d91",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "mq-9a-reaper",
+      "name": "MQ-9A Reaper",
+      "kind": "real",
+      "file": "models/mq-9a-reaper.usdz",
+      "source": "sources/mq-9a-reaper.usda",
+      "preview": "previews/mq-9a-reaper.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -10.05,
+        -2.277619323264748,
+        -5.698437636435051
+      ],
+      "bounds_max_m": [
+        10.05,
+        1.5323806767352524,
+        5.300438490820604
+      ],
+      "bounds_size_m": [
+        20.1,
+        3.8100000000000005,
+        10.998876127255656
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 20100.0,
+        "fuselageLengthMillimeters": 11000.0,
+        "heightMillimeters": 3810.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 115,
+      "triangles": 22056,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -5.565460415361635
+          ],
+          "axis": "z",
+          "blades": 4,
+          "radius_m": 1.2088838279401464,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "f8ab2d3c2dd8c2e570c23732aa823fd27424288f46bdfc74d75f9f39202378f5",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 506292,
+      "sha256": "293b04b9376e15ac726771687212d1dfb2b9124047bb6fb7fc326210549d95db",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "iai-harpy",
+      "name": "IAI Harpy",
+      "kind": "real",
+      "file": "models/iai-harpy.usdz",
+      "source": "sources/iai-harpy.usda",
+      "preview": "previews/iai-harpy.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.05,
+        -0.1588888888888889,
+        -1.3113570327109276
+      ],
+      "bounds_max_m": [
+        1.05,
+        0.39111111111111113,
+        1.3902169915410076
+      ],
+      "bounds_size_m": [
+        2.1,
+        0.55,
+        2.7015740242519355
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 2100.0,
+        "fuselageLengthMillimeters": 2700.0,
+        "heightMillimeters": 550.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 23,
+      "triangles": 6240,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -1.2660904744391321
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.41151416610723185,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "18739a5273bfcc3f46768e3bb311ecade2e33ad23a3ef731535c29c99335b1c1",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 257380,
+      "sha256": "e801a48d643ce15712fcc5a1471f0e491969a8dc84f4bbd58a806bf8ded52bb8",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "iai-harop",
+      "name": "IAI Harop",
+      "kind": "real",
+      "file": "models/iai-harop.usdz",
+      "source": "sources/iai-harop.usda",
+      "preview": "previews/iai-harop.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.5,
+        -0.25563808237677244,
+        -1.2799964854061063
+      ],
+      "bounds_max_m": [
+        1.5,
+        0.34436191762322754,
+        1.2164266251459712
+      ],
+      "bounds_size_m": [
+        3.0,
+        0.6,
+        2.4964231105520778
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 3000.0,
+        "fuselageLengthMillimeters": 2500.0,
+        "heightMillimeters": 600.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 38,
+      "triangles": 8936,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -1.2407551576488907
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.3567393432474153,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "87dca6200a37c760626fc317506808ea870478ccc0429c4de444831638795397",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 301540,
+      "sha256": "acfc521d8195c7e6252879387c2877d7342b2e5c1ca25d15080f3a0e3d735c17",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "iai-harpy-ng",
+      "name": "IAI Harpy NG",
+      "kind": "real",
+      "file": "models/iai-harpy-ng.usdz",
+      "source": "sources/iai-harpy-ng.usda",
+      "preview": "previews/iai-harpy-ng.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.5,
+        -0.15493688733511737,
+        -1.2849707690892942
+      ],
+      "bounds_max_m": [
+        1.5,
+        0.4404560342302668,
+        1.2164266251459712
+      ],
+      "bounds_size_m": [
+        3.0,
+        0.5953929215653841,
+        2.5013973942352656
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 3000.0,
+        "fuselageLengthMillimeters": 2500.0,
+        "heightMillimeters": 600.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 30,
+      "triangles": 6896,
+      "rotors": [
+        {
+          "name": "Pusher",
+          "center": [
+            0.0,
+            0.0,
+            -1.2407551576488907
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.40196010400366905,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "bea4110dc143c950c3bf9331a9eb7f93e9db2ad20e219af79e26a228bc493b3a",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Pusher"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 266407,
+      "sha256": "acba1d1f8628222a774078008056137cc41ede85304609f332f837ebac6a5c60",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "epfl-delta-wing-uav",
+      "name": "EPFL Delta-Wing UAV",
+      "kind": "real",
+      "file": "models/epfl-delta-wing-uav.usdz",
+      "source": "sources/epfl-delta-wing-uav.usda",
+      "preview": "previews/epfl-delta-wing-uav.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -0.6225,
+        -0.05267605633802816,
+        -0.3540898872488368
+      ],
+      "bounds_max_m": [
+        0.6225,
+        0.1673239436619718,
+        0.4259101127511632
+      ],
+      "bounds_size_m": [
+        1.245,
+        0.21999999999999997,
+        0.78
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 1245.0,
+        "fuselageLengthMillimeters": 780.0,
+        "heightMillimeters": 220.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 35,
+      "triangles": 11318,
+      "rotors": [
+        {
+          "name": "Tractor",
+          "center": [
+            0.0,
+            0.0384225352112676,
+            0.36700765034940663
+          ],
+          "axis": "z",
+          "blades": 2,
+          "radius_m": 0.12287752463835054,
+          "direction": 1,
+          "preview_rpm": 120
+        }
+      ],
+      "geometry_sha256": "625dbfa8a42e2eebfcf40713373d305a2f4517c15819f6405bb1be3aca9d60f4",
+      "transition": null,
+      "animation": {
+        "embedded": true,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [
+        "/Aircraft/Geometry/Tractor"
+      ],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 742537,
+      "sha256": "81bb49e7fdb92c9ec5460e9e73aef5d29b9b0688a816af9c37bdb8564106565c",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "ncstate-bwb-delta",
+      "name": "NC State BWB DELTA",
+      "kind": "real",
+      "file": "models/ncstate-bwb-delta.usdz",
+      "source": "sources/ncstate-bwb-delta.usda",
+      "preview": "previews/ncstate-bwb-delta.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.4295,
+        -0.09507042253521125,
+        -0.6969032258064516
+      ],
+      "bounds_max_m": [
+        1.4295,
+        0.35492957746478876,
+        0.7760967741935484
+      ],
+      "bounds_size_m": [
+        2.859,
+        0.45,
+        1.4729999999999999
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 2859.0,
+        "fuselageLengthMillimeters": 1473.0,
+        "heightMillimeters": 450.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 34,
+      "triangles": 7283,
+      "rotors": [],
+      "geometry_sha256": "a5d3988a64633a8be9279b1d381a194516ad5d3ecdb9b7caeffabe1a33c43f1e",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 339014,
+      "sha256": "1277c9dbc0ccf2fbd9833ac133e30e3894d5e21cabe6ab6fe8a188dd7b273580",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "hesa-karrar",
+      "name": "HESA Karrar",
+      "kind": "real",
+      "file": "models/hesa-karrar.usdz",
+      "source": "sources/hesa-karrar.usda",
+      "preview": "previews/hesa-karrar.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.25,
+        -0.2551124689268243,
+        -2.049751243781095
+      ],
+      "bounds_max_m": [
+        1.25,
+        0.6948875310731757,
+        1.9502487562189057
+      ],
+      "bounds_size_m": [
+        2.5,
+        0.95,
+        4.000000000000001
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 2500.0,
+        "fuselageLengthMillimeters": 4000.0,
+        "heightMillimeters": 950.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 58,
+      "triangles": 12820,
+      "rotors": [],
+      "geometry_sha256": "4d7b9d03915a36104dd21bed9e66a2d40cd61edd87d1838768196bbbc41489cd",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 165671,
+      "sha256": "3075ca0df1cd65908237b595f201375549740e9cb8f59c052c4502dc2b782fc6",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "ryan-bqm-34f-firebee-ii",
+      "name": "Ryan BQM-34F Firebee II",
+      "kind": "real",
+      "file": "models/ryan-bqm-34f-firebee-ii.usdz",
+      "source": "sources/ryan-bqm-34f-firebee-ii.usda",
+      "preview": "previews/ryan-bqm-34f-firebee-ii.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.47,
+        -0.6437322229645891,
+        -4.25893023255814
+      ],
+      "bounds_max_m": [
+        1.47,
+        1.066267777035411,
+        4.631069767441861
+      ],
+      "bounds_size_m": [
+        2.94,
+        1.71,
+        8.89
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 2940.0,
+        "fuselageLengthMillimeters": 8890.0,
+        "heightMillimeters": 1710.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 59,
+      "triangles": 12912,
+      "rotors": [],
+      "geometry_sha256": "1fa6c8366db4e67f4c3dd303ffd84783e18d5fdd243d8074f4114b0be6d4420a",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 166839,
+      "sha256": "6936d7d7e7cf513fd97c0318f75602a240a8ae4d52f01575f6ca3f8035a4d54c",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "northrop-aqm-35a",
+      "name": "Northrop AQM-35A",
+      "kind": "real",
+      "file": "models/northrop-aqm-35a.usdz",
+      "source": "sources/northrop-aqm-35a.usda",
+      "preview": "previews/northrop-aqm-35a.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.69,
+        -0.2724642588071684,
+        -4.819441860465116
+      ],
+      "bounds_max_m": [
+        1.69,
+        1.4175357411928315,
+        5.240558139534884
+      ],
+      "bounds_size_m": [
+        3.38,
+        1.69,
+        10.06
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 3380.0,
+        "fuselageLengthMillimeters": 10060.0,
+        "heightMillimeters": 1690.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 49,
+      "triangles": 11108,
+      "rotors": [],
+      "geometry_sha256": "1c790ae73186a01aa7b3087ded91f9eb828dc28c889c61ccba4ba78ce6514237",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 141406,
+      "sha256": "b44dab94d7732cde1340cd46c3b0c4756d064fd2ed960ee4fb0d889924fac358",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "northrop-aqm-35b",
+      "name": "Northrop AQM-35B",
+      "kind": "real",
+      "file": "models/northrop-aqm-35b.usdz",
+      "source": "sources/northrop-aqm-35b.usda",
+      "preview": "previews/northrop-aqm-35b.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -1.93,
+        -0.3030963352411104,
+        -5.159581395348837
+      ],
+      "bounds_max_m": [
+        1.93,
+        1.5769036647588894,
+        5.610418604651163
+      ],
+      "bounds_size_m": [
+        3.86,
+        1.88,
+        10.77
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 3860.0,
+        "fuselageLengthMillimeters": 10770.0,
+        "heightMillimeters": 1880.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 49,
+      "triangles": 11108,
+      "rotors": [],
+      "geometry_sha256": "6e35997eb185da8b916ff3f99f6886b5d313fa28bfab4de57ee9b7a83d8272d4",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 141406,
+      "sha256": "1e02193db1142dca348172ccc2e8530fa64a9f91f1a656347cf0ef919c4058ec",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "rockwell-himat",
+      "name": "NASA / Rockwell HiMAT",
+      "kind": "real",
+      "file": "models/rockwell-himat.usdz",
+      "source": "sources/rockwell-himat.usda",
+      "preview": "previews/rockwell-himat.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -2.375,
+        -0.41653066151617574,
+        -3.2864186046511623
+      ],
+      "bounds_max_m": [
+        2.375,
+        0.8934693384838243,
+        3.573581395348837
+      ],
+      "bounds_size_m": [
+        4.75,
+        1.31,
+        6.859999999999999
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 4750.0,
+        "fuselageLengthMillimeters": 6860.0,
+        "heightMillimeters": 1310.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 70,
+      "triangles": 14988,
+      "rotors": [],
+      "geometry_sha256": "c52c2af97379f7e0e4b5861ab10d2972e3f1d5f6acde5ddc43ead9ace0069196",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 211742,
+      "sha256": "74c5fb7f05adb63b604d08b78c0d0143f884703a2c6672830c2e1d416324b639",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "hermeus-quarterhorse-mk21",
+      "name": "Hermeus Quarterhorse Mk 2.1",
+      "kind": "real",
+      "file": "models/hermeus-quarterhorse-mk21.usdz",
+      "source": "sources/hermeus-quarterhorse-mk21.usda",
+      "preview": "previews/hermeus-quarterhorse-mk21.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -4.2,
+        -2.016368286445013,
+        -7.789054726368158
+      ],
+      "bounds_max_m": [
+        4.2,
+        1.583631713554987,
+        7.41094527363184
+      ],
+      "bounds_size_m": [
+        8.4,
+        3.6,
+        15.199999999999998
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 8400.0,
+        "fuselageLengthMillimeters": 15200.0,
+        "heightMillimeters": 3600.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 120,
+      "triangles": 20984,
+      "rotors": [],
+      "geometry_sha256": "a046e29e4c5b63ddc4e815f4a96160aab92d211954bd73eb816e9ec6ad5dbb03",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 297621,
+      "sha256": "b062d03832a62cbded3e1740a661f430b51bd698915c0b31710ecd8790b108d8",
+      "arkit_validation": "passed"
+    },
+    {
+      "id": "north-american-x-10",
+      "name": "North American X-10",
+      "kind": "real",
+      "file": "models/north-american-x-10.usdz",
+      "source": "sources/north-american-x-10.usda",
+      "preview": "previews/north-american-x-10.png",
+      "metres_per_unit": 1,
+      "up_axis": "Y",
+      "forward_axis": "+Z",
+      "bounds_min_m": [
+        -4.295,
+        -2.3696996208807235,
+        -10.33587064676617
+      ],
+      "bounds_max_m": [
+        4.295,
+        2.030300379119277,
+        9.83412935323383
+      ],
+      "bounds_size_m": [
+        8.59,
+        4.4,
+        20.17
+      ],
+      "catalogue_dimensions": {
+        "wingspanMillimeters": 8590.0,
+        "fuselageLengthMillimeters": 20170.0,
+        "heightMillimeters": 4400.0
+      },
+      "geometry_accuracy": "approximate exterior; not a measured CAD replica",
+      "scale_note": "Published catalogue dimensions anchor the model where available. Rotor envelopes and small details are estimated. Entries with no catalogue dimensions use a nominal visual scale.",
+      "mesh_count": 124,
+      "triangles": 20816,
+      "rotors": [],
+      "geometry_sha256": "47f30f0ae369df99b24a9069b91d3e81edad45dc3f94329734ad6f971434bbd4",
+      "transition": null,
+      "animation": {
+        "embedded": false,
+        "duration_seconds": 2,
+        "time_codes_per_second": 60,
+        "samples_per_rotor": 121,
+        "preview_rpm": 120,
+        "note": "Cyclic display animation; rpm is deliberately slowed for inspection. Jet aircraft without external propellers have no rotor animation."
+      },
+      "rotor_paths": [],
+      "texture_provenance": "Original procedural surface patterns and original text decals; no reference photograph is embedded.",
+      "validation_note": "Native usdchecker reports Success. Its macOS distribution may additionally emit a duplicate UsdShade behavior registration diagnostic; full raw output is retained.",
+      "bytes": 280805,
+      "sha256": "ec092f7f0200e2e5637680c45e3a291b25a53ea7b087192c8f981d1bab3daad1",
+      "arkit_validation": "passed"
+    }
+  ]
+}

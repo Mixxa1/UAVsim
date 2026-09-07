@@ -15,6 +15,21 @@ final class InterceptMissionScene {
     private var effectNodes: [UUID: EffectInstance] = [:]
     private var detachedVisuals: Set<String> = []
     private var debris: [Debris] = []
+    /// Wreckage in the air, integrated with real drag, wind and ground contact.
+    private let debrisRuntime = BallisticProjectileRuntime()
+    /// Nodes for the pieces the runtime is flying, keyed by projectile id.
+    private var debrisNodes: [UUID: DebrisNode] = [:]
+
+    private struct DebrisNode {
+        let node: SCNNode
+        let bornAt: TimeInterval
+        let spawnOrientation: simd_quatf
+        /// Set once the piece has come to rest, so it fades from where it actually stopped.
+        var settledAt: TimeInterval?
+    }
+    /// The drop zone on the ground and the load itself, on the delivery side of the mission.
+    private var deliveryZoneNode: SCNNode?
+    private var deliveryLoadNode: SCNNode?
 
     /// A part that came off an airframe. It keeps flying on its own from where it separated,
     /// because a lost subtree is world debris — not a child that follows its former parent.
@@ -23,7 +38,20 @@ final class InterceptMissionScene {
         let origin: SIMD3<Float>
         let velocity: SIMD3<Float>
         let bornAt: TimeInterval
+        /// Axis and rate it tumbles about. A piece that comes off an airframe at speed does not
+        /// hold its attitude, and a fragment translating without rotating reads as a dropped prop.
+        let spinAxis: SIMD3<Float>
+        let spinRate: Float
+        let spawnOrientation: simd_quatf
     }
+
+    private var debrisSurfaceProbeStorage: ClosureBallisticSurfaceProbe?
+    /// Ground for wreckage. Falls back to sea level only if the scene never handed one over, which
+    /// is exactly what the old parabola assumed anyway.
+    private var debrisSurfaceProbe: BallisticSurfaceProbe {
+        debrisSurfaceProbeStorage ?? Self.flatDebrisGround
+    }
+    private static let flatDebrisGround = FlatGroundBallisticSurfaceProbe()
 
     /// One world effect in the scene: its node and the emitters whose birth rate is ramped down
     /// as it ages.
@@ -41,6 +69,10 @@ final class InterceptMissionScene {
     // MARK: Tuning
 
     private static let debrisLifetime: Float = 8
+    /// How hard a piece is thrown clear of the airframe it came off, metres per second.
+    private static let debrisBurstSpeed: Float = 5.5
+    /// Tumble rate of a shed piece, radians per second.
+    private static let debrisSpinRate: Float = 7
     private static let gravity: Float = 9.81
     private static let cameraFieldOfView: CGFloat = 70
     /// The observer watches from a distance, so it looks through a longer lens than a pilot does.
@@ -55,6 +87,10 @@ final class InterceptMissionScene {
     /// Fraction of an effect's life during which it emits at full rate. After that emission
     /// ramps down so the plume thins out instead of being cut off.
     private static let emissionHoldFraction: Float = 0.55
+    /// How far the zone disc floats above the ground sample, so it does not z-fight with terrain.
+    private static let zoneGroundClearance: Float = 0.25
+    /// A marker the operator can pick out from altitude while being chased.
+    private static let zoneMastHeight: Float = 26
 
     /// `showsCallsigns` is off on the hardest difficulty: a floating label over every aircraft is
     /// a targeting aid, and the point of the hard setting is that the operator finds and tracks
@@ -78,18 +114,21 @@ final class InterceptMissionScene {
         profile: DroneModelProfile,
         position: SIMD3<Float>,
         payload: AttachedPayloadComponent?,
+        moduleShape: AttachedModuleShape,
         seed: UInt64,
         initialCourse: SIMD3<Float> = SIMD3<Float>(0, 0, -1)
     ) -> InterceptVehicleRuntime {
         let visual = DroneModelBuilder.build(profile: profile)
         root.addChildNode(visual.rootNode)
         visual.rootNode.simdPosition = position
-        if payload != nil { attachPayloadModule(to: visual) }
+        if payload != nil {
+            visual.payloadMountNode.addChildNode(Self.makeModuleNode(shape: moduleShape))
+        }
 
         let mass = VehicleMassModel.resolve(
             for: profile,
             uavProfile: profile.resolvedUAVProfile,
-            payloadMass: payload == nil ? 0 : PayloadType.sensorModule.defaultMass
+            payloadMass: payload == nil ? 0 : moduleShape.massKg
         )
         let built = VehicleComponentGraphBuilder.build(
             profile: profile,
@@ -119,16 +158,182 @@ final class InterceptMissionScene {
 
     func camera(for vehicleID: String) -> SCNNode? { cameras[vehicleID] }
 
-    private func attachPayloadModule(to visual: DroneVisualModel) {
-        let module = SCNNode(geometry: SCNBox(width: 0.18, height: 0.12, length: 0.24, chamferRadius: 0.02))
+    // MARK: - Delivery zone
+
+    /// Marks the place the load has to reach. A flat disc with a rim, laid on the ground and not
+    /// lit, so it reads the same from the operator's camera at 200 m and from the observer's at
+    /// 600 m, at any hour of the world's clock.
+    func setDeliveryZone(centre: SIMD3<Float>, radius: Float, shape: AttachedModuleShape) {
+        deliveryZoneNode?.removeFromParentNode()
+        let zone = SCNNode()
+        zone.name = "delivery-zone"
+        zone.simdPosition = centre + SIMD3<Float>(0, Self.zoneGroundClearance, 0)
+
+        let floor = SCNNode(geometry: SCNCylinder(radius: CGFloat(radius), height: 0.05))
+        let fill = SCNMaterial()
+        fill.diffuse.contents = NSColor(calibratedRed: 0.30, green: 0.78, blue: 0.55, alpha: 0.16)
+        fill.lightingModel = .constant
+        fill.isDoubleSided = true
+        fill.writesToDepthBuffer = false
+        floor.geometry?.firstMaterial = fill
+        zone.addChildNode(floor)
+
+        let rim = SCNNode(geometry: SCNTube(
+            innerRadius: CGFloat(radius * 0.94),
+            outerRadius: CGFloat(radius),
+            height: 0.4
+        ))
+        let edge = SCNMaterial()
+        edge.diffuse.contents = NSColor(calibratedRed: 0.35, green: 0.92, blue: 0.62, alpha: 0.75)
+        edge.lightingModel = .constant
+        edge.isDoubleSided = true
+        rim.geometry?.firstMaterial = edge
+        zone.addChildNode(rim)
+
+        // A marker tall enough to find from the air. The zone is a patch of ground in a forest and
+        // an operator being chased has no time to hunt for a faint ring.
+        let mast = SCNNode(geometry: SCNCylinder(radius: 0.5, height: CGFloat(Self.zoneMastHeight)))
+        mast.geometry?.firstMaterial = edge
+        mast.simdPosition = SIMD3<Float>(0, Self.zoneMastHeight * 0.5, 0)
+        zone.addChildNode(mast)
+
+        root.addChildNode(zone)
+        deliveryZoneNode = zone
+
+        deliveryLoadNode?.removeFromParentNode()
+        let load = Self.makeModuleNode(shape: shape)
+        load.name = "delivery-load"
+        load.isHidden = true
+        root.addChildNode(load)
+        deliveryLoadNode = load
+    }
+
+    /// Draws the load where the session says it is. Hidden while it is still on the aircraft — the
+    /// aircraft is already carrying a visible one.
+    func updateDelivery(_ delivery: InterceptDeliveryRuntime?) {
+        guard let node = deliveryLoadNode else { return }
+        guard let delivery, delivery.state != .carried, delivery.state != .destroyed else {
+            node.isHidden = true
+            return
+        }
+        node.isHidden = false
+        node.simdPosition = delivery.position
+        if delivery.state == .falling, simd_length_squared(delivery.velocity) > 1e-4 {
+            // Nose-down along its own flight path, the way a dropped object settles.
+            node.simdOrientation = Self.lookRotation(forward: simd_normalize(delivery.velocity))
+        }
+    }
+
+    /// The module as an object in the world. Built here rather than in the payload catalogue
+    /// because this is mission equipment: it exists for the length of one run, and what the
+    /// operator chose about it is a shape and a mass, not a sensor.
+    static func makeModuleNode(shape: AttachedModuleShape) -> SCNNode {
+        let size = shape.sizeMeters
+        let node = SCNNode()
+        node.name = moduleNodeName
+
         let material = SCNMaterial()
         material.diffuse.contents = NSColor(calibratedWhite: 0.22, alpha: 1)
         material.metalness.contents = 0.6
         material.roughness.contents = 0.45
-        module.geometry?.firstMaterial = material
-        module.name = "attached-payload-module"
-        visual.payloadMountNode.addChildNode(module)
+
+        switch shape {
+        case .charge:
+            node.geometry = SCNBox(
+                width: CGFloat(size.x), height: CGFloat(size.y), length: CGFloat(size.z),
+                chamferRadius: 0.02
+            )
+        case .ballast:
+            let body = SCNCylinder(radius: CGFloat(size.x / 2), height: CGFloat(size.z))
+            let cylinder = SCNNode(geometry: body)
+            // A cylinder stands up its own Y; the module lies along the airframe's length.
+            cylinder.eulerAngles.x = .pi / 2
+            cylinder.geometry?.firstMaterial = material
+            node.addChildNode(cylinder)
+        case .supplyCrate, .medicalPack:
+            // A strapped crate. Lighter than the ordnance so it reads as cargo at a glance, with
+            // a band across it where the strap goes.
+            node.geometry = SCNBox(
+                width: CGFloat(size.x), height: CGFloat(size.y), length: CGFloat(size.z),
+                chamferRadius: 0.02
+            )
+            let crate = SCNMaterial()
+            crate.diffuse.contents = shape == .medicalPack
+                ? NSColor(calibratedWhite: 0.86, alpha: 1)
+                : NSColor(calibratedRed: 0.40, green: 0.36, blue: 0.28, alpha: 1)
+            crate.roughness.contents = 0.82
+            node.geometry?.firstMaterial = crate
+            let strap = SCNNode(geometry: SCNBox(
+                width: CGFloat(size.x * 1.02), height: CGFloat(size.y * 0.18), length: CGFloat(size.z * 1.02),
+                chamferRadius: 0.01
+            ))
+            let strapMaterial = SCNMaterial()
+            strapMaterial.diffuse.contents = shape == .medicalPack
+                ? NSColor(calibratedRed: 0.78, green: 0.18, blue: 0.16, alpha: 1)
+                : NSColor(calibratedWhite: 0.22, alpha: 1)
+            strapMaterial.roughness.contents = 0.9
+            strap.geometry?.firstMaterial = strapMaterial
+            node.addChildNode(strap)
+            return node
+        case .sensorPod:
+            // A short mast on a base — something that is meant to stand where it is put down.
+            node.geometry = SCNBox(
+                width: CGFloat(size.x), height: CGFloat(size.y * 0.55), length: CGFloat(size.z),
+                chamferRadius: 0.02
+            )
+            let mast = SCNNode(geometry: SCNCylinder(
+                radius: CGFloat(size.x * 0.10),
+                height: CGFloat(size.y * 0.9)
+            ))
+            mast.geometry?.firstMaterial = material
+            mast.simdPosition = SIMD3<Float>(0, size.y * 0.62, -size.z * 0.18)
+            node.addChildNode(mast)
+            let dome = SCNNode(geometry: SCNSphere(radius: CGFloat(size.x * 0.28)))
+            let lens = SCNMaterial()
+            lens.diffuse.contents = NSColor(calibratedRed: 0.14, green: 0.20, blue: 0.26, alpha: 1)
+            lens.metalness.contents = 0.2
+            lens.roughness.contents = 0.18
+            dome.geometry?.firstMaterial = lens
+            dome.simdPosition = SIMD3<Float>(0, -size.y * 0.24, size.z * 0.24)
+            node.addChildNode(dome)
+        case .net:
+            node.geometry = SCNBox(
+                width: CGFloat(size.x), height: CGFloat(size.y), length: CGFloat(size.z),
+                chamferRadius: 0.03
+            )
+            // The folded net itself, visible as a lighter band across the pack.
+            let band = SCNNode(geometry: SCNBox(
+                width: CGFloat(size.x * 0.92), height: CGFloat(size.y * 0.34), length: CGFloat(size.z * 0.92),
+                chamferRadius: 0.02
+            ))
+            let netMaterial = SCNMaterial()
+            netMaterial.diffuse.contents = NSColor(calibratedWhite: 0.62, alpha: 1)
+            netMaterial.roughness.contents = 0.9
+            band.geometry?.firstMaterial = netMaterial
+            band.simdPosition = SIMD3<Float>(0, -size.y * 0.22, 0)
+            node.addChildNode(band)
+        case .kineticSlug:
+            let body = SCNCapsule(capRadius: CGFloat(size.x / 2), height: CGFloat(size.z))
+            let capsule = SCNNode(geometry: body)
+            capsule.eulerAngles.x = .pi / 2
+            capsule.geometry?.firstMaterial = material
+            node.addChildNode(capsule)
+            // Two tail fins, so the faired body reads as faired rather than as a pill.
+            for side in [-1, 1] {
+                let fin = SCNNode(geometry: SCNBox(
+                    width: 0.012, height: CGFloat(size.x * 0.9), length: CGFloat(size.z * 0.22),
+                    chamferRadius: 0.004
+                ))
+                fin.geometry?.firstMaterial = material
+                fin.simdPosition = SIMD3<Float>(Float(side) * size.x * 0.42, 0, size.z * 0.34)
+                node.addChildNode(fin)
+            }
+        }
+        node.geometry?.firstMaterial = material
+        return node
     }
+
+    static let moduleNodeName = "attached-payload-module"
 
     private func makeCamera(id: String, role: InterceptVehicleRole, on visual: DroneVisualModel) -> SCNNode {
         let camera = SCNNode()
@@ -173,8 +378,16 @@ final class InterceptMissionScene {
 
     // MARK: - Per-frame update
 
-    func update(_ session: InterceptMissionSession, deltaTime: Float) {
+    func update(
+        _ session: InterceptMissionSession,
+        deltaTime: Float,
+        ground: @escaping (SIMD3<Float>, Float) -> Float,
+        wind: SIMD3<Float> = .zero
+    ) {
         let now = session.worldTime
+        if debrisSurfaceProbeStorage == nil {
+            debrisSurfaceProbeStorage = ClosureBallisticSurfaceProbe(heightAt: ground)
+        }
         for actor in session.actors {
             guard let visual = visuals[actor.id] else { continue }
             visual.rootNode.simdPosition = actor.state.position
@@ -185,8 +398,9 @@ final class InterceptMissionScene {
                 trackTarget(from: actor.id, to: session.target.state.position, deltaTime: deltaTime)
             }
         }
-        updateDebris(now: now)
+        updateDebris(now: now, deltaTime: deltaTime, wind: wind)
         updateEffects(session.effects.effects, now: now)
+        updateDelivery(session.delivery)
     }
 
     private func spinPropellers(of visual: DroneVisualModel, throttle: Float, deltaTime: Float) {
@@ -200,6 +414,7 @@ final class InterceptMissionScene {
     /// debris list. The original is hidden rather than removed so the component graph and the
     /// visual model stay in the same shape.
     private func shedDetachedParts(of actor: InterceptVehicleRuntime, visual: DroneVisualModel, now: TimeInterval) {
+        let hub = visual.rootNode.simdWorldPosition
         for component in actor.graph.components where !component.isAttached {
             guard let legacy = component.legacyComponent,
                   detachedVisuals.insert("\(actor.id)/\(legacy.rawValue)").inserted else { continue }
@@ -208,7 +423,36 @@ final class InterceptMissionScene {
                 copy.simdTransform = node.simdWorldTransform
                 root.addChildNode(copy)
                 node.isHidden = true
-                debris.append(Debris(node: copy, origin: copy.simdPosition, velocity: actor.state.velocity, bornAt: now))
+                // Thrown outward from the airframe it came off, not carried along with it. Every
+                // piece leaving on the same vector is a formation, not a wreck.
+                let offset = copy.simdWorldPosition - hub
+                let outward = simd_length_squared(offset) > 1e-6
+                    ? simd_normalize(offset)
+                    : SIMD3<Float>(0, 1, 0)
+                // Deterministic per piece, so a replay of the same run sheds the same wreckage.
+                let seed = Float(abs(legacy.rawValue.hashValue % 1000)) / 1000
+                let burst = Self.debrisBurstSpeed * (0.55 + seed * 0.9)
+                // Flown by the shared ballistic runtime rather than a local parabola: a shed part
+                // now feels air resistance and wind, lands on the ground instead of sinking through
+                // it, and skips off it once or twice before settling. Its mass is the component's
+                // own — a torn-off camera pod and a whole wing do not fall the same way.
+                let projectileID = debrisRuntime.launch(
+                    kind: .debris,
+                    descriptor: BallisticDescriptor(
+                        massKg: max(0.05, component.massKg),
+                        shape: .debris
+                    ),
+                    position: copy.simdWorldPosition,
+                    carrierVelocity: actor.state.velocity,
+                    separationImpulse: outward * burst + SIMD3<Float>(0, 1.4 + seed, 0),
+                    surfaceProbe: debrisSurfaceProbe
+                )
+                debrisNodes[projectileID] = DebrisNode(
+                    node: copy,
+                    bornAt: now,
+                    spawnOrientation: copy.simdOrientation,
+                    settledAt: nil
+                )
             }
         }
     }
@@ -244,16 +488,43 @@ final class InterceptMissionScene {
         return simd_quatf(simd_float3x3(columns: (xAxis, yAxis, zAxis)))
     }
 
-    private func updateDebris(now: TimeInterval) {
-        for item in debris {
-            let age = Float(now - item.bornAt)
-            item.node.simdPosition = item.origin
-                + item.velocity * age
-                + SIMD3<Float>(0, -0.5 * Self.gravity * age * age, 0)
-            item.node.opacity = CGFloat(max(0, min(1, Self.debrisLifetime - age)))
-            if age >= Self.debrisLifetime { item.node.removeFromParentNode() }
+    private func updateDebris(now: TimeInterval, deltaTime: Float, wind: SIMD3<Float>) {
+        guard !debrisNodes.isEmpty else {
+            return
         }
-        debris.removeAll { Float(now - $0.bornAt) >= Self.debrisLifetime }
+
+        let result = debrisRuntime.update(
+            deltaTime: deltaTime,
+            environment: BallisticEnvironment(atmosphere: .standard, windVector: wind),
+            surfaceProbe: debrisSurfaceProbe
+        )
+
+        for projectile in debrisRuntime.projectiles {
+            guard let entry = debrisNodes[projectile.id] else { continue }
+            entry.node.simdWorldPosition = projectile.position
+            entry.node.simdWorldOrientation = projectile.orientation * entry.spawnOrientation
+        }
+
+        // A piece that has landed stays where it landed and fades there, rather than being flown
+        // on by a formula that no longer describes anything.
+        for impact in result.impacts {
+            guard var entry = debrisNodes[impact.projectileID] else { continue }
+            entry.node.simdWorldPosition = impact.position
+            entry.settledAt = now
+            debrisNodes[impact.projectileID] = entry
+        }
+        for lost in result.abandoned {
+            debrisNodes.removeValue(forKey: lost.id)?.node.removeFromParentNode()
+        }
+
+        for (id, entry) in debrisNodes {
+            let age = Float(now - entry.bornAt)
+            entry.node.opacity = CGFloat(max(0, min(1, Self.debrisLifetime - age)))
+            if age >= Self.debrisLifetime {
+                entry.node.removeFromParentNode()
+                debrisNodes.removeValue(forKey: id)
+            }
+        }
     }
 
     /// Mirrors the session's effect list into the scene. Anything the session has retired is torn
@@ -308,6 +579,8 @@ final class InterceptMissionScene {
         cameras.removeAll()
         debris.removeAll()
         detachedVisuals.removeAll()
+        deliveryZoneNode = nil
+        deliveryLoadNode = nil
     }
 
     // MARK: - Effect construction

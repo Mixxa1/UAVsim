@@ -118,16 +118,29 @@ enum VehiclePairContactService {
             addOmega(inverseInertia(simd_cross(ar, impulse), aq, aMass), to: &first, kind: firstClass, orientation: aq)
             addOmega(inverseInertia(simd_cross(br, -impulse), bq, bMass), to: &second, kind: secondClass, orientation: bq)
         }
-        // Share the dissipated contact energy; never charge its full value to both bodies.
-        let energy = 0.5 * effectiveMass * closing * closing * (1 - material.restitution * material.restitution)
+        // The same energy the rest of the simulator charges an airframe for a contact — see
+        // `ImpactResolutionService`: what the normal impulse transmits past the material's own
+        // absorption, plus what the sliding tangential component abrades away.
+        //
+        // Not halved between the two bodies. An earlier version split it, on the reasoning that
+        // both structures deform — which made a vehicle-to-vehicle ram roughly half as damaging as
+        // hitting a wall at the same closing speed, and left an interceptor flying home from a
+        // collision that should have ended it. Both airframes are charged what the contact put
+        // through them, exactly as a single airframe is against a building.
+        let impactEnergy = 0.5 * effectiveMass * closing * closing
+        let absorption = min(1, max(0, material.energyAbsorption))
+        let transmittedEnergy = impactEnergy * (1 - absorption * 0.65)
+        let abrasionEnergy = 0.5 * effectiveMass * tangentSpeed * tangentSpeed * material.abrasionFactor * 0.16
+        let energy = transmittedEnergy + abrasionEnergy
+
         let impactID = UUID()
         let aReport = report(graph: &firstGraph, componentID: contact.firstSphere.componentID,
             orientation: aq, position: aPose, point: contact.point, normal: n, impulse: impulse,
-            energy: energy * 0.5, closing: closing, tangent: tangentSpeed, id: impactID,
+            energy: energy, closing: closing, tangent: tangentSpeed, id: impactID,
             deltaTime: deltaTime, applyDamage: applyDamage)
         let bReport = report(graph: &secondGraph, componentID: contact.secondSphere.componentID,
             orientation: bq, position: bPose, point: contact.point, normal: -n, impulse: -impulse,
-            energy: energy * 0.5, closing: closing, tangent: tangentSpeed, id: impactID,
+            energy: energy, closing: closing, tangent: tangentSpeed, id: impactID,
             deltaTime: deltaTime, applyDamage: applyDamage)
         return (aReport, bReport)
     }
@@ -140,8 +153,11 @@ enum VehiclePairContactService {
         let material = ImpactSurfaceMaterial.metalVehicle
         let ratio = energy * material.damageFactor / max(0.5, graph.component(id: componentID)?.strengthJ ?? 40)
         let tier: ImpactOutcomeTier = ratio < 0.05 ? .lightTouch : ratio < 0.3 ? .scrape : ratio < 1 ? .heavyImpact : .criticalImpact
+        // Spread widens with severity, the same way it does for a contact with the world: a hard
+        // enough hit is not a dent in one component, it goes through the structure around it.
+        let spreadRadius = 0.15 + 0.45 * min(1, ratio)
         let damage = applyDamage ? graph.applyImpact(primaryComponentID: componentID, energyJ: energy,
-            damageFactor: material.damageFactor, spreadRadius: 0.25, contactPointBody: bodyPoint) : []
+            damageFactor: material.damageFactor, spreadRadius: spreadRadius, contactPointBody: bodyPoint) : []
         let connections = applyDamage ? graph.applyConnectionImpact(primaryComponentID: componentID,
             contactPointBody: bodyPoint, impulseBody: simd_act(orientation.conjugate, impulse), energyJ: energy,
             damageFactor: material.damageFactor, contactDuration: deltaTime) : []

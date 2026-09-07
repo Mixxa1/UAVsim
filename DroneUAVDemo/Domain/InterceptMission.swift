@@ -97,6 +97,23 @@ enum InterceptFunctionalState: String, Codable {
 
 // MARK: - Scenario options
 
+/// Which side of an interception the operator is flying.
+///
+/// The two are the same mission read from opposite ends: one aircraft carries something to a place
+/// and another aircraft exists to stop it. Everything the scenario already owns — the actors, the
+/// contact model, the damage graph, the observation handoff — serves both, so this is a side rather
+/// than a second scenario.
+enum InterceptMissionSide: String, Codable, CaseIterable, Identifiable {
+    /// The operator carries the module and closes on the target.
+    case interceptor
+    /// The operator carries a delivery to a zone while an interceptor hunts them.
+    case delivery
+
+    var id: String { rawValue }
+    var titleKey: String { "intercept.side.\(rawValue)" }
+    var hintKey: String { "intercept.side.\(rawValue).hint" }
+}
+
 enum InterceptTargetBehavior: String, Codable, CaseIterable, Identifiable {
     /// Flies its route and never reacts to the attacker.
     case routeFollower
@@ -106,9 +123,34 @@ enum InterceptTargetBehavior: String, Codable, CaseIterable, Identifiable {
     case escapeBoundary
     /// Tries to stabilise and hold position once it has taken damage.
     case damagedRecovery
+    /// Runs the operator down. The delivery side's aircraft, and not offered as a choice on the
+    /// interceptor side — a target that hunts the interceptor is a different mission.
+    case interceptorPursuit
 
     var id: String { rawValue }
     var titleKey: String { "intercept.behavior.\(rawValue)" }
+
+    /// The profiles an operator may pick for the aircraft they are hunting.
+    static var selectable: [InterceptTargetBehavior] { allCases.filter { $0 != .interceptorPursuit } }
+}
+
+/// Where the operator's delivery is, on the side of the mission that has one.
+///
+/// The whole outcome of a delivery run is here: the aircraft's own condition never decides it. A
+/// wrecked aircraft whose load still reached the zone succeeded; an untouched one whose load did
+/// not, failed.
+enum InterceptDeliveryState: String, Codable {
+    /// Still on the aircraft.
+    case carried
+    /// Released and on its way down.
+    case falling
+    case landedInside
+    case landedOutside
+    /// Destroyed before it could arrive — taken apart with the aircraft, or on the ground.
+    case destroyed
+
+    var isResolved: Bool { self == .landedInside || self == .landedOutside || self == .destroyed }
+    var titleKey: String { "intercept.delivery.\(rawValue)" }
 }
 
 /// Who is allowed to call the target neutralised.
@@ -144,11 +186,114 @@ enum AttachedPayloadState: String, Codable {
 enum AttachedPayloadProfile: String, Codable, CaseIterable, Identifiable {
     /// The module changes nothing; only the contact itself damages the two airframes.
     case contactOnly
-    /// The module knocks out named equipment on the vehicle it contacts.
+    /// The module fouls the rotors of both aircraft — the one it touches and the one it came off.
     case equipmentDisruption
+    /// A dense mass driven through one point of the target's structure. The target comes apart;
+    /// the aircraft that delivered it is wrecked but not scattered.
+    case kineticPenetration
+    /// The module takes both airframes apart — the one it hit and the one carrying it. There is no
+    /// standing off from something bolted to your own aircraft.
+    case structuralDestruction
 
     var id: String { rawValue }
-    var titleKey: String { "intercept.effect.\(rawValue)" }
+
+    /// Whether the module wrecks its own carrier along with what it touched.
+    var destroysCarrier: Bool { self == .structuralDestruction }
+
+    /// Whether the operator's aircraft is still flyable after the module has gone off.
+    ///
+    /// Only the two inert modules leave it flying. Anything that actually does something does it
+    /// at contact range, on a mount bolted to the operator's own airframe — "I set it off and flew
+    /// home" is not an outcome this mission has.
+    var sparesCarrier: Bool { self == .contactOnly }
+}
+
+/// What is actually bolted under the aircraft.
+///
+/// Named as things, because they are things. An earlier version listed them by shape — "compact
+/// module", "cylindrical module" — which told the operator the silhouette and nothing about what
+/// they were loading.
+///
+/// Each carries its own mass, its own silhouette and the effect that belongs to it, so choosing one
+/// is a single decision rather than a shape and an unrelated effect picked separately. What the
+/// effect *does* stays an abstract game rule on named components (see `AttachedPayloadProfile`);
+/// nothing here describes how any of it is built.
+enum AttachedModuleShape: String, Codable, CaseIterable, Identifiable {
+    /// A compact charge. The lightest thing that disables the aircraft it touches.
+    case charge
+    /// A folded net. Fouls rotors instead of striking the airframe — both aircraft's, since it
+    /// deploys off a mount on the operator's own. The bulkiest option.
+    case net
+    /// A dense faired slug. No charge in it — it takes the target apart by arriving, and takes
+    /// the aircraft that carried it out of the air doing so.
+    case kineticSlug
+    /// Inert mass for practice. Behaves like a loaded aircraft and does nothing on contact.
+    case ballast
+    /// A crate of supplies. The heaviest thing on the list and the reason the delivery side is
+    /// flown with an aircraft that can lift something.
+    case supplyCrate
+    /// A field medical pack. Bulky rather than dense, and the load a delivery run is usually for.
+    case medicalPack
+    /// A sensor left behind at the zone — a ground station rather than something carried back.
+    case sensorPod
+
+    var id: String { rawValue }
+    var titleKey: String { "intercept.module.\(rawValue)" }
+    var detailKey: String { "intercept.module.\(rawValue).detail" }
+
+    /// What an aircraft on this side of the mission would actually be carrying.
+    ///
+    /// An interceptor does not fly out with a medical pack taped to it, and a delivery run is not
+    /// normally made with a net. The two lists overlap where they should: a charge or a slug can be
+    /// what is being delivered, and both still go off where they land.
+    static func selectable(for side: InterceptMissionSide) -> [AttachedModuleShape] {
+        switch side {
+        case .interceptor:
+            return [.charge, .net, .kineticSlug, .ballast]
+        case .delivery:
+            return [.supplyCrate, .medicalPack, .sensorPod, .charge, .kineticSlug]
+        }
+    }
+
+    /// Mounted mass, kilograms. Fed to the mass model, so a heavier module really is a slower,
+    /// less agile interceptor.
+    var massKg: Float {
+        switch self {
+        case .charge: return 0.35
+        case .net: return 0.9
+        case .kineticSlug: return 0.75
+        case .ballast: return 0.6
+        case .supplyCrate: return 2.4
+        case .medicalPack: return 1.6
+        case .sensorPod: return 1.1
+        }
+    }
+
+    /// Bounding size in metres, for whoever draws it.
+    var sizeMeters: SIMD3<Float> {
+        switch self {
+        case .charge: return SIMD3<Float>(0.18, 0.12, 0.24)
+        case .net: return SIMD3<Float>(0.34, 0.10, 0.30)
+        case .kineticSlug: return SIMD3<Float>(0.14, 0.14, 0.52)
+        case .ballast: return SIMD3<Float>(0.13, 0.13, 0.42)
+        case .supplyCrate: return SIMD3<Float>(0.36, 0.26, 0.40)
+        case .medicalPack: return SIMD3<Float>(0.30, 0.22, 0.34)
+        case .sensorPod: return SIMD3<Float>(0.16, 0.18, 0.30)
+        }
+    }
+
+    /// What this module does on contact. Not a separate setting any more: a net fouls rotors and a
+    /// slug does not, and asking the operator to pick the object and its behaviour independently
+    /// only made it possible to describe something that does not exist.
+    var effectProfile: AttachedPayloadProfile {
+        switch self {
+        case .charge: return .structuralDestruction
+        case .net: return .equipmentDisruption
+        case .kineticSlug: return .kineticPenetration
+        // Cargo. It has no effect on anything it touches, which is the point of carrying it.
+        case .ballast, .supplyCrate, .medicalPack, .sensorPod: return .contactOnly
+        }
+    }
 }
 
 /// The one situation in which a module's effect is allowed to occur.
@@ -176,6 +321,10 @@ struct AttachedPayloadComponent: Codable, Equatable, Identifiable {
     private(set) var triggeringImpactID: UUID?
 
     static let defaultMountPointID = "payloadMount"
+    /// The component id the operator's own module occupies when it is taped to the nose. Its own
+    /// entry in the component graph, so its mass sits where the module sits and its condition is
+    /// the module's own rather than the belly bay's.
+    static let noseMountPointID = "missionNoseModule"
 
     init(
         ownerVehicleID: String,
@@ -240,10 +389,16 @@ struct AttachedPayloadComponent: Codable, Equatable, Identifiable {
 /// clamped by `validated`, and then constant for the whole run.
 struct InterceptMissionConfiguration: Codable, Equatable {
     var missionID = "attached-payload-v2"
+    /// Which end of the interception the operator flies.
+    var side: InterceptMissionSide = .interceptor
     var targetBehavior: InterceptTargetBehavior = .routeFollower
     var targetCarriesPayload = true
     var targetPayloadInert = false
+    /// Derived from `moduleShape` — see `AttachedModuleShape.effectProfile`. Kept as a stored
+    /// value because the session and the log read it directly, but `validated` is what sets it.
     var payloadProfile: AttachedPayloadProfile = .equipmentDisruption
+    /// What the module is: its mass, its silhouette and its behaviour.
+    var moduleShape: AttachedModuleShape = .charge
     var confirmationPolicy: InterceptConfirmationPolicy = .authoritativeWorld
     var targetProfileID = ""
     var observerProfileID = ""
@@ -264,10 +419,20 @@ struct InterceptMissionConfiguration: Codable, Equatable {
     /// How long one approach may last before it is written off as a miss.
     var attemptTimeout: TimeInterval = 25
     /// How long the result may stay unconfirmed before the run fails.
-    var assessmentTimeout: TimeInterval = 12
-    /// NO SIGNAL is shown for at least this long before the observer takes over, so the handoff
-    /// never looks like a cut made at the moment of contact.
-    var noSignalHold: TimeInterval = 1.2
+    ///
+    /// This is how long a stricken aircraft is given to reach the ground, not how long the mission
+    /// is willing to wait for a verdict. An aircraft whose rotors have been fouled at the 52 m
+    /// patrol altitude comes down under a partly-working disc, not in free fall: fifteen to twenty
+    /// seconds. Twelve — the value this started at — expired first and called a run that was about
+    /// to succeed a failure.
+    var assessmentTimeout: TimeInterval = 25
+    /// How long the picture has to stay gone before the observer takes over.
+    ///
+    /// Long enough that a hiccup is not a handoff: a link that stumbles for a second and comes
+    /// back should leave the operator on their own aircraft, because being thrown onto somebody
+    /// else's camera mid-approach is worse than a second of interference. A real loss outlasts
+    /// this comfortably.
+    var noSignalHold: TimeInterval = 4
     /// Zero means unlimited; airframe, payload and mission time still constrain attempts.
     var maximumAttempts = 0
     var timeLimit: TimeInterval = 600
@@ -277,6 +442,11 @@ struct InterceptMissionConfiguration: Codable, Equatable {
     /// rather judge range by eye. Deliberately not tied to difficulty: it is a preference about
     /// how the mission is flown, not a rung on the ladder.
     var hidesRangeReadouts = false
+    /// Centre of the drop zone on the delivery side, relative to the dock, with y above the local
+    /// ground. Far enough out that the run is a transit with a hunter on it rather than a hop.
+    var deliveryZoneOffset = SIMD3<Float>(0, 0, -1500)
+    /// How close to that centre the load has to come to rest to count as delivered.
+    var deliveryZoneRadius: Float = 45
 
     /// Difficulty is the same lever it is in every other scenario: how much room the target has,
     /// how late it can be acquired, how sharply it moves and how many approaches are allowed.
@@ -290,12 +460,18 @@ struct InterceptMissionConfiguration: Codable, Equatable {
             configuration.attemptRange = 26
             configuration.targetAgility = 0.65
             configuration.maximumAttempts = 0
+            // How far the load has to be carried, with a hunter on it the whole way. This is the
+            // delivery side's difficulty: a longer run is more time inside somebody's turn circle.
+            configuration.deliveryZoneOffset = SIMD3<Float>(0, 0, -950)
+            configuration.deliveryZoneRadius = 70
         case .medium:
             configuration.areaRadius = 280
             configuration.acquisitionRange = 160
             configuration.attemptRange = 22
             configuration.targetAgility = 1
             configuration.maximumAttempts = 0
+            configuration.deliveryZoneOffset = SIMD3<Float>(0, 0, -1500)
+            configuration.deliveryZoneRadius = 45
         case .hard:
             configuration.areaRadius = 380
             configuration.acquisitionRange = 120
@@ -303,6 +479,8 @@ struct InterceptMissionConfiguration: Codable, Equatable {
             configuration.targetAgility = 1.6
             // The one difficulty where running out of approaches is a real way to lose.
             configuration.maximumAttempts = 3
+            configuration.deliveryZoneOffset = SIMD3<Float>(0, 0, -2200)
+            configuration.deliveryZoneRadius = 28
         }
         return configuration
     }
@@ -312,14 +490,38 @@ struct InterceptMissionConfiguration: Codable, Equatable {
     var validated: InterceptMissionConfiguration {
         var copy = self
         copy.areaRadius = areaRadius.isFinite ? max(80, min(areaRadius, 2000)) : 240
+        copy.deliveryZoneRadius = deliveryZoneRadius.isFinite ? max(12, min(deliveryZoneRadius, 300)) : 45
+        if !deliveryZoneOffset.x.isFinite || !deliveryZoneOffset.y.isFinite || !deliveryZoneOffset.z.isFinite {
+            copy.deliveryZoneOffset = SIMD3<Float>(0, 0, -1500)
+        }
+        if side == .delivery {
+            // The aircraft the operator is running from hunts them. Nothing else it could be doing
+            // is this mission, so it is not left to the setup screen to get right.
+            copy.targetBehavior = .interceptorPursuit
+            // A zone the run cannot legally reach is not a mission. The boundary has to contain it
+            // with room to manoeuvre around it.
+            let reach = simd_length(SIMD2<Float>(copy.deliveryZoneOffset.x, copy.deliveryZoneOffset.z))
+            copy.areaRadius = max(copy.areaRadius, reach + copy.deliveryZoneRadius + 80)
+        } else if targetBehavior == .interceptorPursuit {
+            copy.targetBehavior = .routeFollower
+        }
         copy.acquisitionRange = acquisitionRange.isFinite ? max(20, min(acquisitionRange, copy.areaRadius)) : 160
         copy.attemptRange = attemptRange.isFinite ? max(2, min(attemptRange, 80)) : 22
         copy.attemptTimeout = attemptTimeout.isFinite ? max(2, min(attemptTimeout, 120)) : 25
-        copy.assessmentTimeout = assessmentTimeout.isFinite ? max(1, min(assessmentTimeout, 120)) : 12
-        copy.noSignalHold = noSignalHold.isFinite ? max(0.2, min(noSignalHold, 5)) : 1.2
+        copy.assessmentTimeout = assessmentTimeout.isFinite ? max(1, min(assessmentTimeout, 120)) : 25
+        copy.noSignalHold = noSignalHold.isFinite ? max(0.5, min(noSignalHold, 15)) : 4
         copy.timeLimit = timeLimit.isFinite ? max(10, min(timeLimit, 7200)) : 600
         copy.targetAgility = targetAgility.isFinite ? max(0, min(targetAgility, 4)) : 1
         copy.maximumAttempts = max(0, maximumAttempts)
+        // A load that belongs to the other side of the mission — a net on a delivery run, a
+        // medical pack on an interception — is a configuration that could only have come from
+        // switching sides with one already chosen.
+        let allowed = AttachedModuleShape.selectable(for: copy.side)
+        if !allowed.contains(copy.moduleShape) {
+            copy.moduleShape = allowed.first ?? .charge
+        }
+        // One source of truth: the module decides what the module does.
+        copy.payloadProfile = copy.moduleShape.effectProfile
         if !targetOffset.x.isFinite || !targetOffset.y.isFinite || !targetOffset.z.isFinite {
             copy.targetOffset = SIMD3<Float>(0, 18, -65)
         }
@@ -405,16 +607,22 @@ enum InterceptResultReason: String, Codable {
     case assessmentExpired
     case attemptsExhausted
     case payloadUnavailable
+    /// Delivery side: the load came to rest inside the zone. The only way that run is won.
+    case payloadDelivered
+    /// Delivery side: it came down somewhere else, or did not survive the trip.
+    case payloadLost
 
     var titleKey: String { "intercept.result.\(rawValue)" }
 }
 
+/// How the run ended. Deliberately without a score: this is a rehearsal of an interception, and
+/// what matters afterwards is whether it worked, why, and how many approaches it took — not a
+/// number that turns those into a leaderboard.
 struct InterceptMissionResult: Codable, Equatable {
     let success: Bool
     let reason: InterceptResultReason
     let timestamp: TimeInterval
     let attempts: Int
-    let score: Int
 }
 
 // MARK: - Mission events
@@ -530,6 +738,13 @@ struct InterceptMissionHUDState: Equatable {
     var sourceHasTargetInView = false
     /// Whether the operator asked for the distances to be left off the screen.
     var hidesRanges = false
+    /// Which end of the mission is being flown, and — on the delivery side — where the load is,
+    /// how far the zone still is, and whether it can be let go right now.
+    var side: InterceptMissionSide = .interceptor
+    var delivery: InterceptDeliveryState = .carried
+    var deliveryZoneRange: Float = 0
+    var isOverDeliveryZone = false
+    var canRelease = false
 
     var isObservingObserver: Bool { sourceID == InterceptCallsign.observer }
 }

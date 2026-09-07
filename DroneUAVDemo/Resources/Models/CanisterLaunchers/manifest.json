@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "date": "2026-09-07",
+  "collection": "IAI container-launch transports, truck plus module",
+  "note": "Cell geometry is measured from the model at load time; the numbers recorded here are what that measurement produced when the collection was added, so a changed model is visible as a mismatch rather than silently believed.",
+  "fit_caveat": "The source collection records that the current flight meshes are wider and taller than these cells (Harpy 2.10 m span against a 1.54 m cell). The airframe is hidden while sealed, which is what the launch presentation already does, so the round is not drawn inside a cell it does not fit.",
+  "models": [
+    {
+      "id": "harpy-bonnet-6x6",
+      "file": "harpy-bonnet-6x6-with-module.usdz",
+      "profile_ids": ["iai-harpy", "iai-harpy-ng"],
+      "launch_cell": "Cell_2_1",
+      "cells": 3,
+      "measured_cell_axis": "+Z",
+      "measured_cell_size_m": [1.76, 1.278, 2.931],
+      "measured_module_centre_m": [0.0, 3.15, -1.82],
+      "cab_side_z": 1.68,
+      "cover_animation": false
+    },
+    {
+      "id": "harop-cabover-6x6",
+      "file": "harop-cabover-6x6-with-module.usdz",
+      "profile_ids": ["iai-harop"],
+      "launch_cell": "Cell_2_2",
+      "cells": 9,
+      "measured_cell_axis": "+X",
+      "measured_cell_size_m": [3.101, 0.629, 1.76],
+      "measured_module_centre_m": [0.0, 2.86, -1.1],
+      "cab_side_z": 2.82,
+      "cover_animation": true
+    }
+  ]
+}

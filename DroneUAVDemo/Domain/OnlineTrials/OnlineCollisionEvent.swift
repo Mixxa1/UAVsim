@@ -47,6 +47,27 @@ struct OnlineSharedEventParticipant: Identifiable, Codable, Equatable {
     }
 }
 
+/// Initial conditions of a released object, replicated instead of its trajectory.
+///
+/// `BallisticProjectileRuntime` integrates at a fixed step from a fixed state, so every participant
+/// given the same release point, velocity and drag properties computes the same arc. Sending those
+/// seven numbers once is both cheaper and steadier than streaming positions: no interpolation, no
+/// jitter, and a capsule that visibly lands where it should on every screen.
+///
+/// The wind and the atmosphere are session-wide and already agreed, so they are not carried here.
+struct OnlineDropPayload: Codable, Equatable {
+    var velocityX: Double
+    var velocityY: Double
+    var velocityZ: Double
+    var massKg: Double
+    var dragCoefficient: Double
+    var referenceAreaSqM: Double
+    /// Set for a payload released whole from the mount.
+    var payloadTypeRawValue: String?
+    /// Set for a capsule fired from the launcher rack.
+    var capsuleSizeRawValue: String?
+}
+
 struct OnlineSharedEvent: Identifiable, Codable, Equatable {
     var id: UUID
     var sessionID: UUID
@@ -65,6 +86,9 @@ struct OnlineSharedEvent: Identifiable, Codable, Equatable {
     var note: String?
     /// Resolved independently by the authority; legacy events retain their shared result.
     var vehicleResults: [String: OnlineSharedEventResult]? = nil
+    /// Present on `.payloadReleased`. Optional so events from builds without ballistics — and every
+    /// other event kind — decode unchanged.
+    var drop: OnlineDropPayload? = nil
 
     init(
         id: UUID = UUID(),
@@ -81,8 +105,10 @@ struct OnlineSharedEvent: Identifiable, Codable, Equatable {
         positionZ: Double,
         result: OnlineSharedEventResult,
         participants: [OnlineSharedEventParticipant],
-        note: String? = nil
+        note: String? = nil,
+        drop: OnlineDropPayload? = nil
     ) {
+        self.drop = drop
         self.id = id
         self.sessionID = sessionID
         self.kind = kind

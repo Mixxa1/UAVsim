@@ -52,6 +52,9 @@
 		100000000000000000000209 /* DroneControlValues.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000109 /* DroneControlValues.swift */; };
 		10000000000000000000020A /* TelemetrySnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010A /* TelemetrySnapshot.swift */; };
 		10000000000000000000020B /* DronePhysicsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010B /* DronePhysicsEngine.swift */; };
+		BA1100000000000000000003 /* BallisticSurfaceProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1100000000000000000004 /* BallisticSurfaceProbe.swift */; };
+		BA1100000000000000000009 /* BallisticObstacleIntersection.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA110000000000000000000A /* BallisticObstacleIntersection.swift */; };
+		BA1100000000000000000005 /* BallisticProjectileRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1100000000000000000006 /* BallisticProjectileRuntime.swift */; };
 		10000000000000000000020C /* SimpleDronePhysicsEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010C /* SimpleDronePhysicsEngine.swift */; };
 		10000000000000000000020D /* SceneFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010D /* SceneFactory.swift */; };
 		10000000000000000000020E /* DroneModelBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000010E /* DroneModelBuilder.swift */; };
@@ -67,6 +70,7 @@
 		10000000000000000000FD21 /* PropulsionBackend.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FD20 /* PropulsionBackend.swift */; };
 		10000000000000000000FD11 /* EngineRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FD10 /* EngineRuntime.swift */; };
 		10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC20 /* FuelSystemRuntime.swift */; };
+		BA1100000000000000000001 /* BallisticDescriptor.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1100000000000000000002 /* BallisticDescriptor.swift */; };
 		10000000000000000000FC11 /* AtmosphereModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FC10 /* AtmosphereModel.swift */; };
 		10000000000000000000FE81 /* CarrierAircraft.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE80 /* CarrierAircraft.swift */; };
 		10000000000000000000FE91 /* CarrierAircraftLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE90 /* CarrierAircraftLoader.swift */; };
@@ -80,6 +84,13 @@
 		A0D1000000000000000000A2 /* AudioAssetCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000A1 /* AudioAssetCatalog.swift */; };
 		A0D1000000000000000000A4 /* AppAudioSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000A3 /* AppAudioSettings.swift */; };
 		A0D1000000000000000000A6 /* Audio in Resources */ = {isa = PBXBuildFile; fileRef = A0D1000000000000000000A5 /* Audio */; };
+		B5A0000000000000000000B2 /* UAVModelAssetLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000B1 /* UAVModelAssetLibrary.swift */; };
+		B5A0000000000000000000A2 /* UAVModels in Resources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000A1 /* UAVModels */; };
+		B5A0000000000000000000C2 /* CatapultAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000C1 /* CatapultAssetLoader.swift */; };
+		B5A0000000000000000000D2 /* Launchers in Resources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000D1 /* Launchers */; };
+		B5A0000000000000000000E2 /* CanisterAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000E1 /* CanisterAssetLoader.swift */; };
+		B5A0000000000000000000F2 /* CanisterLaunchers in Resources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000F1 /* CanisterLaunchers */; };
+		B5A000000000000000000102 /* Vehicles in Resources */ = {isa = PBXBuildFile; fileRef = B5A000000000000000000101 /* Vehicles */; };
 		10000000000000000000FE41 /* FlightEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE40 /* FlightEnvelope.swift */; };
 		10000000000000000000FF23 /* AeroTableCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF22 /* AeroTableCodec.swift */; };
 		10000000000000000000FF13 /* MachCoefficientDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF12 /* MachCoefficientDatabase.swift */; };
@@ -388,6 +399,7 @@
 		AD5000000000000000000000 /* RaceBuilderPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5000000000000000000001 /* RaceBuilderPanelView.swift */; };
 		AD5100000000000000000000 /* InterceptMissionPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5100000000000000000001 /* InterceptMissionPanelView.swift */; };
 		AD5400000000000000000000 /* ControllerAxisSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5400000000000000000001 /* ControllerAxisSettingsView.swift */; };
+		AD5600000000000000000000 /* AttachedModulePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5600000000000000000001 /* AttachedModulePreviewView.swift */; };
 		AD4000000000000000000000 /* RaceTrack.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000001 /* RaceTrack.swift */; };
 		AD4000000000000000000002 /* RaceTrackStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000003 /* RaceTrackStore.swift */; };
 		AD4000000000000000000004 /* RaceTrackGenerator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD4000000000000000000005 /* RaceTrackGenerator.swift */; };
@@ -422,6 +434,7 @@
 		100000000000000000000A40 /* HandLaunchArm.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A41 /* HandLaunchArm.usdz */; };
 		100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1E /* FireTruckAssetLoader.swift */; };
 		10000000000000000000F008 /* RunwayAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F009 /* RunwayAssetLoader.swift */; };
+		BA1100000000000000000007 /* DroneSceneController+Ballistics.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1100000000000000000008 /* DroneSceneController+Ballistics.swift */; };
 		100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A22 /* FireVisualAssetLoader.swift */; };
 		10000000000000000000040A /* Generic_grass.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040B /* Generic_grass.usdz */; };
 		10000000000000000000040C /* ThirdPartyAssets.json in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000040D /* ThirdPartyAssets.json */; };
@@ -594,6 +607,9 @@
 		100000000000000000000109 /* DroneControlValues.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneControlValues.swift; sourceTree = "<group>"; };
 		10000000000000000000010A /* TelemetrySnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TelemetrySnapshot.swift; sourceTree = "<group>"; };
 		10000000000000000000010B /* DronePhysicsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DronePhysicsEngine.swift; sourceTree = "<group>"; };
+		BA1100000000000000000004 /* BallisticSurfaceProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BallisticSurfaceProbe.swift"; sourceTree = "<group>"; };
+		BA110000000000000000000A /* BallisticObstacleIntersection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BallisticObstacleIntersection.swift"; sourceTree = "<group>"; };
+		BA1100000000000000000006 /* BallisticProjectileRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BallisticProjectileRuntime.swift"; sourceTree = "<group>"; };
 		10000000000000000000010C /* SimpleDronePhysicsEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimpleDronePhysicsEngine.swift; sourceTree = "<group>"; };
 		10000000000000000000010D /* SceneFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneFactory.swift; sourceTree = "<group>"; };
 		10000000000000000000010E /* DroneModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DroneModelBuilder.swift; sourceTree = "<group>"; };
@@ -611,6 +627,7 @@
 		10000000000000000000FD20 /* PropulsionBackend.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PropulsionBackend.swift; sourceTree = "<group>"; };
 		10000000000000000000FD10 /* EngineRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineRuntime.swift; sourceTree = "<group>"; };
 		10000000000000000000FC20 /* FuelSystemRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FuelSystemRuntime.swift; sourceTree = "<group>"; };
+		BA1100000000000000000002 /* BallisticDescriptor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "BallisticDescriptor.swift"; sourceTree = "<group>"; };
 		10000000000000000000FC10 /* AtmosphereModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AtmosphereModel.swift; sourceTree = "<group>"; };
 		10000000000000000000FE80 /* CarrierAircraft.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierAircraft.swift; sourceTree = "<group>"; };
 		10000000000000000000FE90 /* CarrierAircraftLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierAircraftLoader.swift; sourceTree = "<group>"; };
@@ -624,6 +641,13 @@
 		A0D1000000000000000000A1 /* AudioAssetCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AudioAssetCatalog.swift; sourceTree = "<group>"; };
 		A0D1000000000000000000A3 /* AppAudioSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppAudioSettings.swift; sourceTree = "<group>"; };
 		A0D1000000000000000000A5 /* Audio */ = {isa = PBXFileReference; lastKnownFileType = folder; path = Audio; sourceTree = "<group>"; };
+		B5A0000000000000000000B1 /* UAVModelAssetLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVModelAssetLibrary.swift; sourceTree = "<group>"; };
+		B5A0000000000000000000A1 /* UAVModels */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/UAVModels"; sourceTree = "<group>"; };
+		B5A0000000000000000000C1 /* CatapultAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CatapultAssetLoader.swift; sourceTree = "<group>"; };
+		B5A0000000000000000000D1 /* Launchers */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/Launchers"; sourceTree = "<group>"; };
+		B5A0000000000000000000E1 /* CanisterAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanisterAssetLoader.swift; sourceTree = "<group>"; };
+		B5A0000000000000000000F1 /* CanisterLaunchers */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/CanisterLaunchers"; sourceTree = "<group>"; };
+		B5A000000000000000000101 /* Vehicles */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/Vehicles"; sourceTree = "<group>"; };
 		10000000000000000000FE40 /* FlightEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightEnvelope.swift; sourceTree = "<group>"; };
 		10000000000000000000FF22 /* AeroTableCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroTableCodec.swift; sourceTree = "<group>"; };
 		10000000000000000000FF12 /* MachCoefficientDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachCoefficientDatabase.swift; sourceTree = "<group>"; };
@@ -908,6 +932,7 @@
 		100000000000000000000401 /* PineTreeAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PineTreeAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000A1E /* FireTruckAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireTruckAssetLoader.swift; sourceTree = "<group>"; };
 		10000000000000000000F009 /* RunwayAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunwayAssetLoader.swift; sourceTree = "<group>"; };
+		BA1100000000000000000008 /* DroneSceneController+Ballistics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "DroneSceneController+Ballistics.swift"; sourceTree = "<group>"; };
 		100000000000000000000A22 /* FireVisualAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FireVisualAssetLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000403 /* GenericGrassMaterialLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GenericGrassMaterialLoader.swift; sourceTree = "<group>"; };
 		100000000000000000000405 /* EnvironmentDebugOptions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EnvironmentDebugOptions.swift; sourceTree = "<group>"; };
@@ -936,6 +961,7 @@
 		AD5000000000000000000001 /* RaceBuilderPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceBuilderPanelView.swift; sourceTree = "<group>"; };
 		AD5100000000000000000001 /* InterceptMissionPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptMissionPanelView.swift; sourceTree = "<group>"; };
 		AD5400000000000000000001 /* ControllerAxisSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControllerAxisSettingsView.swift; sourceTree = "<group>"; };
+		AD5600000000000000000001 /* AttachedModulePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AttachedModulePreviewView.swift; sourceTree = "<group>"; };
 		AD4000000000000000000001 /* RaceTrack.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrack.swift; sourceTree = "<group>"; };
 		AD4000000000000000000003 /* RaceTrackStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrackStore.swift; sourceTree = "<group>"; };
 		AD4000000000000000000005 /* RaceTrackGenerator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RaceTrackGenerator.swift; sourceTree = "<group>"; };
@@ -1244,6 +1270,7 @@
 				100000000000000000000131 /* UAVProfile.swift */,
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
 				10000000000000000000FD30 /* PropellerModel.swift */,
+				BA1100000000000000000002 /* BallisticDescriptor.swift */,
 				10000000000000000000FC10 /* AtmosphereModel.swift */,
 				10000000000000000000FE80 /* CarrierAircraft.swift */,
 				10000000000000000000FE60 /* SonicBoomModel.swift */,
@@ -1382,6 +1409,9 @@
 				1000000000000000000002AA /* MulticopterAutopilotController.swift */,
 				1000000000000000000002A8 /* MulticopterRouteBuilder.swift */,
 				100000000000000000000141 /* PayloadController.swift */,
+				BA1100000000000000000004 /* BallisticSurfaceProbe.swift */,
+				BA110000000000000000000A /* BallisticObstacleIntersection.swift */,
+				BA1100000000000000000006 /* BallisticProjectileRuntime.swift */,
 				10000000000000000000010C /* SimpleDronePhysicsEngine.swift */,
 				10000000000000000000016E /* TacticalMapCoordinator.swift */,
 				1000000000000000000002C7 /* MissionReplayRecorder.swift */,
@@ -1410,6 +1440,7 @@
 				100000000000000000000401 /* PineTreeAssetLoader.swift */,
 				100000000000000000000A1E /* FireTruckAssetLoader.swift */,
 				10000000000000000000F009 /* RunwayAssetLoader.swift */,
+				BA1100000000000000000008 /* DroneSceneController+Ballistics.swift */,
 				100000000000000000000A22 /* FireVisualAssetLoader.swift */,
 				100000000000000000000A02 /* ManAssetLoader.swift */,
 				AD4000000000000000000009 /* RaceTrackSceneLayer.swift */,
@@ -1447,6 +1478,9 @@
 				10000000000000000000010D /* SceneFactory.swift */,
 				10000000000000000000011D /* ScenePopulationService.swift */,
 				100000000000000000000134 /* UAVVisualFactory.swift */,
+				B5A0000000000000000000B1 /* UAVModelAssetLibrary.swift */,
+				B5A0000000000000000000C1 /* CatapultAssetLoader.swift */,
+				B5A0000000000000000000E1 /* CanisterAssetLoader.swift */,
 				10000000000000000000FE90 /* CarrierAircraftLoader.swift */,
 				100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */,
 				1000000000000000000002DE /* MissionReplaySceneController.swift */,
@@ -1515,6 +1549,7 @@
 				AD5000000000000000000001 /* RaceBuilderPanelView.swift */,
 				AD5100000000000000000001 /* InterceptMissionPanelView.swift */,
 				AD5400000000000000000001 /* ControllerAxisSettingsView.swift */,
+				AD5600000000000000000001 /* AttachedModulePreviewView.swift */,
 				100000000000000000000A0E /* PayloadGimbalSliderControls.swift */,
 				100000000000000000000A10 /* SettingsView.swift */,
 				100000000000000000000150 /* DiagnosticsModuleView.swift */,
@@ -1641,6 +1676,10 @@
 				A9N000000000000000000006 /* Analog-NTSC-LICENSE.txt */,
 				10000000000000000000040D /* ThirdPartyAssets.json */,
 				A0D1000000000000000000A5 /* Audio */,
+				B5A0000000000000000000A1 /* UAVModels */,
+				B5A0000000000000000000D1 /* Launchers */,
+				B5A0000000000000000000F1 /* CanisterLaunchers */,
+				B5A000000000000000000101 /* Vehicles */,
 				C0DE10000000000000000002 /* Workbench.usdz */,
 				C0DE10000000000000000004 /* Brick_Material.usdz */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
@@ -1922,6 +1961,10 @@
 				A9N000000000000000000106 /* Analog-NTSC-LICENSE.txt in Resources */,
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
 				A0D1000000000000000000A6 /* Audio in Resources */,
+				B5A0000000000000000000A2 /* UAVModels in Resources */,
+				B5A0000000000000000000D2 /* Launchers in Resources */,
+				B5A0000000000000000000F2 /* CanisterLaunchers in Resources */,
+				B5A000000000000000000102 /* Vehicles in Resources */,
 				C0DE10000000000000000001 /* Workbench.usdz in Resources */,
 				C0DE10000000000000000003 /* Brick_Material.usdz in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
@@ -2090,6 +2133,9 @@
 				10000000000000000000020A /* TelemetrySnapshot.swift in Sources */,
 				10000000000000000000024E /* TargetMarkerState.swift in Sources */,
 				10000000000000000000020B /* DronePhysicsEngine.swift in Sources */,
+				BA1100000000000000000003 /* BallisticSurfaceProbe.swift in Sources */,
+				BA1100000000000000000009 /* BallisticObstacleIntersection.swift in Sources */,
+				BA1100000000000000000005 /* BallisticProjectileRuntime.swift in Sources */,
 				10000000000000000000020C /* SimpleDronePhysicsEngine.swift in Sources */,
 				10000000000000000000020D /* SceneFactory.swift in Sources */,
 				10000000000000000000020E /* DroneModelBuilder.swift in Sources */,
@@ -2105,6 +2151,7 @@
 				10000000000000000000FD21 /* PropulsionBackend.swift in Sources */,
 				10000000000000000000FD11 /* EngineRuntime.swift in Sources */,
 				10000000000000000000FC21 /* FuelSystemRuntime.swift in Sources */,
+				BA1100000000000000000001 /* BallisticDescriptor.swift in Sources */,
 				10000000000000000000FC11 /* AtmosphereModel.swift in Sources */,
 				10000000000000000000FE81 /* CarrierAircraft.swift in Sources */,
 				10000000000000000000FE91 /* CarrierAircraftLoader.swift in Sources */,
@@ -2155,11 +2202,13 @@
 				100000000000000000000400 /* PineTreeAssetLoader.swift in Sources */,
 				100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */,
 				10000000000000000000F008 /* RunwayAssetLoader.swift in Sources */,
+				BA1100000000000000000007 /* DroneSceneController+Ballistics.swift in Sources */,
 				100000000000000000000A21 /* FireVisualAssetLoader.swift in Sources */,
 				100000000000000000000A01 /* ManAssetLoader.swift in Sources */,
 				AD5000000000000000000000 /* RaceBuilderPanelView.swift in Sources */,
 				AD5100000000000000000000 /* InterceptMissionPanelView.swift in Sources */,
 				AD5400000000000000000000 /* ControllerAxisSettingsView.swift in Sources */,
+				AD5600000000000000000000 /* AttachedModulePreviewView.swift in Sources */,
 				AD4000000000000000000000 /* RaceTrack.swift in Sources */,
 				AD4000000000000000000002 /* RaceTrackStore.swift in Sources */,
 				AD4000000000000000000004 /* RaceTrackGenerator.swift in Sources */,
@@ -2259,6 +2308,9 @@
 				1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */,
 				100000000000000000000230 /* UAVVisualPreset.swift in Sources */,
 				100000000000000000000231 /* UAVVisualFactory.swift in Sources */,
+				B5A0000000000000000000B2 /* UAVModelAssetLibrary.swift in Sources */,
+				B5A0000000000000000000C2 /* CatapultAssetLoader.swift in Sources */,
+				B5A0000000000000000000E2 /* CanisterAssetLoader.swift in Sources */,
 				100000000000000000000232 /* UAVFilterState.swift in Sources */,
 				100000000000000000000233 /* UAVCatalog.swift in Sources */,
 				100000000000000000000234 /* UAVSelectionState.swift in Sources */,

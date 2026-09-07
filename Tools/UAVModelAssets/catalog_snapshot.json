@@ -1,0 +1,766 @@
+[
+  {
+    "id": "dji-matrice-350-rtk",
+    "name": "DJI Matrice 350 RTK",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        810.0,
+        670.0,
+        430.0
+      ]
+    },
+    "notes": "DJI enterprise specifications list 3.77 kg without batteries, 6.47 kg with two TB65 batteries, 960 g single downward payload, and 9.2 kg max takeoff weight.",
+    "source": "https://enterprise.dji.com/matrice-350-rtk/specs",
+    "kind": "real"
+  },
+  {
+    "id": "dji-flycart-30",
+    "name": "DJI FlyCart 30",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        2800.0,
+        3085.0,
+        947.0
+      ]
+    },
+    "notes": "DJI lists 42.5 kg aircraft weight without batteries, 65.0 kg with batteries, 30.0 kg payload in dual-battery mode, 40.0 kg in single-battery mode, and 95.0 kg max takeoff weight. Baseline keeps 30.0 kg as the safe standard payload limit.",
+    "source": "https://www.dji.com/flycart-30/specs",
+    "kind": "real"
+  },
+  {
+    "id": "dji-mavic-3t",
+    "name": "DJI Mavic 3T",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "diagonalWheelbaseMillimeters": 380.1,
+      "unfoldedMillimeters": [
+        347.5,
+        283.0,
+        107.7
+      ]
+    },
+    "notes": "DJI Mavic 3 Enterprise specifications list Mavic 3T at 920 g with propellers, 1,050 g maximum takeoff weight, 347.5×283×107.7 mm unfolded dimensions, 45-minute flight time, 38-minute hover time, 21 m/s maximum horizontal speed in Sport mode, 12 m/s wind resistance, a 335.5 g battery, 56× hybrid zoom, and a thermal camera with spot and area temperature measurement.",
+    "source": "https://enterprise.dji.com/mavic-3-enterprise/specs",
+    "kind": "real"
+  },
+  {
+    "id": "dji-matrice-4t",
+    "name": "DJI Matrice 4T",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "diagonalWheelbaseMillimeters": 438.8,
+      "unfoldedMillimeters": [
+        307.0,
+        387.5,
+        149.5
+      ]
+    },
+    "notes": "DJI Matrice 4 Series specifications list 1,219 g standard takeoff weight, 1,420 g maximum takeoff weight, 200 g maximum payload, 307.0×387.5×149.5 mm unfolded dimensions, 438.8 mm diagonal wheelbase, 49-minute flight time, 42-minute hover time, 21 m/s maximum horizontal speed, and a 99.5 Wh / 401 g battery.",
+    "source": "https://enterprise.dji.com/matrice-4-series/specs",
+    "kind": "real"
+  },
+  {
+    "id": "dji-matrice-30t",
+    "name": "DJI Matrice 30T",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "diagonalWheelbaseMillimeters": 668.0,
+      "unfoldedMillimeters": [
+        470.0,
+        585.0,
+        215.0
+      ]
+    },
+    "notes": "DJI Matrice 30 Series specifications list 470×585×215 mm unfolded dimensions, 365×215×195 mm folded dimensions, 3,770±10 g weight with two batteries, 4,069 g maximum takeoff weight, 23 m/s maximum horizontal speed, 41-minute flight time, 36-minute hover time, 12 m/s wind resistance, and two 685 g / 131.6 Wh TB30 batteries.",
+    "source": "https://enterprise.dji.com/matrice-30/specs",
+    "kind": "real"
+  },
+  {
+    "id": "dji-matrice-400",
+    "name": "DJI Matrice 400",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "diagonalWheelbaseMillimeters": 1070.0,
+      "unfoldedMillimeters": [
+        980.0,
+        760.0,
+        480.0
+      ]
+    },
+    "notes": "DJI Matrice 400 specifications list 5,020±20 g without batteries, 9,740±40 g with batteries, 15.8 kg maximum takeoff weight, 980×760×480 mm unfolded dimensions, and 6 kg maximum payload.",
+    "source": "https://enterprise.dji.com/matrice-400/specs",
+    "kind": "real"
+  },
+  {
+    "id": "fotokite-sigma",
+    "name": "Fotokite Sigma",
+    "manufacturer": "Fotokite",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        520.0,
+        520.0,
+        180.0
+      ]
+    },
+    "notes": "Fotokite publishes the Sigma as an actively tethered first-responder UAS with a 1.3 kg carbon-fiber frame, 24+ hour operation, 45 m maximum altitude, IP55 rating, thermal camera, wide camera, zoom camera, and live streaming.",
+    "source": "https://fotokite.com/",
+    "kind": "real"
+  },
+  {
+    "id": "everdrone-first-on-scene",
+    "name": "Everdrone First on Scene",
+    "manufacturer": "Everdrone",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Everdrone describes its system as autonomous Drone as First Responder support that delivers lifesaving medical equipment, including AEDs and anti-bleeding kits, and provides real-time situational awareness. Exact aircraft mass and dimensions are not publicly specified.",
+    "source": "https://everdrone.com/",
+    "kind": "real"
+  },
+  {
+    "id": "zipline-platform-1",
+    "name": "Zipline Platform 1",
+    "manufacturer": "Zipline",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 3350.0,
+      "fuselageLengthMillimeters": 1800.0,
+      "heightMillimeters": 420.0
+    },
+    "notes": "Zipline publishes autonomous delivery drones that fly up to 70 mph and up to 155 miles roundtrip. Platform 1 mass, payload, and dimensions remain conservative estimates because current public Zipline material does not publish exact aircraft figures.",
+    "source": "https://www.zipline.com/technology",
+    "kind": "real"
+  },
+  {
+    "id": "wingcopter-198",
+    "name": "Wingcopter 198",
+    "manufacturer": "Wingcopter",
+    "type": "hybridVTOL",
+    "dimensions": {
+      "wingspanMillimeters": 1980.0,
+      "fuselageLengthMillimeters": 1520.0,
+      "heightMillimeters": 650.0
+    },
+    "notes": "Wingcopter publishes the Wingcopter 198 with a 198×152×65 cm aircraft envelope, 25 kg maximum takeoff weight, 94 km maximum range, 90 km/h speed, 4.7 kg payload, eight motors, and two batteries. Battery-separated mass is still estimated until OEM mass breakdown is available.",
+    "source": "https://wingcopter.com/wingcopter-198",
+    "kind": "real"
+  },
+  {
+    "id": "matternet-m2",
+    "name": "Matternet M2",
+    "manufacturer": "Matternet",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        720.0,
+        720.0,
+        320.0
+      ]
+    },
+    "notes": "Matternet publishes the M2 as an FAA Type Certified healthcare delivery aircraft and states that the system carries payloads up to 2 kg over distances up to 20 km. Exact aircraft mass, speed, and dimensions remain modeled conservatively until manufacturer data is available.",
+    "source": "https://www.matternet.com/our-system",
+    "kind": "real"
+  },
+  {
+    "id": "skydio-x10",
+    "name": "Skydio X10",
+    "manufacturer": "Skydio",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        351.0,
+        351.0,
+        160.0
+      ]
+    },
+    "notes": "Skydio publishes X10 with up to 45 mph maximum speed, 40-minute maximum flight time, IP55 protection, 28.6 mph gust handling, 7.5-mile range with Connect SL, thermal sensor packages, attachment bays rated to 385 g, and aircraft weight under 4.7 lb. Full width, height, and battery mass remain estimated.",
+    "source": "https://www.skydio.com/x10",
+    "kind": "real"
+  },
+  {
+    "id": "dji-matrice-4td-dock-3",
+    "name": "DJI Matrice 4TD + Dock 3",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "diagonalWheelbaseMillimeters": 498.5,
+      "unfoldedMillimeters": [
+        377.7,
+        416.2,
+        212.5
+      ]
+    },
+    "notes": "DJI Dock 3 specifications list the supported Matrice 4D/4TD aircraft at 1,850 g, 2,090 g maximum takeoff weight, 377.7×416.2×212.5 mm dimensions, 54-minute maximum flight time, 47-minute hover time, IP55 rating, 149.9 Wh / 640 g battery, and thermal-camera variant data for Matrice 4TD. DJI notes Dock 3 only supports Normal mode, so runtime speed is capped to the Normal-mode figure.",
+    "source": "https://enterprise.dji.com/dock-3/specs",
+    "kind": "real"
+  },
+  {
+    "id": "brinc-lemur-2",
+    "name": "BRINC Lemur 2",
+    "manufacturer": "BRINC",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        406.4,
+        330.2,
+        101.6
+      ]
+    },
+    "notes": "BRINC publishes Lemur 2 at 3.3 lb / 1.5 kg, 20-minute flight time, 16×13×4 in dimensions, 4K visual camera, night vision, thermal sensor, 360-degree position hold, real-time floor plans, glass breaker, two-way communications, live stream, and mesh capability. Public BRINC specs do not publish a numeric maximum speed.",
+    "source": "https://brincdrones.com/lemur-2/",
+    "kind": "real"
+  },
+  {
+    "id": "dji-mavic-4-pro",
+    "name": "DJI Mavic 4 Pro",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "DJI official materials confirm a 1,063 g takeoff weight, 51-minute maximum flight time, and a 6,654 mAh intelligent flight battery. No official airframe-only base mass is inferred here.",
+    "source": "https://store.dji.com/product/dji-mavic-4-pro",
+    "kind": "real"
+  },
+  {
+    "id": "dji-neo",
+    "name": "DJI Neo",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        130.0,
+        157.0,
+        48.5
+      ]
+    },
+    "notes": "DJI official specifications list 135 g takeoff weight, 130×157×48.5 mm aircraft dimensions, 18-minute flight and hover time, 7 km flight distance, 10 km FCC transmission distance, 8 m/s wind resistance, 45 g / 10.5 Wh battery, 3 m/s maximum ascent speed in Sport mode, and 16 m/s maximum horizontal speed in Manual mode.",
+    "source": "https://www.dji.com/neo/specs",
+    "kind": "real"
+  },
+  {
+    "id": "dji-phantom-3-standard",
+    "name": "DJI Phantom 3 Standard",
+    "manufacturer": "DJI",
+    "type": "multicopter",
+    "dimensions": {
+      "diagonalWheelbaseMillimeters": 350.0
+    },
+    "notes": "DJI official support materials list 1,216 g aircraft weight with battery and propellers and a 350 mm diagonal size. Battery-separated base mass and maximum payload figures are intentionally left unset.",
+    "source": "https://www.dji.com/phantom-3-standard/info#specs",
+    "kind": "real"
+  },
+  {
+    "id": "fpv-tiny-whoop-65",
+    "name": "Tiny Whoop 65",
+    "manufacturer": "FPV Class",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        98.0,
+        98.0,
+        42.0
+      ]
+    },
+    "notes": "Representative of the 65 mm ducted whoop class rather than one product: roughly 35 g all-up on a 1S 450 mAh pack, three to four minutes of flying, and a top speed low enough that a doorway is a real gate.",
+    "source": null,
+    "kind": "class"
+  },
+  {
+    "id": "fpv-micro-racer-25",
+    "name": "Micro Racer 2.5\"",
+    "manufacturer": "FPV Class",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        145.0,
+        145.0,
+        46.0
+      ]
+    },
+    "notes": "Representative of the 2.5-inch micro class — about 145 g on a 3S pack, four to five minutes of flying, and enough speed to make a tight course genuinely demanding.",
+    "source": null,
+    "kind": "class"
+  },
+  {
+    "id": "fpv-racer-5",
+    "name": "Racer 5-inch",
+    "manufacturer": "FPV Class",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        250.0,
+        250.0,
+        62.0
+      ]
+    },
+    "notes": "Representative of the open five-inch class: about 680 g ready to fly on a 6S 1300 mAh pack, four to five minutes of racing, and a thrust-to-weight ratio near ten to one.",
+    "source": null,
+    "kind": "class"
+  },
+  {
+    "id": "fpv-spec-5",
+    "name": "Spec 5-inch",
+    "manufacturer": "FPV Class",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        250.0,
+        250.0,
+        62.0
+      ]
+    },
+    "notes": "Representative of a spec/control racing class — deliberately a little heavier and a little slower than the open five-inch, with the performance ceiling set by the rules rather than by the builder's budget.",
+    "source": null,
+    "kind": "class"
+  },
+  {
+    "id": "fpv-long-range-7",
+    "name": "Long Range 7-inch",
+    "manufacturer": "FPV Class",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        340.0,
+        340.0,
+        78.0
+      ]
+    },
+    "notes": "Representative of the 7-inch long-range class — around 1.15 kg on a 6S 4000-6000 mAh pack, fifteen to twenty minutes of cruising, noticeably steadier in wind than a five-inch and correspondingly slower to change direction.",
+    "source": null,
+    "kind": "class"
+  },
+  {
+    "id": "fpv-open-class",
+    "name": "Open Class 10-inch",
+    "manufacturer": "FPV Class",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        480.0,
+        480.0,
+        115.0
+      ]
+    },
+    "notes": "Representative of the X/open racing class — about 2.6 kg on 12S, six minutes of flying, and the highest straight-line speed of any multirotor here. The mass that buys the speed also has to be flown: it neither stops nor turns like a five-inch.",
+    "source": null,
+    "kind": "class"
+  },
+  {
+    "id": "fpv-cinewhoop-3",
+    "name": "Cinewhoop 3-inch",
+    "manufacturer": "FPV Class",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        195.0,
+        195.0,
+        72.0
+      ]
+    },
+    "notes": "Representative of the cinewhoop class — around 550 g with prop ducts, four to five minutes of flying, deliberately damped handling for camera work. The ducts cost speed and add a great deal of side area for wind to push on.",
+    "source": null,
+    "kind": "class"
+  },
+  {
+    "id": "freefly-alta-x",
+    "name": "Freefly Alta X",
+    "manufacturer": "Freefly Systems",
+    "type": "multicopter",
+    "dimensions": {
+      "unfoldedMillimeters": [
+        2273.0,
+        2273.0,
+        387.0
+      ]
+    },
+    "notes": "Freefly specifications list 10.86 kg standard empty weight, 15.06 kg maximum payload, and 34.86 kg maximum gross takeoff weight.",
+    "source": "https://freeflysystems.com/alta-x/specs",
+    "kind": "real"
+  },
+  {
+    "id": "griff-30",
+    "name": "Griff 30",
+    "manufacturer": "Griff Aviation",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Official Griff Aviation product materials confirm 30 kg maximum payload capacity. Other mass and size values are left optional rather than inferred.",
+    "source": "https://www.griffaviation.com/drones/griff-30",
+    "kind": "real"
+  },
+  {
+    "id": "griff-60",
+    "name": "Griff 60",
+    "manufacturer": "Griff Aviation",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Official Griff Aviation materials confirm an eight-rotor configuration and 60 kg maximum payload capacity. Additional mass figures are intentionally left optional.",
+    "source": "https://www.griffaviation.com/drones/griff-60",
+    "kind": "real"
+  },
+  {
+    "id": "wildfire-ember-40",
+    "name": "Wildfire Robotics Ember 40",
+    "manufacturer": "Wildfire Robotics",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Composite/representative platform (not a real product) — modeled as the entry point of a firefighting hose-lift family, sized for lightweight foldable hose up to its full narrow-diameter rigging range.",
+    "source": null,
+    "kind": "concept"
+  },
+  {
+    "id": "pyrolift-talon-60",
+    "name": "Pyrolift Systems Talon 60",
+    "manufacturer": "Pyrolift Systems",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Composite/representative platform (not a real product) — the mid-tier of a firefighting hose-lift family, able to run the narrow hose class end-to-end or a standard attack line for shorter operating heights.",
+    "source": null,
+    "kind": "concept"
+  },
+  {
+    "id": "colossus-ca8-vulcan",
+    "name": "Colossus Aerial CA-8 Vulcan",
+    "manufacturer": "Colossus Aerial",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Composite/representative platform (not a real product) — a superheavy-class firefighting hose-lift airframe, comfortably running a standard hose up to roughly 120m.",
+    "source": null,
+    "kind": "concept"
+  },
+  {
+    "id": "colossus-ca12-atlas",
+    "name": "Colossus Aerial CA-12 Atlas",
+    "manufacturer": "Colossus Aerial",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Composite/representative platform (not a real product) — the top of a firefighting hose-lift family, sized to comfortably carry the longest standard-diameter attack line in the catalog with margin to spare.",
+    "source": null,
+    "kind": "concept"
+  },
+  {
+    "id": "agrowing-titan-at40",
+    "name": "AgroWing Titan AT-40",
+    "manufacturer": "AgroWing Systems",
+    "type": "multicopter",
+    "dimensions": {},
+    "notes": "Composite/representative platform (not a real product), sized in the spirit of real DJI Agras-class spray drones but scaled up to a flagship-tier heavy-lift tank capacity.",
+    "source": null,
+    "kind": "concept"
+  },
+  {
+    "id": "avidrone-490tl",
+    "name": "Avidrone 490TL",
+    "manufacturer": "Avidrone Aerospace",
+    "type": "helicopter",
+    "dimensions": {},
+    "notes": "Avidrone official fleet data lists 23 kg useful payload and 57 kg gross weight. The platform is modeled as a tandem-rotor cargo helicopter without inferring missing dimensions.",
+    "source": "https://avidrone.com/fleet",
+    "kind": "real"
+  },
+  {
+    "id": "wingtraone-gen-ii",
+    "name": "WingtraOne GEN II",
+    "manufacturer": "Wingtra",
+    "type": "hybridVTOL",
+    "dimensions": {
+      "wingspanMillimeters": 1250.0
+    },
+    "notes": "Wingtra official technical specifications confirm 4.5 kg maximum takeoff weight, 800 g payload capacity, and 125 cm wingspan.",
+    "source": "https://wingtra.com/mapping-drone-wingtraone/technical-specifications/",
+    "kind": "real"
+  },
+  {
+    "id": "quantum-systems-trinity-pro",
+    "name": "Quantum Systems Trinity Pro",
+    "manufacturer": "Quantum Systems",
+    "type": "hybridVTOL",
+    "dimensions": {
+      "wingspanMillimeters": 2394.0,
+      "fuselageLengthMillimeters": 1491.0
+    },
+    "notes": "Quantum Systems official materials confirm 5.75 kg maximum takeoff mass, 1.0 kg payload capacity, 2.394 m wingspan, and 1.491 m fuselage length.",
+    "source": "https://helpdesk.quantum-systems.com/trinity/",
+    "kind": "real"
+  },
+  {
+    "id": "mq-9b-skyguardian",
+    "name": "MQ-9B SkyGuardian",
+    "manufacturer": "General Atomics Aeronautical Systems",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 24000.0,
+      "fuselageLengthMillimeters": 11700.0
+    },
+    "notes": "GA-ASI official MQ-9B technical material lists 24 m wingspan, 11.7 m length, 5,670 kg max gross takeoff weight, and 2,177 kg payload capacity across nine hardpoints. It is powered by a Honeywell TPE331-10 turboprop driving a four-blade pusher propeller, and GA-ASI quotes over 40 hours of endurance. The 2,721 kg (6,000 lb) fuel load modelled here is the published capacity; propeller diameter and shaft speed are carried across from the MQ-9A, which uses the same engine, and are estimates rather than separately published figures for this variant. Without a powerplant entry this airframe fell back to the battery-electric thrust model, which is calibrated from weight rather than from an engine — the aircraft flew on a propulsion system it does not have.",
+    "source": "https://www.ga-asi.com/remotely-piloted-aircraft/skyguardian",
+    "kind": "real"
+  },
+  {
+    "id": "hermes-900",
+    "name": "Hermes 900",
+    "manufacturer": "Elbit Systems",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 15000.0
+    },
+    "notes": "Elbit official material confirms a 15 m wingspan, 1,180 kg maximum takeoff weight, and payload capability up to 350 kg.",
+    "source": "https://elbitsystems.com/product/hermes-900/",
+    "kind": "real"
+  },
+  {
+    "id": "ft5-los",
+    "name": "FT5 Łoś",
+    "manufacturer": "WB Group",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 6400.0,
+      "fuselageLengthMillimeters": 3100.0
+    },
+    "notes": "WB Group official FT-5 brochure lists 85 kg weight, 30 kg payload, 6.4 m wingspan, and 3.1 m length. No separate official max takeoff mass was inferred.",
+    "source": "https://www.wbgroup.pl/app/uploads/2017/06/ft5_eng_21q03.pdf",
+    "kind": "real"
+  },
+  {
+    "id": "sensefly-ebee-tac",
+    "name": "senseFly eBee TAC",
+    "manufacturer": "AgEagle senseFly",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 1160.0,
+      "fuselageLengthMillimeters": 700.0
+    },
+    "notes": "Conservative estimated configuration based on public eBee TAC family data. Launch semantics are modeled as hand launch with modest climb corridor and aircraft-like fly-by turns.",
+    "source": "https://ageagle.com/drone-sensors/ebee-tac/",
+    "kind": "real"
+  },
+  {
+    "id": "rq-21-integrator",
+    "name": "RQ-21 Integrator",
+    "manufacturer": "Insitu",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 4900.0,
+      "fuselageLengthMillimeters": 2800.0
+    },
+    "notes": "Conservative estimated mode based on public RQ-21 family references. Launch semantics are intentionally catapult-biased with rail heading and protected initial climb.",
+    "source": "https://www.insitu.com/products/integrator",
+    "kind": "real"
+  },
+  {
+    "id": "aerosonde-mk-4-7",
+    "name": "Aerosonde Mk 4.7",
+    "manufacturer": "Textron Systems",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 3600.0,
+      "fuselageLengthMillimeters": 1900.0,
+      "heightMillimeters": 500.0
+    },
+    "notes": "Textron Systems and Naval Technology publish a 3.6 m wingspan, 10 lb (4.5 kg) payload, more than 12 hours endurance at full payload, 50-60 kt cruise with a 62-80 kt dash, a 4,500 m density-altitude ceiling, and a single-cylinder air-cooled direct-injected spark-ignited Lycoming EL-005 running jet fuel. Lycoming rates the EL-005 at 4 hp (about 3 kW) at 5,500 rpm with a 6.25 kg dry weight. Gross weight is taken as the widely published 80 lb (36.3 kg) figure. Usable fuel mass is NOT published: 8.5 kg is derived here from the endurance and a small heavy-fuel two-stroke's typical specific consumption, and should be treated as an estimate.",
+    "source": "https://www.naval-technology.com/projects/aerosonde-mark-47-small-unmanned-aircraft-system-suas/",
+    "kind": "real"
+  },
+  {
+    "id": "rq-7b-shadow",
+    "name": "RQ-7B Shadow 200",
+    "manufacturer": "Textron Systems (AAI)",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 4270.0,
+      "fuselageLengthMillimeters": 3410.0,
+      "heightMillimeters": 1000.0
+    },
+    "notes": "Directory of U.S. Military Rockets and Missiles lists the RQ-7B at a 4.27 m wingspan, 170 kg maximum weight, 194 km/h maximum and 111 km/h loiter speed, a 4,570 m ceiling, seven hours endurance, and a UEL AR-741 rotary engine of 28.3 kW (38 hp); the RQ-7A length of 3.41 m and height of 1.0 m carry over. The RQ-7B's defining change is a longer wet wing holding up to 44 litres of fuel, which at gasoline density is about 31.7 kg. Later RQ-7Bv2 aircraft fly a 6.1 m wing at over 209 kg gross weight — this entry models the baseline RQ-7B.",
+    "source": "https://www.designation-systems.net/dusrm/app2/q-7.html",
+    "kind": "real"
+  },
+  {
+    "id": "mq-9a-reaper",
+    "name": "MQ-9A Reaper",
+    "manufacturer": "General Atomics Aeronautical Systems",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 20100.0,
+      "fuselageLengthMillimeters": 11000.0,
+      "heightMillimeters": 3810.0
+    },
+    "notes": "The U.S. Air Force fact sheet lists a 66 ft (20.1 m) wingspan, 36 ft (11 m) length, 4,000 lb (1,814 kg / 602 gal) fuel capacity, and a ceiling up to 50,000 ft (15,240 m). Published aggregate data give 2,223 kg empty weight, 4,763 kg maximum takeoff weight, 482 km/h maximum and 313 km/h cruise speed, and 1,900 km range. GA-ASI states over 27 hours endurance, 240 KTAS maximum airspeed, 3,850 lb (1,746 kg) total payload of which 3,000 lb (1,361 kg) is external stores, and a Honeywell TPE331-10 turboprop with digital electronic engine control.",
+    "source": "https://www.ga-asi.com/remotely-piloted-aircraft/mq-9a",
+    "kind": "real"
+  },
+  {
+    "id": "iai-harpy",
+    "name": "IAI Harpy",
+    "manufacturer": "Israel Aerospace Industries",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 2100.0,
+      "fuselageLengthMillimeters": 2700.0,
+      "heightMillimeters": 550.0
+    },
+    "notes": "Published data give a 2.7 m length, 2.1 m wingspan, 135 kg gross weight, a single UEL AR731 Wankel rotary engine of 28 kW (38 hp), 185 km/h maximum speed, 200 km range, and a 32 kg high-explosive warhead in a tailless delta with a single pusher propeller. Endurance and usable fuel mass are not published; the 2.5 h loiter and 20 kg fuel load modelled here are derived from the published range and engine class. This is the first aircraft in the catalogue to use the delta aerodynamic family.",
+    "source": "https://en.wikipedia.org/wiki/IAI_Harpy",
+    "kind": "real"
+  },
+  {
+    "id": "iai-harop",
+    "name": "IAI Harop",
+    "manufacturer": "Israel Aerospace Industries",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 3000.0,
+      "fuselageLengthMillimeters": 2500.0,
+      "heightMillimeters": 600.0
+    },
+    "notes": "Published data give a 2.5 m length, 3.0 m wingspan, delta wing with canards, a single Wankel pusher engine, 417 km/h maximum speed, 200 km range, more than 6 hours endurance, a 4,600 m service ceiling, a radar cross-section under 0.5 m², a 16 kg warhead with sub-metre CEP, man-in-the-loop control, and canister launch from vehicles or ships. Gross weight is the commonly published 135 kg. Engine power and usable fuel mass are not published; the 30 kg fuel load modelled here is derived from the endurance and the engine class.",
+    "source": "https://en.wikipedia.org/wiki/IAI_Harop",
+    "kind": "real"
+  },
+  {
+    "id": "iai-harpy-ng",
+    "name": "IAI Harpy NG",
+    "manufacturer": "Israel Aerospace Industries",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 3000.0,
+      "fuselageLengthMillimeters": 2500.0,
+      "heightMillimeters": 600.0
+    },
+    "notes": "Public material describes Harpy NG as an anti-radiation loitering weapon combining the Harop airframe with the Harpy's SEAD role, quoting 9 hours airborne time, a seeker band widened from 2-18 GHz to 0.8-18 GHz, ground-vehicle launch, and improvements in loiter time, range, altitude, maintenance and training. Reported total weight is about 160 kg with roughly 15 kg of explosive. Dimensions are inherited from the Harop airframe and engine power and fuel mass are not published — this entry is deliberately marked as estimated.",
+    "source": "https://en.wikipedia.org/wiki/IAI_Harpy_NG",
+    "kind": "real"
+  },
+  {
+    "id": "epfl-delta-wing-uav",
+    "name": "EPFL Delta-Wing UAV",
+    "manufacturer": "EPFL (Environmental Sensing Observatory)",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 1245.0,
+      "fuselageLengthMillimeters": 780.0,
+      "heightMillimeters": 220.0
+    },
+    "notes": "EPFL's Environmental Sensing Observatory describes a custom delta-wing UAV whose wings come from a Multiplex Xeno Electric airframe while the fuselage was redesigned for a larger payload and the power-train uprated for the added weight; the platform is used to identify a delta-wing aerodynamic model from combined wind-tunnel and in-flight data for model-based navigation in GNSS-denied conditions. Multiplex publishes the donor airframe at a 1,245 mm wingspan, 32 dm² (0.32 m²) wing area and 650-690 g all-up electric weight. The modified aircraft's mass, payload and airspeeds are not published — the figures here are estimates for the modified configuration and are marked accordingly. This aircraft is electric: it is in this group as an aerodynamic reference for the delta family, not as a fuel-burning platform.",
+    "source": "https://link.springer.com/article/10.1007/s13272-024-00727-9",
+    "kind": "real"
+  },
+  {
+    "id": "ncstate-bwb-delta",
+    "name": "NC State BWB DELTA",
+    "manufacturer": "North Carolina State University",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 2859.0,
+      "fuselageLengthMillimeters": 1473.0,
+      "heightMillimeters": 450.0
+    },
+    "notes": "NASA-funded NC State research (Barnwell MS thesis, 2003, and AIAA 2004-5114) describes the UAV BWB DELTA — designed, built and flight tested at NC State, sharing its planform with the NASA blended wing-body design — with a NACA 0015 section, 58 in (1.473 m) root chord tapering to a 5.25 in tip, 34.3 in (0.871 m) mean aerodynamic chord, 17.77 ft² (1.651 m²) wing area over a 9.38 ft (2.859 m) wingspan, 30 lb (13.6 kg) dry weight with a 15 lb (6.8 kg) payload capacity, and an AMT mini-turbojet rated at 15-18 lbf static thrust. Published speeds are 120 ft/s (36.6 m/s) cruise and 45 ft/s (13.7 m/s) stall, with the MESA test configuration listed at 42 lb (19.05 kg) takeoff weight, 117 ft/s cruise and 44 ft/s stall. The aircraft has no landing gear: it is dolly-launched and skid-recovered. Endurance is not published; the figure here reflects a mini-turbojet's typical fuel fraction and is an estimate.",
+    "source": "https://ntrs.nasa.gov/citations/20050169564",
+    "kind": "real"
+  },
+  {
+    "id": "hesa-karrar",
+    "name": "HESA Karrar",
+    "manufacturer": "HESA",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 2500.0,
+      "fuselageLengthMillimeters": 4000.0,
+      "heightMillimeters": 950.0
+    },
+    "notes": "Published data list a 4 m length, 2.5 m wingspan, 700 kg maximum takeoff weight, 227 kg payload, one Tolloue-5 or Microturbo TRI 60-5 turbojet of an estimated 4.2-4.4 kN thrust, 900 km/h maximum speed, 1,000 km range with a 500 km combat radius, three hardpoints, a rocket-assist system for takeoff and parachute recovery. Service ceiling, endurance and fuel capacity are not published. The 210 kg fuel load and one-hour endurance modelled here are derived together from the engine's rated thrust and a turbojet's specific consumption, so that tank, engine and endurance agree with each other rather than being three independent guesses; they are estimates, not specifications. Rocket-assisted launch and parachute recovery are not modelled, so this aircraft uses the standard start like the other runway-class aircraft in the catalogue.",
+    "source": "https://en.wikipedia.org/wiki/HESA_Karrar",
+    "kind": "real"
+  },
+  {
+    "id": "ryan-bqm-34f-firebee-ii",
+    "name": "Ryan BQM-34F Firebee II",
+    "manufacturer": "Ryan Aeronautical / Teledyne Ryan",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 2940.0,
+      "fuselageLengthMillimeters": 8890.0,
+      "heightMillimeters": 1710.0
+    },
+    "notes": "Published data (designation-systems.net, USAF Museum of Aviation, Wikipedia): 8.89 m long, 2.94 m span, 1.71 m high, 0.66 m body diameter, 951 kg at air launch and 1,110 kg on the ground with its booster — the 159 kg difference being the booster itself. One Teledyne CAE J69-T-406 turbojet of 8.5 kN (1,920 lbf); Wikipedia quotes a J69-T-6 at 1,840 lbf, which is a different mark of the same engine. Mach 1.1 at sea level and Mach 1.78 at 13,700 m, ceiling 16,800 m, 73-75 minutes of subsonic endurance and 1,125-1,430 km of range with a conformal external tank that is jettisoned before the supersonic run. Recovery is by parachute with an 80 ft canopy and mid-air retrieval by helicopter. The operational profile that matters here is a four-minute Mach 1.5 dash at 60,000 ft rather than a supersonic cruise. Wing area and fuel capacity are not published: the 230 kg modelled here is derived from the engine's rated thrust and a turbojet's specific consumption against the quoted endurance, so tank, engine and endurance agree with each other rather than being three independent guesses.",
+    "source": "https://www.designation-systems.net/dusrm/m-34.html",
+    "kind": "real"
+  },
+  {
+    "id": "northrop-aqm-35a",
+    "name": "Northrop AQM-35A",
+    "manufacturer": "Northrop (Radioplane)",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 3380.0,
+      "fuselageLengthMillimeters": 10060.0,
+      "heightMillimeters": 1690.0
+    },
+    "notes": "Published data (designation-systems.net, Wikipedia): 10.06 m long, 3.38 m span, 1.69 m high, 0.51 m body diameter, 900 kg launch weight, one Westinghouse XJ81-WE-3 lightweight expendable turbojet of 8.0 kN (1,810 lbf), Mach 1.55, ceiling 18,300 m. First flight January 1956; 25 of all types built; retired in the mid-1960s. Air-launched by a B-50D, GC-130A or DC-130; ground launch was designed but never tested, so it is not offered here. Sources disagree on one figure that matters: designation-systems lists 900 kg as the *launch* weight while Wikipedia lists the same 1,980 lb as the *empty* weight. The launch reading is used, because the alternative implies a fuel and payload fraction this airframe has no room for. Wing area, fuel capacity and endurance are not published. The programme was judged unsuccessful partly because the aircraft was too fast to be a realistic target for the missiles it was meant to test.",
+    "source": null,
+    "kind": "real"
+  },
+  {
+    "id": "northrop-aqm-35b",
+    "name": "Northrop AQM-35B",
+    "manufacturer": "Northrop (Radioplane)",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 3860.0,
+      "fuselageLengthMillimeters": 10770.0,
+      "heightMillimeters": 1880.0
+    },
+    "notes": "Published data (designation-systems.net, Wikipedia): 10.77 m long, 3.86 m span, 1.88 m high, 1,540 kg launch weight, one General Electric J85-GE-5 turbojet of 17.1 kN (3,850 lbf), Mach 2.0, ceiling 21,300 m. First flown March 1961, after a Q-4A powered by the Fairchild J83 was cancelled when that engine fell behind. It is catalogued separately from the AQM-35A on purpose: the pair is the same airframe with 8.0 kN and 17.1 kN of thrust, so the difference between what they can reach is a direct test that achievable Mach comes out of the thrust-and-drag balance rather than out of a declared speed limit. Wing area, fuel capacity and endurance are not published.",
+    "source": null,
+    "kind": "real"
+  },
+  {
+    "id": "rockwell-himat",
+    "name": "NASA / Rockwell HiMAT",
+    "manufacturer": "Rockwell International / NASA",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 4750.0,
+      "fuselageLengthMillimeters": 6860.0,
+      "heightMillimeters": 1310.0
+    },
+    "notes": "Published data (NASA Dryden programme material, designation-systems.net, Wikipedia): 0.44 scale of a full-size fighter, 6.86 m long, 4.75 m span, 1.31 m high, 1,588 kg gross with 299 kg of fuel, one General Electric J85-GE-21 with afterburner rated 22.3 kN (5,004 lbf) static at sea level. Dropped from the NB-52B at 13,700 m and Mach 0.68; top speed Mach 1.4. Landed on retractable three-point skids on Rogers Dry Lake with a typical run of about 1,370 m. 26 flights on two aircraft between July 1979 and January 1983, each about 30 minutes. The design points are what make this aircraft useful as a reference rather than the top speed: a sustained 8 g turn at Mach 0.9 and 7,600 m, and 3 g held for three and a half minutes at Mach 1.4 and 12,200 m — numerical acceptance criteria rather than an impression of agility. Sources disagree on the masses (3,501 lb gross with 659 lb of fuel in the programme material against 3,370 lb empty and 4,030 lb gross in Wikipedia) and on the top speed (Mach 1.4 from NASA, Mach 1.6 from designation-systems); the programme figures are used. Wing area is not available in any text source — the NASA reports carrying it are scanned images.",
+    "source": "https://www.designation-systems.net/dusrm/app4/himat.html",
+    "kind": "real"
+  },
+  {
+    "id": "hermeus-quarterhorse-mk21",
+    "name": "Hermeus Quarterhorse Mk 2.1",
+    "manufacturer": "Hermeus",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 8400.0,
+      "fuselageLengthMillimeters": 15200.0,
+      "heightMillimeters": 3600.0
+    },
+    "notes": "Confirmed by Hermeus and contemporary reporting (FlightGlobal, Army Recognition, New Atlas, Aviation Today): first flight from Spaceport America in New Mexico in late February or early March 2026 — sources give 27 February and 2 March — and first supersonic flight on 26 or 28 May 2026 at Mach 1.21, about 1,484 km/h, on the aircraft's third flight. Powered by a Pratt & Whitney F100 afterburning turbofan quoted at more than 23,000 lbf in reheat; the F100-PW-229's catalogue figures are 17,800 lbf dry and 29,160 lbf with afterburner. Delta wing, single vertical stabiliser, variable inlet in the nose with a precooler, remotely piloted from a ground station, conventional runway takeoff and landing. The programme target for the Mk 2 series is Mach 2.5, with Mach 3 sought in 2027 on the Chimera combined-cycle engine. WARNING — dimensions and weights are NOT published. Hermeus states only that the aircraft is about the size of an F-16 and nearly three times larger and four times heavier than the Mk 1, which is roughly 12.2 m long with a 3.7 m span. The 15.2 m length, 8.4 m span and 11,000 kg maximum weight modelled here are estimates built from those two statements and are labelled as such. The skin material is likewise unpublished; titanium is inferred from the declared Mach 2.5 target, which aluminium could not sustain thermally, and the precooler on the intake is itself a thermal-management device.",
+    "source": "https://www.hermeus.com/quarterhorse",
+    "kind": "real"
+  },
+  {
+    "id": "north-american-x-10",
+    "name": "North American X-10",
+    "manufacturer": "North American Aviation",
+    "type": "fixedWing",
+    "dimensions": {
+      "wingspanMillimeters": 8590.0,
+      "fuselageLengthMillimeters": 20170.0,
+      "heightMillimeters": 4400.0
+    },
+    "notes": "Published data (designation-systems.net, Military Factory, Wikipedia): 8.59 m span, 4.40 m high, 39.5 m² wing area, 11,703 kg empty, 15,876 kg gross, 19,187 kg maximum, two Westinghouse XJ40-WE-1 turbojets of 48.4 kN (10,900 lbf) each with afterburner, 2,090 km/h maximum, service ceiling 13,650 m, rate of climb 26.5 m/s, range 1,370 km. Radio-command guidance with an optional N-6 inertial system. Thirteen built; first flight 14 October 1953; only one survives. Sources disagree on the length: 66.1 ft from designation-systems and Military Factory, 71 ft from aero-web, 77 ft from Wikipedia. The two independent sources that agree are used, giving 20.17 m. Between 1953 and 1955 five aircraft flew fifteen sorties from Edwards, reaching Mach 1.84, 12,500 m and 644 km; six more at Cape Canaveral reached 15,000 m, 1,009 km and Mach 2.05. Fuel capacity is not published; the 4,000 kg modelled here is the difference between the empty and gross weights less an allowance for equipment. This is the only twin-engined aircraft in the catalogue and the only supersonic one that takes off from a runway under its own power.",
+    "source": "https://www.designation-systems.net/dusrm/app1/x-10.html",
+    "kind": "real"
+  }
+]

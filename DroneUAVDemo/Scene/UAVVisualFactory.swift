@@ -11,7 +11,26 @@ enum UAVVisualFactory {
         case indoorGuardCage(color: NSColor)
     }
 
-    static func build(profile: UAVProfile) -> DroneVisualModel {
+    /// An authored USDZ airframe when the bundled library covers this aircraft,
+    /// otherwise the procedural silhouette below.
+    ///
+    /// Every catalogue entry has its own model, so the per-id variants further down —
+    /// one preset re-scaled and re-accented to stand in for a sibling airframe — are
+    /// only reached when the library is absent or a file fails to load. They are kept
+    /// for exactly that case, and for workbench builds and the abstract UAV, which
+    /// have no authored model by definition.
+    ///
+    /// `modelScale` is the ratio between the size the simulation flies and the size the
+    /// catalogue publishes; see `DroneModelBuilder.authoredModelScale`.
+    static func build(profile: UAVProfile, modelScale: Float = 1.0) -> DroneVisualModel {
+        if let authored = UAVModelAssetLibrary.shared.makeVisualModel(
+            profileID: profile.id,
+            payloadMountOffset: profile.payloadMountOffset,
+            scale: modelScale
+        ) {
+            return authored
+        }
+
         switch profile.id {
         case "dji-mavic-3t":
             return visualVariant(

@@ -1505,7 +1505,12 @@ struct LIPODroneModelRepository: DroneModelRepository {
             return RuntimeTuning(
                 fallbackTakeoffMass: 5670.0,
                 fallbackDimensions: DroneDimensionsMM(x: 24000, y: 11700, z: 3900),
-                runtimeSceneDimensionsOverride: DroneDimensionsMM(x: 3200, y: 1900, z: 900),
+                // Flown at its real twenty-four-metre span. It used to carry a
+                // `runtimeSceneDimensionsOverride` of 3.2 m, back when the visual was a
+                // procedural stand-in authored at a fraction of the real aeroplane and
+                // the runtime footprint had to agree with what was on screen. The
+                // authored USDZ is at true scale, so the stand-in — and the fiftyfold
+                // inertia error it dragged behind it — is no longer needed.
                 maxHorizontalSpeedMps: 108.0,
                 maxAscentSpeedMps: 4.2,
                 maxDescentSpeedMps: 5.5,
@@ -1564,7 +1569,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             return RuntimeTuning(
                 fallbackTakeoffMass: 1180.0,
                 fallbackDimensions: DroneDimensionsMM(x: 15000, y: 8500, z: 2600),
-                runtimeSceneDimensionsOverride: DroneDimensionsMM(x: 2600, y: 1600, z: 820),
+                // Real fifteen-metre span; see the MQ-9B note above for the scene-scale
+                // stand-in this replaces.
                 maxHorizontalSpeedMps: 61.0,
                 maxAscentSpeedMps: 4.0,
                 maxDescentSpeedMps: 4.8,
@@ -2448,7 +2454,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
             return fixedWingRuntimeTuning(
                 fallbackTakeoffMass: 4763.0,
                 fallbackDimensions: DroneDimensionsMM(x: 20100, y: 11000, z: 3810),
-                runtimeSceneDimensionsOverride: DroneDimensionsMM(x: 2750, y: 1630, z: 775),
+                // Real twenty-metre span; see the MQ-9B note for the scene-scale
+                // stand-in this replaces.
                 maxHorizontalSpeedMps: 134.0,
                 maxAscentSpeedMps: 4.4,
                 maxDescentSpeedMps: 5.6,

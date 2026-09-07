@@ -62,11 +62,11 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
     var compatiblePayloads: [PayloadType] {
         switch self {
         case .attachedPayloadIntercept:
-            // Not a camera choice: this *is* the attached module the aircraft carries into
-            // contact. Both are inert boxes as far as the payload system is concerned — the
-            // effect they produce belongs to the mission's `AttachedPayloadProfile`, not to the
-            // hardware — and neither is launched at anything.
-            return [.sensorModule, .cargoBox]
+            // Nothing from the payload catalogue. What this mission's aircraft carries is chosen
+            // as an `AttachedModuleShape` and mounted by the mission itself, with its own mass in
+            // the component graph — and a catalogue payload on top of that was a second box under
+            // the same belly. The operator picked one load and the aircraft carried two.
+            return []
         case .searchAndRescue:
             return [.thermalCamera, .cameraGimbal]
         case .fireResponse:

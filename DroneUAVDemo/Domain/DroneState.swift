@@ -154,6 +154,16 @@ struct DroneState {
     /// "throttle × rating" is no longer an answer — and the fuel model needs the real
     /// number rather than its own second guess at it.
     var propulsionThrustNewtons: Float = 0.0
+    /// The wing area the aerodynamic model is actually flying on, m².
+    ///
+    /// Published for the same reason as the thrust above: something outside the flight
+    /// model needs the real number rather than its own second guess. The structural load
+    /// solver used to measure the wing off the *rendered* geometry, which is a bounding
+    /// rectangle around a swept planform and came out six times the real area on an
+    /// MQ-9B. This is the catalogue's own answer — solved from published stall speed and
+    /// maximum takeoff weight in `FixedWingAerodynamics.build` — and it already carries
+    /// any lift lost to damage. Zero for anything with no wing.
+    var referenceWingAreaM2: Float = 0.0
     /// Total-pressure recovery the intake is achieving, 0...1. One for anything with a
     /// propeller and for any jet below Mach 1.
     var inletPressureRecovery: Float = 1.0
