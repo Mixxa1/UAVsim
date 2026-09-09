@@ -308,6 +308,26 @@ final class DroneSceneController {
     private var worldClock = WorldClock()
     /// Night blend the sky image was last generated for. Twilight is the only time it moves.
     private var lastAppliedNightBlend: Double = -1.0
+    /// Everything the sky image is built from. Installing a background costs ~30 ms — SceneKit
+    /// rebuilds its sky representation from the image — and that was being paid on every call
+    /// regardless of whether the image had changed, including at noon where the blend is pinned at
+    /// zero and the result is byte-for-byte the one already installed.
+    private struct SkyAppearanceKey: Equatable {
+        let terrain: TerrainPreset
+        let weather: WeatherPreset
+        let weatherIntensity: Float
+        let nightBlend: Double
+    }
+    private var lastAppliedSkyKey: SkyAppearanceKey?
+    private var daylightSkyCache: (key: SkyAppearanceKey, image: NSImage)?
+    #if DEBUG
+    /// Rate and cost of the two world-clock lighting paths, per real second. See `applyWorldClock`.
+    private var worldClockLightingCount = 0
+    private var worldClockLightingSeconds: Double = 0.0
+    private var worldClockRebuildCount = 0
+    private var worldClockRebuildSeconds: Double = 0.0
+    private var worldClockReportWindowStart = CFAbsoluteTimeGetCurrent()
+    #endif
     // v1.5: vehicleID → vehicleProfileID so late-arriving snapshots can build the right visual.
     private var replicaProfileCache: [UUID: String] = [:]
     // v1.4.4: timestamp for computing deltaTime inside applyOnlineInterpolatedRemoteStates.
@@ -504,7 +524,15 @@ final class DroneSceneController {
     private var worldObjectFootprints: [UUID: [SIMD2<Float>]] = [:]
     /// `worldNavigationObstacles` keyed by id, for the by-id lookups the risk report drives.
     private var worldNavigationObstaclesByID: [UUID: CollisionObstacle] = [:]
-    private(set) var environmentObstacleIndex = CollisionObstacleSpatialIndex.empty
+    private(set) var environmentObstacleIndex = CollisionObstacleSpatialIndex.empty {
+        // Eight sites rebuild this index and only four of them bump `environmentRevision`, so the
+        // cache is invalidated from the assignment itself rather than from a revision counter it
+        // would silently miss.
+        didSet { analyticRayObstacleCache = environmentObstacleIndex.makeSegmentQueryCache() }
+    }
+    /// Incremental cache for `analyticEnvironmentRayHit`'s broad phase. Scoped to that one caller:
+    /// avoidance, route certification and the corridor queries keep the uncached path unchanged.
+    private var analyticRayObstacleCache = CollisionObstacleSpatialIndex.empty.makeSegmentQueryCache()
     private(set) var environmentMapDescriptors: [EnvironmentObjectDescriptor] = []
     /// The installed world's own buildings and trees, as planning obstacles.
     ///
@@ -1749,9 +1777,13 @@ final class DroneSceneController {
     /// presentation's hiding on the very next tick. Two writers, one property; the
     /// one that runs last wins, and it was not the one that knew.
     private var localAircraftVisibility = LocalAircraftPresentationVisibility()
+    private var lastLaunchPresentation: (progress: Float, state: LaunchState)?
+    private var airframeBoosterEffluxNode: SCNNode?
+    private var airframeBoosterIsBurning = false
     private var canisterRoundSealed: Bool {
         get { localAircraftVisibility.enclosed }
         set {
+            guard localAircraftVisibility.enclosed != newValue else { return }
             localAircraftVisibility.enclosed = newValue
             droneNode.isHidden = localAircraftVisibility.isHidden
         }
@@ -1769,7 +1801,9 @@ final class DroneSceneController {
     private var authoredCanisterCellOffset: SIMD3<Float>?
 
     func setLaunchAsset(_ asset: LaunchAsset?) {
+        lastLaunchPresentation = nil
         currentLaunchAsset = asset
+        updateAirframeBoosterEfflux(state: .idle)
         // A round placed on the map is sealed until its launch is commanded.
         canisterRoundSealed = asset?.isCanister == true
         authoredCatapultCradleHeight = nil
@@ -1835,6 +1869,13 @@ final class DroneSceneController {
         state: LaunchState
     ) {
         let clampedProgress = progress.clamped(to: 0.0...1.0)
+        // Launch scenery usually stays unchanged for the entire flight. Even assigning the
+        // same SceneKit property can wait for the renderer; avoid entering the graph at all.
+        if let last = lastLaunchPresentation,
+           last.progress == clampedProgress, last.state == state {
+            return
+        }
+        lastLaunchPresentation = (clampedProgress, state)
         updateAirframeBoosterEfflux(state: state)
         // Only a canister hides its round.
         if currentLaunchAsset?.isCanister != true {
@@ -2163,6 +2204,7 @@ final class DroneSceneController {
     /// point. Camera-local, so it follows every look movement together with
     /// the held aircraft (whose cradle point rides the same gaze ray).
     private func buildHandLaunchPOVArm() {
+        lastLaunchPresentation = nil
         handLaunchPOVArmBuilt = true
 
         let shoulderLocal = SIMD3<Float>(-0.32, -0.48, 0.15)
@@ -2792,11 +2834,11 @@ final class DroneSceneController {
         }
         let burning = boosted && state == .assistedAcceleration
 
-        let existing = droneNode.childNode(withName: "airframeBoosterEfflux", recursively: true)
-        guard burning || existing != nil else { return }
+        guard burning != airframeBoosterIsBurning else { return }
+        airframeBoosterIsBurning = burning
 
         let anchor: SCNNode
-        if let existing {
+        if let existing = airframeBoosterEffluxNode {
             anchor = existing
         } else {
             anchor = SCNNode()
@@ -2806,6 +2848,7 @@ final class DroneSceneController {
             anchor.simdPosition = SIMD3<Float>(0.0, 0.0, Float(maxBB.z - minBB.z) * 0.5 + 0.05)
             anchor.addParticleSystem(makeBoosterPlume(scale: 0.45))
             droneNode.addChildNode(anchor)
+            airframeBoosterEffluxNode = anchor
         }
         if anchor.isHidden == burning { anchor.isHidden = !burning }
         anchor.particleSystems?.forEach { $0.birthRate = burning ? 700 : 0 }
@@ -3433,7 +3476,7 @@ final class DroneSceneController {
         // planar footprint, so the query is the ray's XZ extent with a margin for obstacle radius;
         // the bounding-sphere reject below still does the exact work.
         let rayEnd = origin + dir * bestDistance
-        let raySweptObstacles = environmentObstacleIndex.query(
+        let raySweptObstacles = analyticRayObstacleCache.query(
             from: origin,
             to: rayEnd,
             margin: Self.analyticRayQueryMargin
@@ -5259,6 +5302,9 @@ final class DroneSceneController {
 
     func setDroneProfile(_ profile: DroneModelProfile) {
         activeProfile = profile
+        lastLaunchPresentation = nil
+        airframeBoosterEffluxNode = nil
+        airframeBoosterIsBurning = false
 
         clearDetachedVehicleParts()
         droneNode.removeFromParentNode()
@@ -6045,26 +6091,13 @@ final class DroneSceneController {
         updateStormClouds(weather)
 
         if let terrain = lastTerrainConfig {
-            let haze = skyHorizonHazeColor(for: weather)
-            let backgroundImage = skyGradientImage(
-                for: terrain.preset,
-                weatherFogColor: haze?.color,
-                weatherFogStrength: haze?.strength ?? 0,
-                weatherHazeDistribution: haze?.distribution ?? .groundHaze
-            )
-            let resolvedBackground = nightOverriddenBackground(backgroundImage)
-            scene.background.contents = resolvedBackground
-            // Keep the thermal restore target current if the EO sky changed while thermal is
-            // active (the dirty flag re-paints the thermal sky on the next frame).
-            if thermalRenderingActive { thermalSavedBackground = resolvedBackground }
-            // applyTerrainVisualStyle keeps lightingEnvironment.contents in lockstep with the
-            // visible sky on terrain changes; weather can change independently of terrain, so
-            // without this the IBL ambient light kept using the pre-storm bright gradient even
-            // though the visible sky had already gone dark. Night uses the same dark override as
-            // the background — a bright daytime gradient merely turned down in intensity still
-            // floods diffuse surfaces (grass, trees) with a sky-bright dome of fill light, which
-            // reads as "lit", not dark.
-            scene.lightingEnvironment.contents = resolvedBackground
+            // Was a third verbatim copy of the gradient/tint/background/IBL block. Routed through
+            // the one implementation so the installed sky and the key that describes it cannot
+            // diverge — a copy that installs a background without recording what it built it from
+            // would leave the shared cache claiming the previous sky is still up.
+            //
+            // `currentWeather` is assigned from `weather` above, so the key sees the new weather.
+            applySkyAppearance(for: terrain)
 
             let isSnow = weather.preset == .snow
             if terrain.preset != .city {
@@ -9489,6 +9522,64 @@ final class DroneSceneController {
         print("[Snow] Decorations built: patches=\(patches) footsteps=\(footsteps) patchScale=\(String(format:"%.3f",patchBaseScale)) footScale=\(String(format:"%.3f",footBaseScale))")
     }
 
+    /// The sky, and only the sky: gradient, night tint, scene background and the IBL that matches it.
+    ///
+    /// Split out of `applyTerrainVisualStyle` because the world clock was calling that whole
+    /// function — grid guide, ground material, detail geometry and all — merely to change the colour
+    /// of the sky as the sun moved. Measured through a twilight, four of its eight steps were
+    /// rebuilding terrain that time of day does not affect, and they cost more than the sky did:
+    /// `surface=23ms detail=9ms` against `gradient=9ms tint=7ms`. The terrain steps are also
+    /// scene-graph mutations, so each one additionally waited on the render thread's lock — the same
+    /// stall documented in [[project_render_thread_lock_stall_fix]], which is why `surface` measured
+    /// 0.9 ms at noon and 23 ms in a twilight for identical work.
+    ///
+    /// Returns whether anything was installed, so callers can skip work that only matters when the
+    /// sky actually changed.
+    @discardableResult
+    private func applySkyAppearance(for terrain: TerrainConfiguration) -> Bool {
+        let key = SkyAppearanceKey(
+            terrain: terrain.preset,
+            weather: currentWeather.preset,
+            weatherIntensity: currentWeather.normalizedIntensity,
+            nightBlend: worldClock.nightBlend
+        )
+        guard key != lastAppliedSkyKey else { return false }
+        lastAppliedSkyKey = key
+
+        // Twilight changes the tint, not the daylight gradient underneath it. Retain one
+        // gradient for the current terrain/weather instead of redrawing 1024 x 768 pixels
+        // on every night-blend update. The cache remains bounded across weather changes.
+        let daylightKey = SkyAppearanceKey(
+            terrain: key.terrain,
+            weather: key.weather,
+            weatherIntensity: key.weatherIntensity,
+            nightBlend: 0
+        )
+        let backgroundImage: NSImage
+        if let cached = daylightSkyCache, cached.key == daylightKey {
+            backgroundImage = cached.image
+        } else {
+            let haze = skyHorizonHazeColor(for: currentWeather)
+            backgroundImage = skyGradientImage(
+                for: terrain.preset,
+                weatherFogColor: haze?.color,
+                weatherFogStrength: haze?.strength ?? 0,
+                weatherHazeDistribution: haze?.distribution ?? .groundHaze
+            )
+            daylightSkyCache = (daylightKey, backgroundImage)
+        }
+        let resolvedBackground = nightOverriddenBackground(backgroundImage)
+        scene.background.contents = resolvedBackground
+        // Keep the thermal restore target current if the EO sky changed while thermal is active
+        // (the dirty flag re-paints the thermal sky on the next frame).
+        if thermalRenderingActive { thermalSavedBackground = resolvedBackground }
+        // Night uses the same dark override as the background for IBL too — a bright daytime
+        // gradient merely turned down in intensity still floods diffuse surfaces with a sky-bright
+        // dome of fill light, which reads as "lit", not dark.
+        scene.lightingEnvironment.contents = resolvedBackground
+        return true
+    }
+
     private func applyTerrainVisualStyle(_ terrain: TerrainConfiguration) {
         // An imported world overrides procedural styling wherever the request comes from.
         //
@@ -9504,16 +9595,34 @@ final class DroneSceneController {
             return
         }
 
-        configureWorldSurfaceGeometry(for: terrain)
-        applyLightingProfile(for: terrain.preset)
+        // Sub-step breakdown of the one bucket that turned out to dominate.
+        //
+        // `[WorldClock]` measured this whole function at 64-78 ms per call, once a real second right
+        // through a twilight — four to five dropped frames each time, which is what the operator
+        // measured as frame time rising at the change of day. It is expensive enough that the
+        // simulation cannot deliver the requested time acceleration while it runs, so the sun slows
+        // down and the blend gate settles at one rebuild per second; the rate is a *symptom* of the
+        // cost, not a separate problem. This says which of the eight steps spends the 70 ms, because
+        // they call for different fixes: a generated image can be cached, an IBL bake cannot be made
+        // cheap, and a scene-graph teardown is the render-lock stall documented in
+        // [[project_render_thread_lock_stall_fix]] rather than a cost at all.
+        #if DEBUG
+        let styleStarted = CFAbsoluteTimeGetCurrent()
+        var styleLap = styleStarted
+        var styleLaps: [String] = []
+        func styleMark(_ name: String) {
+            let now = CFAbsoluteTimeGetCurrent()
+            styleLaps.append(String(format: "%@=%.1f", name, (now - styleLap) * 1000.0))
+            styleLap = now
+        }
+        #else
+        func styleMark(_ name: String) {}
+        #endif
 
-        let haze = skyHorizonHazeColor(for: currentWeather)
-        let backgroundImage = skyGradientImage(
-            for: terrain.preset,
-            weatherFogColor: haze?.color,
-            weatherFogStrength: haze?.strength ?? 0,
-            weatherHazeDistribution: haze?.distribution ?? .groundHaze
-        )
+        configureWorldSurfaceGeometry(for: terrain)
+        styleMark("surface")
+        applyLightingProfile(for: terrain.preset)
+        styleMark("lamps")
 
         switch terrain.preset {
         case .gridDemo:
@@ -9524,13 +9633,8 @@ final class DroneSceneController {
             axesNode.isHidden = true
         }
 
-        let resolvedBackground = nightOverriddenBackground(backgroundImage)
-        scene.background.contents = resolvedBackground
-        if thermalRenderingActive { thermalSavedBackground = resolvedBackground }
-        // Night uses the same dark override as the background for IBL too — a bright daytime
-        // gradient merely turned down in intensity still floods diffuse surfaces with a
-        // sky-bright dome of fill light, which reads as "lit", not dark.
-        scene.lightingEnvironment.contents = resolvedBackground
+        applySkyAppearance(for: terrain)
+        styleMark("sky")
 
         if let geometry = groundNode.geometry {
             let mapSizeMeters = terrain.scenicHalfExtent * 2.0
@@ -9575,9 +9679,23 @@ final class DroneSceneController {
             }
             geometry.materials = [groundMaterial]
         }
+        styleMark("ground")
         refreshGroundDetailPatch(for: terrain)
+        styleMark("patch")
 
         updateTerrainDetailGeometry(for: terrain)
+        styleMark("detail")
+
+        #if DEBUG
+        let styleTotal = (CFAbsoluteTimeGetCurrent() - styleStarted) * 1000.0
+        if styleTotal >= 5.0 {
+            print(String(
+                format: "[SkyRebuild] total=%.1fms  %@",
+                styleTotal,
+                styleLaps.joined(separator: " ") as NSString
+            ))
+        }
+        #endif
     }
 
     private func updateTerrainDetailGeometry(for terrain: TerrainConfiguration) {
@@ -9924,19 +10042,70 @@ final class DroneSceneController {
 
         // Cheap path, every update: lamp intensities, colour and angle. This is what makes the
         // day read as continuous.
+        #if DEBUG
+        let lightingStarted = CFAbsoluteTimeGetCurrent()
+        #endif
         applyLightingProfile(for: lastTerrainConfig?.preset ?? .field)
+        #if DEBUG
+        worldClockLightingSeconds += CFAbsoluteTimeGetCurrent() - lightingStarted
+        worldClockLightingCount += 1
+        #endif
 
-        // Expensive path: the sky is a generated 1024x768 gradient and rebuilding it drags the
-        // whole terrain visual style along. It only needs to run while the sky is actually
-        // changing colour — during twilight — so it is keyed on the night blend rather than on
-        // the sun angle. Outside dawn and dusk the blend is pinned at 0 or 1 and this never fires,
-        // which matters at 64x where a whole day passes in twenty seconds.
+        // Expensive path: the sky image is regenerated and reinstalled, which SceneKit charges ~30 ms
+        // for. It only needs to run while the sky is actually changing colour — during twilight — so
+        // it is keyed on the night blend rather than on the sun angle. Outside dawn and dusk the
+        // blend is pinned at 0 or 1 and this never fires, which matters at 64x where a whole day
+        // passes in twenty seconds.
+        //
+        // This used to call `applyTerrainVisualStyle`, which restyles the *whole terrain*. Measured
+        // through a twilight, that cost 64-78 ms per call, of which the sky was 16: the rest was the
+        // grid guide (rebuilt in full even though this preset hides it), the ground material and the
+        // detail geometry — none of which time of day changes. It was expensive enough to eat the
+        // time acceleration itself, so the sun crawled at about 3x while 64x was selected, and the
+        // blend gate settled at one rebuild per second by starving the thing driving it.
         if abs(clock.nightBlend - lastAppliedNightBlend) >= 0.05 {
             lastAppliedNightBlend = clock.nightBlend
             if let terrain = lastTerrainConfig {
-                applyTerrainVisualStyle(terrain)
+                #if DEBUG
+                let rebuildStarted = CFAbsoluteTimeGetCurrent()
+                #endif
+                applySkyAppearance(for: terrain)
+                #if DEBUG
+                worldClockRebuildSeconds += CFAbsoluteTimeGetCurrent() - rebuildStarted
+                worldClockRebuildCount += 1
+                #endif
             }
         }
+
+        #if DEBUG
+        let now = CFAbsoluteTimeGetCurrent()
+        let window = now - worldClockReportWindowStart
+        if window >= 1.0 {
+            // Counts are per *real* second on purpose: that is the quantity frame time is spent
+            // from, and the one the blend gate does not bound.
+            if worldClockRebuildCount > 0 || worldClockLightingCount > 8 {
+                print(String(
+                    format: "[WorldClock] lighting=%.0f/s %.2fms  skyRebuild=%.0f/s %.1fms"
+                        + "  elev=%.1f nightBlend=%.2f",
+                    Double(worldClockLightingCount) / window,
+                    worldClockLightingCount > 0
+                        ? worldClockLightingSeconds / Double(worldClockLightingCount) * 1000.0
+                        : 0.0,
+                    Double(worldClockRebuildCount) / window,
+                    worldClockRebuildCount > 0
+                        ? worldClockRebuildSeconds / Double(worldClockRebuildCount) * 1000.0
+                        : 0.0,
+                    clock.sunElevationDegrees,
+                    clock.nightBlend
+                ))
+            }
+            worldClockReportWindowStart = now
+            worldClockLightingCount = 0
+            worldClockLightingSeconds = 0.0
+            worldClockRebuildCount = 0
+            worldClockRebuildSeconds = 0.0
+        }
+        #endif
 
         if previousTimeOfDay != missionTimeOfDay {
             refreshThermalContextForTimeOfDay()

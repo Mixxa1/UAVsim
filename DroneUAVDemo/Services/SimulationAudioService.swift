@@ -32,7 +32,8 @@ struct AudioLoopHandle: Hashable {
 /// simulation comes from — continuous parameter control matters more than head-related
 /// filtering, and this is the trade that buys it.
 ///
-/// Everything is main-thread. The simulation tick is `@MainActor` and drives this directly;
+/// The live graph is main-thread. Clip decoding is isolated on a background worker.
+/// The simulation tick is `@MainActor` and drives the graph directly;
 /// SceneKit's render callbacks are not, and must not reach in here without hopping first.
 @MainActor
 final class SimulationAudioService {
@@ -63,7 +64,7 @@ final class SimulationAudioService {
     /// retry on every event for the rest of the session.
     private var isDisabled = false
 
-    private static let sampleRate: Double = 48_000.0
+    nonisolated private static let sampleRate: Double = 48_000.0
     /// Voice budget. The plan asks explicitly that simultaneous destruction not produce audio
     /// spam; this is the ceiling that makes that a property of the system rather than of luck.
     private static let oneShotVoiceCount = 16
@@ -84,6 +85,17 @@ final class SimulationAudioService {
     private(set) var catalog: AudioAssetCatalog = .empty
     /// Decoded clips, keyed `"<assetID>#<variant>"`.
     private var buffers: [String: AVAudioPCMBuffer] = [:]
+    private var preparationStarted = false
+    private(set) var isPrepared = false
+
+    /// Decoded buffers are transferred once to the main actor and never mutated by the worker
+    /// after delivery. AVAudioEngine and all live voices remain confined to the main actor.
+    private struct PreparedPack: @unchecked Sendable {
+        let catalog: AudioAssetCatalog
+        let buffers: [String: AVAudioPCMBuffer]
+        let airflowFallback: AVAudioPCMBuffer?
+        let seconds: TimeInterval
+    }
     /// Assets this service generates rather than loads. They live outside the pack manifest
     /// because there is no file to describe, but they are addressed by the same ids and play
     /// through the same voices as everything else.
@@ -175,30 +187,23 @@ final class SimulationAudioService {
         master.outputVolume = lastAppliedVolume
     }
 
-    /// Loads the sound pack.
-    ///
-    /// Synchronous, and it stays synchronous: the whole pack is a few megabytes of 16-bit PCM
-    /// that decodes to float with no codec involved, so this is closer to a memcpy than to a
-    /// load. The alternative — decoding lazily on first play — puts file I/O on the path of
-    /// the first impact of every session, which is precisely the moment that must not stutter.
+    /// Called during runtime setup, before the simulation timer starts. Warm the device here
+    /// and decode the pack on a worker so the first simulation tick never loads all the clips.
     func prepare(bundle: Bundle = .main) {
-        guard buffers.isEmpty else { return }
-        #if DEBUG
-        let started = CACurrentMediaTime()
-        #endif
-        // Generated first, and outside the pack check: airflow needs no files, so a build
-        // with a missing or broken pack still has wind.
-        registerAirflowLoop()
-
-        catalog = AudioAssetCatalog.load(from: bundle)
-        guard !catalog.isEmpty else {
-            #if DEBUG
-            print("[Audio] no sound pack in bundle — Audio/AudioPack.json missing or unreadable")
-            #endif
-            return
+        guard !preparationStarted else { return }
+        preparationStarted = true
+        startIfNeeded()
+        Task.detached(priority: .utility) { [weak self] in
+            let pack = Self.loadPack(bundle: bundle)
+            await self?.install(pack)
         }
+    }
 
-        var loadedFrames: AVAudioFrameCount = 0
+    nonisolated private static func loadPack(bundle: Bundle) -> PreparedPack {
+        let started = CACurrentMediaTime()
+        let catalog = AudioAssetCatalog.load(from: bundle)
+        var buffers: [String: AVAudioPCMBuffer] = [:]
+
         for clip in catalog.allClipURLs {
             guard let file = try? AVAudioFile(forReading: clip.url),
                   file.length > 0,
@@ -213,16 +218,34 @@ final class SimulationAudioService {
                 continue
             }
             buffers[Self.bufferKey(clip.id, clip.variant)] = buffer
-            loadedFrames += buffer.frameLength
         }
 
+        // Synthesis is a fallback, not work to perform and immediately overwrite with the WAV.
+        let airflowFallback = buffers[Self.bufferKey(AudioAssetID.airflowLoop.rawValue, 1)] == nil
+            ? Self.makeAirflowLoop() : nil
+        return PreparedPack(
+            catalog: catalog,
+            buffers: buffers,
+            airflowFallback: airflowFallback,
+            seconds: CACurrentMediaTime() - started
+        )
+    }
+
+    private func install(_ pack: PreparedPack) {
+        catalog = pack.catalog
+        buffers = pack.buffers
+        if let airflow = pack.airflowFallback {
+            registerSynthetic(.airflowLoop, buffer: airflow, defaultGainDb: -6.0, loop: true)
+        }
+        isPrepared = true
+
         #if DEBUG
-        let ms = (CACurrentMediaTime() - started) * 1000.0
+        let loadedFrames = buffers.values.reduce(UInt64(0)) { $0 + UInt64($1.frameLength) }
         print(String(
-            format: "[Audio] pack loaded: %d clips, %.1f s of audio, %.1f ms",
+            format: "[Audio] pack loaded off-thread: %d clips, %.1f s of audio, %.1f ms",
             buffers.count,
             Double(loadedFrames) / Self.sampleRate,
-            ms
+            pack.seconds * 1000.0
         ))
         for gap in catalog.manifest.unavailable {
             print("[Audio] asset unavailable: \(gap.id) — \(gap.reason)")
@@ -230,7 +253,7 @@ final class SimulationAudioService {
         #endif
     }
 
-    /// Starts the audio engine lazily, on the first sound that actually needs to play.
+    /// Starts the graph during setup; also supports restarting after an explicit stop.
     @discardableResult
     private func startIfNeeded() -> Bool {
         if isDisabled { return false }
@@ -657,19 +680,6 @@ final class SimulationAudioService {
         resolveDescriptor(id) != nil && buffers[Self.bufferKey(id.rawValue, 1)] != nil
     }
 
-    /// Registers the generated airflow bed, unless the pack ships a real one.
-    ///
-    /// Called before the manifest is read, so the check happens the other way round: the
-    /// synthetic is registered first and the pack overwrites it, because `resolveDescriptor`
-    /// consults the manifest before the synthetic table and `prepare` loads pack clips into
-    /// the same buffer map afterwards. A recording of air over a microphone is better than a
-    /// filtered noise generator; the generator is what keeps a build with no pack from flying
-    /// in silence.
-    private func registerAirflowLoop() {
-        guard let buffer = Self.makeAirflowLoop() else { return }
-        registerSynthetic(.airflowLoop, buffer: buffer, defaultGainDb: -6.0, loop: true)
-    }
-
     /// Builds the airflow loop.
     ///
     /// Generated rather than recorded, for the same reason the sonic boom is: airflow noise
@@ -684,7 +694,7 @@ final class SimulationAudioService {
     /// without a seam — the same construction the asset pack script uses for recorded loops,
     /// and necessary here for the same reason: a discontinuity in noise is a click, and a
     /// click once every four seconds is more noticeable than the noise itself.
-    private static func makeAirflowLoop() -> AVAudioPCMBuffer? {
+    nonisolated private static func makeAirflowLoop() -> AVAudioPCMBuffer? {
         let seconds = 4.0
         let crossfadeSeconds = 0.25
         let totalFrames = Int(seconds * sampleRate)
@@ -741,7 +751,7 @@ final class SimulationAudioService {
 
     // MARK: Helpers
 
-    private static func bufferKey(_ id: String, _ variant: Int) -> String { "\(id)#\(variant)" }
+    nonisolated private static func bufferKey(_ id: String, _ variant: Int) -> String { "\(id)#\(variant)" }
 
     private static func linearGain(_ db: Float) -> Float {
         guard db.isFinite else { return 0.0 }

@@ -368,6 +368,7 @@ final class AutoPathPlannerService {
     private var searchGeneration: Int32 = 0
 
     private var waypoints: [SIMD3<Float>] = []
+    private var lastNearbyPathSegment: Int = 1
     private var currentIndex: Int = 0
     private var pathLengthMeters: Float = 0.0
     private var startPoint: SIMD3<Float>?
@@ -377,6 +378,30 @@ final class AutoPathPlannerService {
 
     private(set) var lastPlanDurationMs: Double = 0.0
     private(set) var activeWaypointCount: Int = 0
+
+    #if DEBUG
+    /// Process-wide planner accounting, read by the `[GuidPhase]` window report.
+    ///
+    /// Static rather than per-instance on purpose: route certification builds its own planner and
+    /// runs it once *per route segment* in a loop, so a per-instance counter on `autoPathPlanner`
+    /// would miss exactly the call site most likely to cost 30 ms in one tick. `lastTag` carries
+    /// the caller's `modeTag`, which is what separates them again in the report.
+    ///
+    /// `entryMsAccumulated` times the whole call, not just the search: the question this has to
+    /// answer is whether the planner is entered every tick, and a cheap early-out entered 60 times
+    /// a second is a different problem from one expensive search.
+    struct Accounting {
+        var entryCount: Int = 0
+        var searchCount: Int = 0
+        var gridBuildCount: Int = 0
+        var deviationSegmentChecks: Int = 0
+        var entryMsAccumulated: Double = 0.0
+        var worstEntryMs: Double = 0.0
+        var lastReason: String = "-"
+        var lastTag: String = "-"
+    }
+    nonisolated(unsafe) static var accounting = Accounting()
+    #endif
 
     func invalidate() {
         planSignature = nil
@@ -407,6 +432,17 @@ final class AutoPathPlannerService {
         forceRecompute: Bool = false,
         reason: String = "periodic"
     ) {
+        #if DEBUG
+        let accountingStart = CFAbsoluteTimeGetCurrent()
+        defer {
+            let ms = (CFAbsoluteTimeGetCurrent() - accountingStart) * 1000.0
+            Self.accounting.entryCount += 1
+            Self.accounting.entryMsAccumulated += ms
+            if ms > Self.accounting.worstEntryMs { Self.accounting.worstEntryMs = ms }
+            Self.accounting.lastReason = reason
+            Self.accounting.lastTag = modeTag
+        }
+        #endif
         status = .recomputing
         statusReason = reason
 
@@ -457,7 +493,7 @@ final class AutoPathPlannerService {
             previousPlanSignature?.modeTag == modeTag &&
             previousPlanSignature?.goalCell == goalCell &&
             previousPlanSignature?.startCell != startCell &&
-            distanceToPath2D(currentPosition: start) > max(1.8, grid.cellSize * 1.25)
+            exceedsPathDeviation(currentPosition: start, tolerance: max(1.8, grid.cellSize * 1.25))
         let shouldReplan =
             forceRecompute ||
             previousPlanSignature?.modeTag != modeTag ||
@@ -494,6 +530,9 @@ final class AutoPathPlannerService {
         }
 
         let planStart = CFAbsoluteTimeGetCurrent()
+        #if DEBUG
+        Self.accounting.searchCount += 1
+        #endif
         let outcome = astar(grid: grid, start: startCell, goal: goalCell)
         let cellPath: [NavigationGrid.Cell]
         switch outcome {
@@ -558,6 +597,7 @@ final class AutoPathPlannerService {
 
         let finalRoute = repaired.route
         waypoints = finalRoute
+        lastNearbyPathSegment = 1
         currentIndex = finalRoute.count > 1 ? 1 : 0
         pathLengthMeters = pathLength(of: finalRoute)
         startPoint = finalRoute.first ?? start
@@ -635,7 +675,10 @@ final class AutoPathPlannerService {
             return "high_collision_risk"
         }
 
-        let offPath = distanceToPath2D(currentPosition: currentPosition) > max(2.0, deviationTolerance)
+        let offPath = exceedsPathDeviation(
+            currentPosition: currentPosition,
+            tolerance: max(2.0, deviationTolerance)
+        )
         if offPath {
             return "off_path"
         }
@@ -746,6 +789,9 @@ final class AutoPathPlannerService {
             return true
         }
 
+        #if DEBUG
+        Self.accounting.gridBuildCount += 1
+        #endif
         var newGrid = NavigationGrid(
             cellSize: preferredCellSize(for: terrain),
             halfExtent: terrain.worldHalfExtent
@@ -1554,24 +1600,43 @@ final class AutoPathPlannerService {
         return total
     }
 
-    private func distanceToPath2D(currentPosition: SIMD3<Float>) -> Float {
+    private func exceedsPathDeviation(currentPosition: SIMD3<Float>, tolerance: Float) -> Bool {
         guard waypoints.count >= 2 else {
             if let first = waypoints.first {
                 let delta = SIMD2<Float>(currentPosition.x - first.x, currentPosition.z - first.z)
-                return simd_length(delta)
+                return simd_length(delta) > tolerance
             }
-            return .greatestFiniteMagnitude
+            return true
         }
 
         let p = SIMD2<Float>(currentPosition.x, currentPosition.z)
-        var best = Float.greatestFiniteMagnitude
-        for index in 1..<waypoints.count {
+        func isNearby(_ index: Int) -> Bool {
+            #if DEBUG
+            Self.accounting.deviationSegmentChecks += 1
+            #endif
             let a = SIMD2<Float>(waypoints[index - 1].x, waypoints[index - 1].z)
             let b = SIMD2<Float>(waypoints[index].x, waypoints[index].z)
-            let d = distanceFromPoint(p, toSegmentA: a, segmentB: b)
-            best = min(best, d)
+            return distanceFromPoint(p, toSegmentA: a, segmentB: b) <= tolerance
         }
-        return best
+
+        // A nearby segment proves membership in the route corridor. Recheck its geometry at
+        // the live position; no time/cell gate can conceal a departure from the path. A miss
+        // falls back to the complete route, including earlier legs of loops and hairpins.
+        let previous = min(max(1, lastNearbyPathSegment), waypoints.count - 1)
+        for candidate in [previous, previous + 1, previous - 1]
+            where candidate >= 1 && candidate < waypoints.count {
+            if isNearby(candidate) {
+                lastNearbyPathSegment = candidate
+                return false
+            }
+        }
+        for index in 1..<waypoints.count where abs(index - previous) > 1 {
+            if isNearby(index) {
+                lastNearbyPathSegment = index
+                return false
+            }
+        }
+        return true
     }
 
     private func distanceFromPoint(_ p: SIMD2<Float>, toSegmentA a: SIMD2<Float>, segmentB b: SIMD2<Float>) -> Float {

@@ -831,11 +831,35 @@ private struct SignalInterferenceOverlayView: View {
     let presentation: SignalInterferencePresentation
     let onRecover: () -> Void
 
+    /// ⚠️ The 18 Hz timeline runs only while something on this overlay is actually animated.
+    ///
+    /// `time` is read in exactly one place — the pulsing gradient — and that gradient lives
+    /// behind `isInteractionBlocking`, which is false for the whole warning/countdown stage.
+    /// So during the countdown the timeline was redrawing a full-screen `GeometryReader` over
+    /// the top of the SceneKit view eighteen times a second to display a card whose only
+    /// changing element is a once-per-second number.
+    ///
+    /// This overlay mounts exactly when the warning appears, and an operator's 8192 m flight
+    /// went from 0.7 ms ticks at 56–110 Hz to 50–73 ms ticks at 20 Hz at that moment and
+    /// stayed there. The shape of the collapse says starvation rather than one slow function:
+    /// every phase inflated together and `sys` sat at a mean of 17.9 ms against a peak of
+    /// 19.0 — a constant per-tick cost, not a spike — with the phases summing to exactly the
+    /// 50 ms budget of a 20 Hz frame.
     var body: some View {
-        TimelineView(.periodic(from: .now, by: 1.0 / 18.0)) { timeline in
-            GeometryReader { geometry in
-                let time = timeline.date.timeIntervalSinceReferenceDate
+        if presentation.state.isInteractionBlocking {
+            TimelineView(.periodic(from: .now, by: 1.0 / 18.0)) { timeline in
+                overlayContent(time: timeline.date.timeIntervalSinceReferenceDate)
+            }
+        } else {
+            // Nothing here animates yet; the card redraws when its contents change.
+            overlayContent(time: 0.0)
+        }
+    }
 
+    @ViewBuilder
+    private func overlayContent(time: TimeInterval) -> some View {
+        Group {
+            GeometryReader { geometry in
                 ZStack(alignment: .topTrailing) {
                     if presentation.state.isInteractionBlocking {
                         Color.black

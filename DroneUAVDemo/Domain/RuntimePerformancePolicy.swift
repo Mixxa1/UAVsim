@@ -1,5 +1,19 @@
 import Foundation
 
+/// Bounds accelerated simulation work while reserving time for a final presented step.
+/// The last step is chosen before it runs, so hitting the budget never adds an extra tick.
+struct SimulationFrameBudget {
+    let maximumSteps: Int
+    let seconds: TimeInterval
+
+    func shouldPresent(stepIndex: Int, elapsed: TimeInterval) -> Bool {
+        if stepIndex >= maximumSteps - 1 { return true }
+        guard stepIndex > 0 else { return false }
+        let meanStepSeconds = elapsed / Double(stepIndex)
+        return elapsed + 2.0 * meanStepSeconds >= seconds
+    }
+}
+
 // MARK: - RuntimeVisibilityState
 // Set by NSWindowDelegate events (miniaturize, key/resign, hide/unhide).
 // The VM derives RuntimeActivityState from this + user-input recency.

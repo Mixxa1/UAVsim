@@ -454,6 +454,165 @@ struct CollisionObstacleSpatialIndex {
             z: Int((z / cellSize).rounded(.down))
         )
     }
+
+    /// Incremental cache for a *repeated* segment query whose rectangle keeps growing.
+    ///
+    /// `query(from:to:margin:)` enumerates every cell of the segment's bounding rectangle, so its
+    /// cost is the rectangle's **area**. That is right for the short segments it was written for —
+    /// a rollout chord, a route leg, a rangefinder shot — where the rectangle is a handful of cells.
+    /// The radio-link path is the first caller whose segment is tens of kilometres long *and*
+    /// diagonal: measured with the aircraft at x 15152, z −44001, the rectangle is 474 × 1375 cells
+    /// and one query walked 653 000 buckets for 72 ms, three times a second, growing for as long as
+    /// the aircraft flew away from the ground station.
+    ///
+    /// The rectangle is anchored at the transmitter and only its far corner moves, so consecutive
+    /// queries overlap almost entirely. This keeps the union of everything scanned so far and, on
+    /// each call, walks only the cells that union has just gained — an L-shaped strip whose cost is
+    /// the rectangle's *perimeter*, not its area.
+    ///
+    /// **The returned set is identical to `query(from:to:margin:)`, not an approximation.** Each
+    /// cached obstacle carries the cell range the index inserted it under, and membership is the
+    /// same range-intersection test the bucket walk performs implicitly. Order is not preserved:
+    /// the one caller takes the minimum hit distance over the whole set, which does not depend on
+    /// order. `Tools/ObstacleIndexCacheProbe` checks the equality against the authoritative query
+    /// over randomised obstacle fields and query sequences.
+    final class SegmentQueryCache {
+        private struct Entry {
+            let obstacle: CollisionObstacle
+            let minX: Int
+            let maxX: Int
+            let minZ: Int
+            let maxZ: Int
+        }
+
+        private struct CellRect {
+            var minX: Int
+            var maxX: Int
+            var minZ: Int
+            var maxZ: Int
+
+            func contains(_ other: CellRect) -> Bool {
+                other.minX >= minX && other.maxX <= maxX
+                    && other.minZ >= minZ && other.maxZ <= maxZ
+            }
+
+            func union(_ other: CellRect) -> CellRect {
+                CellRect(
+                    minX: Swift.min(minX, other.minX),
+                    maxX: Swift.max(maxX, other.maxX),
+                    minZ: Swift.min(minZ, other.minZ),
+                    maxZ: Swift.max(maxZ, other.maxZ)
+                )
+            }
+        }
+
+        private let index: CollisionObstacleSpatialIndex
+        private var scanned: CellRect?
+        private var entries: [Entry] = []
+        private var seen: Set<UUID> = []
+
+        init(index: CollisionObstacleSpatialIndex) {
+            self.index = index
+        }
+
+        func query(
+            from start: SIMD3<Float>,
+            to end: SIMD3<Float>,
+            margin: Float
+        ) -> [CollisionObstacle] {
+            guard !index.cells.isEmpty else { return [] }
+            let clampedMargin = max(0.0, margin)
+            let cellSize = index.cellSize
+            let low = CollisionObstacleSpatialIndex.cellKey(
+                x: min(start.x, end.x) - clampedMargin,
+                z: min(start.z, end.z) - clampedMargin,
+                cellSize: cellSize
+            )
+            let high = CollisionObstacleSpatialIndex.cellKey(
+                x: max(start.x, end.x) + clampedMargin,
+                z: max(start.z, end.z) + clampedMargin,
+                cellSize: cellSize
+            )
+            let requested = CellRect(minX: low.x, maxX: high.x, minZ: low.z, maxZ: high.z)
+
+            if let scanned, scanned.contains(requested) {
+                return obstacles(in: requested)
+            }
+
+            let union = scanned.map { $0.union(requested) } ?? requested
+            // Only the strip the union has just gained. Walking `union` and skipping the old
+            // rectangle inside the loop would still touch every cell of the area this exists to
+            // avoid, so the difference is decomposed into rectangles instead.
+            if let scanned {
+                if union.minZ < scanned.minZ {
+                    scan(minX: union.minX, maxX: union.maxX, minZ: union.minZ, maxZ: scanned.minZ - 1)
+                }
+                if union.maxZ > scanned.maxZ {
+                    scan(minX: union.minX, maxX: union.maxX, minZ: scanned.maxZ + 1, maxZ: union.maxZ)
+                }
+                if union.minX < scanned.minX {
+                    scan(minX: union.minX, maxX: scanned.minX - 1, minZ: scanned.minZ, maxZ: scanned.maxZ)
+                }
+                if union.maxX > scanned.maxX {
+                    scan(minX: scanned.maxX + 1, maxX: union.maxX, minZ: scanned.minZ, maxZ: scanned.maxZ)
+                }
+            } else {
+                scan(minX: union.minX, maxX: union.maxX, minZ: union.minZ, maxZ: union.maxZ)
+            }
+            scanned = union
+            return obstacles(in: requested)
+        }
+
+        private func scan(minX: Int, maxX: Int, minZ: Int, maxZ: Int) {
+            guard minX <= maxX, minZ <= maxZ else { return }
+            let cellSize = index.cellSize
+            for x in minX...maxX {
+                for z in minZ...maxZ {
+                    guard let bucket = index.cells[CellKey(x: x, z: z)] else { continue }
+                    for obstacle in bucket where seen.insert(obstacle.id).inserted {
+                        // The same planar radius the index inserted this obstacle under, so the
+                        // membership test below reproduces the bucket walk exactly.
+                        let radius = max(
+                            0.0,
+                            obstacle.planarHalfExtents.map(simd_length) ?? obstacle.radius
+                        )
+                        let entryLow = CollisionObstacleSpatialIndex.cellKey(
+                            x: obstacle.center.x - radius,
+                            z: obstacle.center.z - radius,
+                            cellSize: cellSize
+                        )
+                        let entryHigh = CollisionObstacleSpatialIndex.cellKey(
+                            x: obstacle.center.x + radius,
+                            z: obstacle.center.z + radius,
+                            cellSize: cellSize
+                        )
+                        entries.append(Entry(
+                            obstacle: obstacle,
+                            minX: entryLow.x,
+                            maxX: entryHigh.x,
+                            minZ: entryLow.z,
+                            maxZ: entryHigh.z
+                        ))
+                    }
+                }
+            }
+        }
+
+        private func obstacles(in rect: CellRect) -> [CollisionObstacle] {
+            var result: [CollisionObstacle] = []
+            result.reserveCapacity(entries.count)
+            for entry in entries
+            where entry.minX <= rect.maxX && entry.maxX >= rect.minX
+                && entry.minZ <= rect.maxZ && entry.maxZ >= rect.minZ {
+                result.append(entry.obstacle)
+            }
+            return result
+        }
+    }
+
+    func makeSegmentQueryCache() -> SegmentQueryCache {
+        SegmentQueryCache(index: self)
+    }
 }
 
 struct CollisionSweepResult {

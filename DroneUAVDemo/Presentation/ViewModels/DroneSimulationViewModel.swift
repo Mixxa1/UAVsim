@@ -611,6 +611,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var isCatchUpStep = false
     /// Set while fast-forwarding so every step of a frame advances the same simulated delta.
     private var forcedDeltaTime: Float?
+    private var simulationFrameStartedAt: TimeInterval?
     /// Presentation is skipped on catch-up steps: only the last step of a frame draws.
     private var shouldPresentThisStep: Bool { !performancePolicy.stopRendering && !isCatchUpStep }
 
@@ -1826,11 +1827,8 @@ final class DroneSimulationViewModel: ObservableObject {
 
     /// Tracks whether the aircraft's shock cone has swept over the operator.
     private var sonicBoomTracker = SonicBoomTracker()
-    /// The simulation's audio output. Lazily started, and only ever by a sound that is
-    /// actually going to play — the entire subsonic fleet never touches it.
+    /// Live audio graph; clip decoding runs off the simulation thread during setup.
     private let simulationAudio = SimulationAudioService()
-    /// Whether the sound pack has been read off disk yet. See `advanceAudioListener`.
-    private var isAudioPackPrepared = false
     private let vehicleAudioRuntime = VehicleAudioRuntime()
     /// Loop voices currently held by the aircraft, so a plan that keeps a layer updates it
     /// instead of starting a second copy of it.
@@ -2237,6 +2235,107 @@ final class DroneSimulationViewModel: ObservableObject {
     private var phaseCurrentTickWorstMs: Double = 0.0
     private var phaseTickCount: Int = 0
     private var phaseTelemetryAccumulator: Float = 0.0
+
+    /// Sub-step breakdown of the `systems` phase, reported the same way `[Phase]` reports the tick.
+    ///
+    /// ⚠️ The first version of this printed a line only when the phase exceeded 4 ms. Every line in
+    /// the log was therefore an expensive tick by construction, which read as "the phase costs 17 ms"
+    /// while the diagnostics panel showed a 0.39 ms frame — the two disagreed because the log was a
+    /// filtered sample of its own tail and the panel was not. Mean and max over a window, with no
+    /// gate, so the distribution is visible instead of only its worst end.
+    ///
+    /// The names are positional: `sysMark` is called once per bucket in this order and asserts the
+    /// name it was handed matches, so inserting a mark without updating the list fails loudly
+    /// rather than silently reattributing every bucket after it.
+    /// ⚠️ `modes` was one bucket covering two unrelated calls, and it measured 16.3 mean against a
+    /// 16.9 max — a constant per-tick cost, not the occasional stall it was first read as. Split so
+    /// the mode machine and the safety/bounds pass are attributable separately, since they would be
+    /// fixed in completely different places.
+    private static let sysPhaseNames = [
+        "damage", "audio", "physState", "groundSafety", "launchVisual", "modeTransitions", "safetyBounds", "rf", "fpvLog", "link",
+        "missionExec", "battery", "missionSafety", "scene", "payload", "scenarios", "events"
+    ]
+    private var sysPhaseSums = [Double](repeating: 0.0, count: sysPhaseNames.count)
+    private var sysPhasePeaks = [Double](repeating: 0.0, count: sysPhaseNames.count)
+    private var sysPhaseTotalSum: Double = 0.0
+    private var sysPhaseTotalPeak: Double = 0.0
+    private var sysPhaseTickCount: Int = 0
+    /// How many of the window's ticks actually presented a frame.
+    ///
+    /// A catch-up tick skips presentation, so the render thread is not holding the scene lock for
+    /// it. If the expensive state is one where every tick presents, a per-tick cost of exactly one
+    /// 60 Hz frame is a lock wait; if it is expensive while presenting rarely, it is real work.
+    /// The tick rate collapsing to ~15/s while the phase costs 16.3 ms is the thing this has to
+    /// separate, and the activity state is printed beside it because switching windows away and
+    /// back cleared the condition once.
+    private var sysPhasePresentCount: Int = 0
+    private var sysPhaseWindowStart = CACurrentMediaTime()
+
+    /// Breakdown of the `guid` phase, built the same way and for the same reason as `[SysPhase]`.
+    ///
+    /// Measured: `guid` climbed from 0.02 ms to 15–18 ms per tick over about half a minute, held
+    /// there for ten seconds with a 33 ms peak — the tick rate fell to 24 Hz — and then dropped
+    /// back to 0.02 ms in a single step. That is one phase covering six unrelated calls, so the
+    /// number says only that guidance got expensive, not which part of it did. The phase holds the
+    /// world clock, the cooldown/failure pass, the resolved-control write, the hand-launch walk,
+    /// the replay lifecycle and the autopilot; the autopilot is the suspect because it reaches
+    /// `autoPathPlanner.planIfNeeded`, but the suspicion is worth exactly nothing unmeasured.
+    ///
+    /// The flight mode is printed beside the buckets: `updateAutopilotTargets` is a dispatcher, and
+    /// which of its branches ran is a property of the mode, not of the timings.
+    private static let guidPhaseNames = [
+        "worldClock", "cooldowns", "controls", "handLaunch", "replay", "autopilot"
+    ]
+    private var guidPhaseSums = [Double](repeating: 0.0, count: guidPhaseNames.count)
+    private var guidPhasePeaks = [Double](repeating: 0.0, count: guidPhaseNames.count)
+    private var guidPhaseTotalSum: Double = 0.0
+    private var guidPhaseTotalPeak: Double = 0.0
+    private var guidPhaseTickCount: Int = 0
+    private var guidPhaseWindowStart = CACurrentMediaTime()
+    /// Planner counters as they stood when the window opened, so the report can show what the
+    /// planner did *during* this second rather than since launch.
+    private var guidPlanEntriesAtWindowStart: Int = 0
+    private var guidPlanMsAtWindowStart: Double = 0.0
+
+    /// Breakdown of the `controls` bucket, which the last flight log showed carrying the whole
+    /// `guid` phase: 0.02 ms on the ground, 0.45 ms after a return-home leg, then 14.5 ms per tick
+    /// held for the rest of the flight with the peak pinned at 16.7–16.8 ms — one display frame,
+    /// hundreds of windows running. Arithmetic does not clamp itself to the display period, so the
+    /// question is what `applyResolvedFlightControls` waits on. It touches no scene graph at all
+    /// (checked: no `presentation`, `rootNode`, `hitTest`, `geometry`, `physicsBody` in its 500
+    /// lines), and the only thing it does reach outside itself per tick is `@Published` writes.
+    ///
+    /// So the split is route / publish / assign, and `rest` is what the report derives for the
+    /// assist pipeline. `publish` times all of `updateControlValues`; `assign` times only the two
+    /// published stores inside it, separating the SwiftUI notification from the clamping around it.
+    /// `pub` counts the calls that got past the equality guard, because a call that early-returns
+    /// notifies nobody and must not be counted as one that did.
+    ///
+    /// Accumulated into instance state rather than laps, because the publishes happen three levels
+    /// down inside a 500-line function; the counters are zeroed on entry to that function and
+    /// folded the moment it returns, so `updateControlValues` calls made from the UI setters on
+    /// other run-loop turns land outside the window and are discarded by the next reset.
+    private var ctlRouteMs: Double = 0.0
+    private var ctlPublishMs: Double = 0.0
+    private var ctlAssignMs: Double = 0.0
+    private var ctlPublishCount: Int = 0
+    private var ctlRouteSum: Double = 0.0
+    private var ctlRoutePeak: Double = 0.0
+    private var ctlPublishSum: Double = 0.0
+    private var ctlPublishPeak: Double = 0.0
+    private var ctlAssignSum: Double = 0.0
+    private var ctlAssignPeak: Double = 0.0
+    private var ctlPublishCountSum: Int = 0
+    private var ctlPublishCountPeak: Int = 0
+    private static let ctlDetailNames = [
+        "route", "intent", "marker", "surface", "assistRoute", "assistSolve",
+        "assistState", "capture", "assistDebug", "commands"
+    ]
+    private var ctlDetailTick = Array(repeating: 0.0, count: ctlDetailNames.count)
+    private var ctlDetailSums = Array(repeating: 0.0, count: ctlDetailNames.count)
+    private var ctlDetailPeaks = Array(repeating: 0.0, count: ctlDetailNames.count)
+    private var guidSearchCountAtWindowStart = 0
+    private var guidGridBuildCountAtWindowStart = 0
     @inline(__always)
     private func markTickPhase(_ phase: TickPhase) {
         let now = CACurrentMediaTime()
@@ -2285,6 +2384,16 @@ final class DroneSimulationViewModel: ObservableObject {
     /// command that will actually take over, rather than from the avoidance command in controls.
     private var fixedWingLatestAssistRollCommandDegrees: Float?
     private var fixedWingLatestAssistCourseCommandRadians: Float?
+    /// Who wrote the pitch axis this tick, and whether the pilot's stick was live.
+    ///
+    /// `pitchCmd` in `[WingTick]` is the *applied* command. Reading it as the assist's output is the
+    /// same trap `asstRoll` exists to close on the roll axis: while the altitude override is live the
+    /// assist's own demand is scaled to a fifth and the applied value is the pilot's. An operator log
+    /// of a level 87 m/s cruise oscillating y 19↔27 with `pitchCmd` slamming between its clamps could
+    /// not be attributed to either owner, because neither was recorded — and the two call for
+    /// opposite fixes.
+    private var fixedWingLatestAssistPitchCommandDegrees: Float?
+    private var fixedWingLatestAltitudeOverrideActive = false
     /// Whether the applied escape course was taken fresh this tick or carried over. Six attempts at
     /// this commitment produced no measurable change; this says which branch actually runs.
     private var fixedWingAvoidanceHoldWasFresh = true
@@ -3364,6 +3473,9 @@ final class DroneSimulationViewModel: ObservableObject {
         keyboardInputService.setInputProcessingMode(.flight)
         keyboardInputService.start()
         emitLaunchDiagnostics(context: "init")
+        if !isSpectatorMode {
+            simulationAudio.prepare()
+        }
         startSimulationLoop()
     }
 
@@ -6998,6 +7110,8 @@ final class DroneSimulationViewModel: ObservableObject {
     /// skip only presentation, so what the operator watches at 64x is the same flight they would
     /// have watched at 1x, just sampled less often.
     private func runSimulationFrame() {
+        simulationFrameStartedAt = CACurrentMediaTime()
+        defer { simulationFrameStartedAt = nil }
         // No automatic cancellation. `operatorIsOnTheControls` is written by
         // `updateControlValues(markManual:)`, which every UI setter goes through — so opening a
         // panel or pressing a header button counted as "flying" and silently dropped the world
@@ -7018,24 +7132,24 @@ final class DroneSimulationViewModel: ObservableObject {
         // A frame that overruns its own budget must not spiral: each overrun would make the next
         // frame's wall delta larger, which asks for even more work. Stop early and report what was
         // actually achieved instead of falling further behind.
-        let budget = Self.simulationTickInterval * 3.0
+        // Leave part of the 60 Hz frame for presentation and the main run loop. The previous
+        // 50 ms allowance guaranteed dropped frames whenever fast-forward exhausted its budget.
+        let budget = SimulationFrameBudget(
+            maximumSteps: steps,
+            seconds: Self.simulationTickInterval * 0.65
+        )
         let frameStarted = CACurrentMediaTime()
         var completed = 0
 
         for index in 0..<steps {
-            isCatchUpStep = index < steps - 1
+            isCatchUpStep = !budget.shouldPresent(
+                stepIndex: index,
+                elapsed: CACurrentMediaTime() - frameStarted
+            )
             forcedDeltaTime = wallDelta
             tick()
             completed += 1
-            if isCatchUpStep, CACurrentMediaTime() - frameStarted > budget {
-                // Present this one after all, so the frame the operator sees is the last one
-                // simulated rather than a stale one.
-                isCatchUpStep = false
-                forcedDeltaTime = wallDelta
-                tick()
-                completed += 1
-                break
-            }
+            if !isCatchUpStep { break }
         }
 
         isCatchUpStep = false
@@ -8455,8 +8569,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// the tick runs more often, so the day speeds up on its own: the multiplier lives in how
     /// often simulated time is advanced, not in a second factor here that could drift out of step
     /// with the physics.
-    private func advanceWorldClock(bySimulatedSeconds seconds: Double) {
+    private func advanceWorldClock(bySimulatedSeconds seconds: Double, present: Bool) {
         worldClock.advance(bySimulatedSeconds: seconds)
+        guard present else { return }
 
         let text = worldClock.formattedTime
         if text != worldClockText { worldClockText = text }
@@ -8630,6 +8745,32 @@ final class DroneSimulationViewModel: ObservableObject {
         markTickPhase(.input)
         #endif
 
+        #if DEBUG
+        let guidStarted = CACurrentMediaTime()
+        var guidLap = guidStarted
+        var guidIndex = 0
+        // Held per tick and folded into the window only if the tick reaches the end of the phase.
+        // Both early returns below — the world not yet imported, and the signal-loss freeze — leave
+        // before the later buckets run, and counting their partial laps against a total that never
+        // arrives would bias every bucket before the return upward. The same trap `[SysPhase]` hit.
+        var guidLaps = [Double](repeating: 0.0, count: Self.guidPhaseNames.count)
+        func guidMark(_ name: String) {
+            let now = CACurrentMediaTime()
+            let elapsed = (now - guidLap) * 1000.0
+            guidLap = now
+            guard guidIndex < guidLaps.count else { return }
+            assert(
+                Self.guidPhaseNames[guidIndex] == name,
+                "guid phase order drifted at \(guidIndex): expected "
+                    + "\(Self.guidPhaseNames[guidIndex]), got \(name)"
+            )
+            guidLaps[guidIndex] = elapsed
+            guidIndex += 1
+        }
+        #else
+        func guidMark(_ name: String) {}
+        #endif
+
         // Physics must not run before the ground exists.
         //
         // An imported world takes tens of seconds to prepare, and the session is live throughout.
@@ -8668,7 +8809,8 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         simulationTime += dt
-        advanceWorldClock(bySimulatedSeconds: Double(dt))
+        advanceWorldClock(bySimulatedSeconds: Double(dt), present: shouldPresentThisStep)
+        guidMark("worldClock")
 
         // Losing the picture never freezes an interception run. The target keeps flying, the
         // observer keeps watching, and the assessment keeps counting down — which is exactly the
@@ -8694,14 +8836,131 @@ final class DroneSimulationViewModel: ObservableObject {
             // Intermittent failures toggle over time — re-bake their factors.
             refreshDamagePhysicsModels()
         }
+        guidMark("cooldowns")
 
         applyResolvedFlightControls(deltaTime: dt, controlState: interactionAwareInput)
+        guidMark("controls")
+        #if DEBUG
+        // Folded the moment the function returns, so publishes made from the UI setters on other
+        // run-loop turns never reach a window.
+        for index in ctlDetailTick.indices {
+            ctlDetailSums[index] += ctlDetailTick[index]
+            ctlDetailPeaks[index] = max(ctlDetailPeaks[index], ctlDetailTick[index])
+        }
+        ctlRouteSum += ctlRouteMs
+        if ctlRouteMs > ctlRoutePeak { ctlRoutePeak = ctlRouteMs }
+        ctlPublishSum += ctlPublishMs
+        if ctlPublishMs > ctlPublishPeak { ctlPublishPeak = ctlPublishMs }
+        ctlAssignSum += ctlAssignMs
+        if ctlAssignMs > ctlAssignPeak { ctlAssignPeak = ctlAssignMs }
+        ctlPublishCountSum += ctlPublishCount
+        if ctlPublishCount > ctlPublishCountPeak { ctlPublishCountPeak = ctlPublishCount }
+        #endif
         updateHandLaunchPOVWalk(deltaTime: dt)
+        guidMark("handLaunch")
         updateMissionReplayLifecycle()
+        guidMark("replay")
         activeFixedWingLaunchDynamics = nil
         updateAutopilotTargets(deltaTime: dt)
+        guidMark("autopilot")
         #if DEBUG
+        // Closed before the report is built: the once-a-second `print` is instrumentation, and
+        // charging it to the phase it measures would put a fake peak in `[Phase] guid`.
         markTickPhase(.guidance)
+        let guidWindowNow = CACurrentMediaTime()
+        let guidTotal = (guidWindowNow - guidStarted) * 1000.0
+        for index in 0..<guidLaps.count {
+            guidPhaseSums[index] += guidLaps[index]
+            if guidLaps[index] > guidPhasePeaks[index] { guidPhasePeaks[index] = guidLaps[index] }
+        }
+        guidPhaseTotalSum += guidTotal
+        if guidTotal > guidPhaseTotalPeak { guidPhaseTotalPeak = guidTotal }
+        guidPhaseTickCount += 1
+        if guidWindowNow - guidPhaseWindowStart >= 1.0, guidPhaseTickCount > 0 {
+            let ticks = Double(guidPhaseTickCount)
+            let breakdown = zip(Self.guidPhaseNames.indices, Self.guidPhaseNames)
+                .map { index, name in
+                    String(
+                        format: "%@=%.2f/%.1f",
+                        name,
+                        guidPhaseSums[index] / ticks,
+                        guidPhasePeaks[index]
+                    )
+                }
+                .joined(separator: " ")
+            // Planner volume over this window, not since launch. A search entered once per second
+            // and a search entered on every tick both show up as an expensive `autopilot` bucket;
+            // only the entry count tells them apart, and only the tag says which caller it was.
+            let planning = AutoPathPlannerService.accounting
+            print(String(
+                format: "[GuidPhase] ticks=%d mode=%@ total=%.2f/%.1fms  %@  "
+                    + "plan=%d/%.1fms worst=%.1f tag=%@ reason=%@",
+                guidPhaseTickCount,
+                String(describing: mode) as NSString,
+                guidPhaseTotalSum / ticks,
+                guidPhaseTotalPeak,
+                breakdown as NSString,
+                planning.entryCount - guidPlanEntriesAtWindowStart,
+                planning.entryMsAccumulated - guidPlanMsAtWindowStart,
+                planning.worstEntryMs,
+                planning.lastTag as NSString,
+                planning.lastReason as NSString
+            ))
+            // `rest` is derived rather than measured: it is whatever `controls` spent outside the
+            // router and updateControlValues (including the assist's own published state). Deriving it costs no
+            // extra marks inside a 500-line function and cannot drift out of step with the total.
+            let controlsIndex = Self.guidPhaseNames.firstIndex(of: "controls") ?? 2
+            let controlsMean = guidPhaseSums[controlsIndex] / ticks
+            print(String(
+                format: "[CtlPhase] ticks=%d controls=%.2f/%.1fms  route=%.2f/%.1f "
+                    + "publish=%.2f/%.1f assign=%.2f/%.1f rest=%.2f  pub=%.2f/%d",
+                guidPhaseTickCount,
+                controlsMean,
+                guidPhasePeaks[controlsIndex],
+                ctlRouteSum / ticks,
+                ctlRoutePeak,
+                ctlPublishSum / ticks,
+                ctlPublishPeak,
+                ctlAssignSum / ticks,
+                ctlAssignPeak,
+                max(0.0, controlsMean - (ctlRouteSum / ticks) - (ctlPublishSum / ticks)),
+                Double(ctlPublishCountSum) / ticks,
+                ctlPublishCountPeak
+            ))
+            let detail = Self.ctlDetailNames.indices.map { index in
+                String(format: "%@=%.2f/%.1f", Self.ctlDetailNames[index] as NSString,
+                       ctlDetailSums[index] / ticks, ctlDetailPeaks[index])
+            }.joined(separator: " ")
+            print("[CtlDetail] ticks=\(guidPhaseTickCount) profile=\(selectedDroneProfile.id) assist=\(fixedWingAssistState.mode) \(detail)")
+            print("[PlanWork] entries=\(planning.entryCount - guidPlanEntriesAtWindowStart) searches=\(planning.searchCount - guidSearchCountAtWindowStart) grids=\(planning.gridBuildCount - guidGridBuildCountAtWindowStart)")
+            guidSearchCountAtWindowStart = planning.searchCount
+            guidGridBuildCountAtWindowStart = planning.gridBuildCount
+            for index in ctlDetailSums.indices {
+                ctlDetailSums[index] = 0
+                ctlDetailPeaks[index] = 0
+            }
+            ctlRouteSum = 0.0
+            ctlRoutePeak = 0.0
+            ctlPublishSum = 0.0
+            ctlPublishPeak = 0.0
+            ctlAssignSum = 0.0
+            ctlAssignPeak = 0.0
+            ctlPublishCountSum = 0
+            ctlPublishCountPeak = 0
+            guidPhaseWindowStart = guidWindowNow
+            guidPhaseTickCount = 0
+            guidPhaseTotalSum = 0.0
+            guidPhaseTotalPeak = 0.0
+            for index in 0..<guidPhaseSums.count {
+                guidPhaseSums[index] = 0.0
+                guidPhasePeaks[index] = 0.0
+            }
+            guidPlanEntriesAtWindowStart = planning.entryCount
+            guidPlanMsAtWindowStart = planning.entryMsAccumulated
+            AutoPathPlannerService.accounting.worstEntryMs = 0.0
+        }
+        // The next phase starts now, so the report above is charged to no phase at all.
+        phaseClock = CACurrentMediaTime()
         #endif
         let pathfindingMs = autoPathPlanner.lastPlanDurationMs
 
@@ -9007,7 +9266,8 @@ final class DroneSimulationViewModel: ObservableObject {
                         + "throttle=%.2f risk=%.2f obstacle=%@ "
                         + "why=%@ pending=%@ avoid=%@ turnR=%.0f hold=%@ heldCrs=%.0f "
                         + "band=%.0f-%.0f nav=%d state=%@ sup=%@ "
-                        + "asstRoll=%@ avOwns=%@ holdRem=%.2f avCrsErr=%@ avRawBank=%@ "
+                        + "asstRoll=%@ asstPitch=%@ altOvr=%@ "
+                        + "avOwns=%@ holdRem=%.2f avCrsErr=%@ avRawBank=%@ "
                         // How far round the active waypoint the aircraft has already turned. 360
                         // is the orbit-trap threshold that arms the emergency abeam pass.
                         + "swept=%.0f",
@@ -9066,6 +9326,14 @@ final class DroneSimulationViewModel: ObservableObject {
                     (fixedWingLatestAssistRollCommandDegrees.map {
                         String(format: "%.1f", $0)
                     } ?? "nil") as NSString,
+                    // What the assist asked of the pitch axis, and whether the pilot's stick was
+                    // holding that axis instead. `pitchCmd` above is the applied value, which is the
+                    // pilot's whenever `altOvr=yes` — the assist's own demand is scaled to a fifth
+                    // there, so the two columns disagreeing is the normal case, not a bug.
+                    (fixedWingLatestAssistPitchCommandDegrees.map {
+                        String(format: "%.1f", $0)
+                    } ?? "nil") as NSString,
+                    (fixedWingLatestAltitudeOverrideActive ? "yes" : "no") as NSString,
                     (fixedWingAvoidanceLastCommandTick == simulationTickCounter
                         ? "yes"
                         : "no") as NSString,
@@ -9358,6 +9626,40 @@ final class DroneSimulationViewModel: ObservableObject {
         #if DEBUG
         markTickPhase(.collisionPost)
         #endif
+
+        // Sub-step breakdown of `sys`, which is the whole back half of the tick.
+        //
+        // A manual night flight logged `sys` climbing monotonically — 0.4 → 0.6 → 1.0 → 2.0 → 3.4 →
+        // 5.9 → 8.0 → 13.4 → 20 → 36 → 46 → 56 → 66 → 74 ms — and never recovering, while every
+        // other phase held flat (`avProbe` 1.6, `guid` 0.2, `phys` 0.05) and `objs` stayed at 946.
+        // Cost that only grows is something accumulating and being walked every tick, so the answer
+        // is which of these dozen calls owns the container. Nothing here is a spike, so the report
+        // fires on the *mean* being large rather than on a peak.
+        #if DEBUG
+        let sysStarted = CACurrentMediaTime()
+        var sysLap = sysStarted
+        var sysIndex = 0
+        // Held per tick and folded into the window only if the tick reaches the end. The
+        // signal-loss branch below returns early, and counting its partial buckets against a tick
+        // total that never arrives would bias every bucket before the return upward.
+        var sysLaps = [Double](repeating: 0.0, count: Self.sysPhaseNames.count)
+        func sysMark(_ name: String) {
+            let now = CACurrentMediaTime()
+            let elapsed = (now - sysLap) * 1000.0
+            sysLap = now
+            guard sysIndex < sysLaps.count else { return }
+            assert(
+                Self.sysPhaseNames[sysIndex] == name,
+                "sys phase order drifted at \(sysIndex): expected "
+                    + "\(Self.sysPhaseNames[sysIndex]), got \(name)"
+            )
+            sysLaps[sysIndex] = elapsed
+            sysIndex += 1
+        }
+        #else
+        func sysMark(_ name: String) {}
+        #endif
+
         var needsCollisionAnalysisRefresh = false
         if let report = impactReport {
             applyImpactConsequences(report)
@@ -9406,17 +9708,24 @@ final class DroneSimulationViewModel: ObservableObject {
             )
         }
 
+        sysMark("damage")
         advanceCarrier(deltaTime: dt)
         advanceAudioListener()
         advanceVehicleAudio(deltaTime: dt)
         advanceSonicBoom(deltaTime: dt)
+        sysMark("audio")
         updatePhysicalState(previousState: previousState, deltaTime: dt)
         if let launchDynamics = activeFixedWingLaunchDynamics,
            launchDynamics.phase == .held || launchDynamics.phase == .catapultRail {
             transitionPhysicalState(.takeoffTransition)
         }
+        sysMark("physState")
         applyGroundedSafetyIfNeeded(deltaTime: dt)
-        refreshFixedWingLaunchPresentation()
+        sysMark("groundSafety")
+        if shouldPresentThisStep {
+            refreshFixedWingLaunchPresentation()
+        }
+        sysMark("launchVisual")
 
         #if DEBUG
         // Launch detector: a sudden upward position jump with low vertical velocity is a teleport
@@ -9433,15 +9742,20 @@ final class DroneSimulationViewModel: ObservableObject {
         #endif
 
         handleModeTransitions()
+        sysMark("modeTransitions")
         enforceRuntimeSafetyAndBounds(context: "tick.post_mode")
+        sysMark("safetyBounds")
         updateRFSystemRuntime(deltaTime: dt)
+        sysMark("rf")
         advanceFPVFlightLog(deltaTime: dt)
+        sysMark("fpvLog")
         updateSignalLossSequence(deltaTime: dt)
         updateFiberOpticTether(deltaTime: dt)
         updateControlLinkFailsafeSequence(deltaTime: dt)
         updateControlLinkFailsafeLatchRecovery(deltaTime: dt)
         armBlockReason = resolveArmAuthorization().reason
         syncMissionDeliveryState(triggerAutoRelease: false)
+        sysMark("link")
 
         if blocksSimulationForSignalLoss {
             refreshFlightControlDiagnostics()
@@ -9453,6 +9767,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         syncMissionDeliveryState(triggerAutoRelease: true)
         updateMissionExecutionRuntime()
+        sysMark("missionExec")
 
         let maneuverAggressiveness = (abs(Float(controlValues.roll)) + abs(Float(controlValues.pitch))) / 120.0
         batteryState = batteryThermalService.updateBattery(
@@ -9518,9 +9833,11 @@ final class DroneSimulationViewModel: ObservableObject {
             }
         }
 
+        sysMark("battery")
         applyMissionSafetyRuntimeIfNeeded()
         sampleMissionObservationIfNeeded()
         updateThunderstormLightning(deltaTime: dt)
+        sysMark("missionSafety")
 
         let renderStart = CACurrentMediaTime()
         if shouldPresentThisStep {
@@ -9543,14 +9860,17 @@ final class DroneSimulationViewModel: ObservableObject {
                 deltaTime: dt
             )
         }
+        sysMark("scene")
         refreshCompassOverlay()
         refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
         syncPayloadLifecycleEvents()
+        sysMark("payload")
         updateMissionScenarioRuntime(deltaTime: TimeInterval(dt))
         updateInterceptMission(deltaTime: dt)
         updateFireResponseRuntime(deltaTime: TimeInterval(dt))
         updateAgriSprayRuntime(deltaTime: TimeInterval(dt))
         updateRaceRuntime(deltaTime: TimeInterval(dt))
+        sysMark("scenarios")
         // Also on the running side: the builder normally pauses the world, but the operator can
         // resume it by hand, and a builder camera that silently stopped answering the keys would
         // look like the application had hung.
@@ -9562,6 +9882,51 @@ final class DroneSimulationViewModel: ObservableObject {
         flushDamageEventAdapters()
         publishOnlineVehicleSnapshotIfNeeded(now: now)
         let renderTimeMs = (CACurrentMediaTime() - renderStart) * 1000.0
+        sysMark("events")
+
+        #if DEBUG
+        let sysWindowNow = CACurrentMediaTime()
+        let sysTotal = (sysWindowNow - sysStarted) * 1000.0
+        for index in 0..<sysLaps.count {
+            sysPhaseSums[index] += sysLaps[index]
+            if sysLaps[index] > sysPhasePeaks[index] { sysPhasePeaks[index] = sysLaps[index] }
+        }
+        sysPhaseTotalSum += sysTotal
+        if sysTotal > sysPhaseTotalPeak { sysPhaseTotalPeak = sysTotal }
+        sysPhaseTickCount += 1
+        if shouldPresentThisStep { sysPhasePresentCount += 1 }
+        if sysWindowNow - sysPhaseWindowStart >= 1.0, sysPhaseTickCount > 0 {
+            let ticks = Double(sysPhaseTickCount)
+            let breakdown = zip(Self.sysPhaseNames.indices, Self.sysPhaseNames)
+                .map { index, name in
+                    String(
+                        format: "%@=%.2f/%.1f",
+                        name,
+                        sysPhaseSums[index] / ticks,
+                        sysPhasePeaks[index]
+                    )
+                }
+                .joined(separator: " ")
+            print(String(
+                format: "[SysPhase] ticks=%d present=%d act=%@ total=%.2f/%.1fms  %@",
+                sysPhaseTickCount,
+                sysPhasePresentCount,
+                performancePolicy.activityState.label as NSString,
+                sysPhaseTotalSum / ticks,
+                sysPhaseTotalPeak,
+                breakdown as NSString
+            ))
+            sysPhaseWindowStart = sysWindowNow
+            sysPhaseTickCount = 0
+            sysPhasePresentCount = 0
+            sysPhaseTotalSum = 0.0
+            sysPhaseTotalPeak = 0.0
+            for index in 0..<sysPhaseSums.count {
+                sysPhaseSums[index] = 0.0
+                sysPhasePeaks[index] = 0.0
+            }
+        }
+        #endif
 
         #if DEBUG
         markTickPhase(.systems)
@@ -9588,7 +9953,7 @@ final class DroneSimulationViewModel: ObservableObject {
            diagnosticsSamplingAccumulator >= 0.45 || cachedDiagnostics.activeObjectCount == 0 {
             let sceneStats = sceneController.sceneDiagnostics()
             let nextDiagnostics = SimulationDiagnostics(
-                frameTimeMs: (CACurrentMediaTime() - frameStart) * 1000.0,
+                frameTimeMs: (CACurrentMediaTime() - (simulationFrameStartedAt ?? frameStart)) * 1000.0,
                 physicsTimeMs: physicsTimeMs,
                 renderTimeMs: renderTimeMs,
                 pathfindingTimeMs: pathfindingMs,
@@ -10329,13 +10694,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// whole frames before. The model transform is what the scene controller has already
     /// written this tick, which is exactly the pose the operator is about to see.
     ///
-    /// The pack loads on the first tick rather than in `init` so that constructing a view
-    /// model — which several code paths do without ever flying it — costs nothing.
     private func advanceAudioListener() {
-        if !isAudioPackPrepared {
-            isAudioPackPrepared = true
-            simulationAudio.prepare()
-        }
         simulationAudio.refreshMasterVolume()
 
         let transform = activeCameraNode.simdWorldTransform
@@ -10980,6 +11339,9 @@ final class DroneSimulationViewModel: ObservableObject {
     /// mistakes here are a pitch that does not track RPM and a Doppler shift with the wrong
     /// sign, and both can be caught in a headless probe rather than by listening.
     private func advanceVehicleAudio(deltaTime: Float) {
+        // Start/boot cues belong to the first audible update; do not consume them while the
+        // background decoder is still preparing the pack.
+        guard simulationAudio.isPrepared else { return }
         let listenerPosition = simulationAudio.currentListenerPosition
         let measuredListenerVelocity: SIMD3<Float>
         if listenerDidTeleport {
@@ -11902,12 +12264,36 @@ final class DroneSimulationViewModel: ObservableObject {
         deltaTime: Float,
         controlState: ResolvedControlState
     ) {
+        #if DEBUG
+        // Zeroed before the guard on purpose: a tick that returns here still reaches the fold, and
+        // must fold zeros rather than whatever the previous tick left behind.
+        ctlRouteMs = 0.0
+        ctlPublishMs = 0.0
+        ctlAssignMs = 0.0
+        ctlPublishCount = 0
+        for index in ctlDetailTick.indices { ctlDetailTick[index] = 0 }
+        var ctlDetailIndex = 0
+        var ctlDetailLap = CACurrentMediaTime()
+        func ctlSection(_ index: Int) {
+            let now = CACurrentMediaTime()
+            ctlDetailTick[ctlDetailIndex] += (now - ctlDetailLap) * 1000.0
+            ctlDetailLap = now
+            ctlDetailIndex = index
+        }
+        defer { ctlSection(ctlDetailIndex) }
+        let ctlRouteStarted = CACurrentMediaTime()
+        #else
+        func ctlSection(_ index: Int) {}
+        #endif
         guard canControlLocalVehicle, !isControlLinkFailsafeActive else { return }
 
         // hybridVTOL transition lever: a raw held-key input, not routed through
         // the assist/marker-guidance pipeline below (keyboard-only this pass;
         // ignored entirely by non-hybridVTOL physics).
-        controlValues.vtolTransitionLever = Double(keyboardInputService.currentVTOLTransitionLever())
+        let transitionLever = Double(keyboardInputService.currentVTOLTransitionLever())
+        if controlValues.vtolTransitionLever != transitionLever {
+            controlValues.vtolTransitionLever = transitionLever
+        }
 
         // P2P 0.7: existing DroneState represents the local pilot vehicle only
         // until multi-state network physics is introduced.
@@ -11924,7 +12310,11 @@ final class DroneSimulationViewModel: ObservableObject {
             context: routingContext
         )
         let effectiveControlMode = resolvedFlightControlMode(for: route.authority)
+        #if DEBUG
+        ctlRouteMs = (CACurrentMediaTime() - ctlRouteStarted) * 1000.0
+        #endif
 
+        ctlSection(1)
         let maxAltitude = Double(terrain.maxFlightAltitude)
         let effectiveAxis = route.axisInput
         let tailsitterHoverControlsActive = selectedDroneProfile.airframeStyle == .tailsitterVTOL &&
@@ -11977,15 +12367,18 @@ final class DroneSimulationViewModel: ObservableObject {
 
         if route.shouldAttemptMarkerGuidance,
            selectedDroneProfile.airframeClass == .multirotor {
+            ctlSection(2)
             _ = applyMultirotorTargetMarkerGuidance(deltaTime: deltaTime)
             return
         }
 
         if selectedDroneProfile.airframeClass == .fixedWing || selectedDroneProfile.airframeClass == .hybridVTOL {
+            ctlSection(3)
             fixedWingAssistUsesTargetYawWhileManual = false
 
             if route.authority == .markerGuidance,
                targetMarkerState != nil {
+                ctlSection(2)
                 if selectedDroneProfile.airframeClass == .hybridVTOL,
                    activeRouteTargetSource != .mission,
                    hybridVTOLMarkerGuidanceReachedTarget() {
@@ -12116,6 +12509,7 @@ final class DroneSimulationViewModel: ObservableObject {
             let altitudeOverrideActive = liveAltitudeOverride || fixedWingAssistAltitudeOverrideTimeRemaining > 0.0
 
             if fixedWingAssistState.mode != .manual, mode == .manual {
+                ctlSection(4)
                 setFixedWingGuidanceSource(.none, reason: "fixed_wing_assist_active")
                 let assistWaypoint = resolvedFixedWingAssistWaypoint()
                 if fixedWingAssistState.mode == .waypointIntercept,
@@ -12142,7 +12536,18 @@ final class DroneSimulationViewModel: ObservableObject {
                 let interceptTarget = guidanceSnapshot?.guidanceTarget ?? assistWaypoint?.position
                 let captureTarget = guidanceSnapshot?.captureTarget ?? assistWaypoint?.position
 
-                if let assistOutput = fixedWingAssistController.update(
+                let interceptDebugContext = FixedWingAssistInterceptDebugContext(
+                    activeTargetSource: fixedWingAssistInterceptDebugSource(),
+                    segmentCountAfterValidation: fixedWingValidatedMissionSegmentCount(),
+                    activeRouteIncludesHome: fixedWingAssistActiveRouteIncludesHome(),
+                    selectedWaypointID: assistWaypoint?.id,
+                    guidanceTargetType: guidanceSnapshot?.guidanceMode ?? "selected_waypoint",
+                    guidanceTargetPoint: interceptTarget,
+                    currentLegStart: assistDebugLeg.start,
+                    currentLegEnd: assistDebugLeg.end
+                )
+                ctlSection(5)
+                let assistOutput = fixedWingAssistController.update(
                     assistState: fixedWingAssistState,
                     aircraftState: state,
                     wing: wing,
@@ -12150,20 +12555,13 @@ final class DroneSimulationViewModel: ObservableObject {
                     currentControls: controlValues,
                     interceptTarget: interceptTarget,
                     captureTarget: captureTarget,
-                    interceptDebugContext: FixedWingAssistInterceptDebugContext(
-                        activeTargetSource: fixedWingAssistInterceptDebugSource(),
-                        segmentCountAfterValidation: fixedWingValidatedMissionSegmentCount(),
-                        activeRouteIncludesHome: fixedWingAssistActiveRouteIncludesHome(),
-                        selectedWaypointID: assistWaypoint?.id,
-                        guidanceTargetType: guidanceSnapshot?.guidanceMode ?? "selected_waypoint",
-                        guidanceTargetPoint: interceptTarget,
-                        currentLegStart: assistDebugLeg.start,
-                        currentLegEnd: assistDebugLeg.end
-                    ),
+                    interceptDebugContext: interceptDebugContext,
                     turnOverrideActive: turnOverrideActive,
                     altitudeOverrideActive: altitudeOverrideActive,
-                    heightAboveSurfaceMeters: heightAboveSupportSurface(for: state.position)
-                ) {
+                    heightAboveSurfaceMeters: heightAboveSupport
+                )
+                ctlSection(6)
+                if let assistOutput {
                     let previousAssistState = fixedWingAssistState
                     let captureTransitionOccurred = !previousAssistState.interceptCompleted && assistOutput.state.interceptCompleted
                     fixedWingAssistState = assistOutput.state
@@ -12194,6 +12592,7 @@ final class DroneSimulationViewModel: ObservableObject {
                        !fixedWingAssistState.capturedWaypointIDs.contains(completedWaypointID) {
                         fixedWingAssistState.capturedWaypointIDs.append(completedWaypointID)
                     }
+                    ctlSection(7)
                     var waypointChanged = false
                     if captureTransitionOccurred {
                         fixedWingCaptureHoldStartedAt = nil
@@ -12207,12 +12606,14 @@ final class DroneSimulationViewModel: ObservableObject {
                         // one that runs while the hold is live.
                         waypointChanged = updatePendingFixedWingAutoAdvanceIfNeeded()
                     }
+                    ctlSection(8)
                     if !waypointChanged {
                         refreshFixedWingAssistRuntimeDebugState(
                             precomputedGuidanceSnapshot: guidanceSnapshot,
                             recomputeGuidance: false
                         )
                     }
+                    ctlSection(9)
                     fixedWingAssistUsesTargetYawWhileManual = !turnOverrideActive
                     if let reason = assistOutput.transitionReason,
                        !captureTransitionOccurred {
@@ -12250,6 +12651,8 @@ final class DroneSimulationViewModel: ObservableObject {
                     let altitudeTarget = assistOutput.state.mode == .altitudeHold || assistOutput.state.mode == .waypointIntercept
                         ? Double(assistOutput.state.targetAltitudeMeters ?? state.position.y)
                         : Double(state.position.y)
+                    fixedWingLatestAssistPitchCommandDegrees = assistOutput.pitchDegrees
+                    fixedWingLatestAltitudeOverrideActive = altitudeOverrideActive
 
                     let assistOutputStillOwnsControllerState = !waypointChanged
                         && assistOutput.state.mode == fixedWingAssistState.mode
@@ -12341,6 +12744,7 @@ final class DroneSimulationViewModel: ObservableObject {
                 }
             }
 
+            ctlSection(9)
             guard hasEffectiveInput else {
                 return
             }
@@ -12357,6 +12761,7 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        ctlSection(9)
         let climb = effectiveAxis.vertical * (effectiveAxis.speedBoost ? 5.4 : 3.0) * deltaTime
         let pitchScale: Float = 28.0
         let rollScale: Float = 26.0
@@ -21261,6 +21666,8 @@ final class DroneSimulationViewModel: ObservableObject {
         fixedWingAssistPinnedWaypoint = nil
         fixedWingLatestAssistRollCommandDegrees = nil
         fixedWingLatestAssistCourseCommandRadians = nil
+        fixedWingLatestAssistPitchCommandDegrees = nil
+        fixedWingLatestAltitudeOverrideActive = false
         fixedWingAvoidanceReleaseRemaining = 0.0
         fixedWingAvoidanceReleaseCourseRadians = nil
         fixedWingAvoidanceLateralCommandWasActive = false
@@ -21470,7 +21877,6 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func fixedWingAssistActiveRouteIncludesHome() -> Bool {
-        let spawnPlanar = SIMD2<Float>(currentSpawnPoint().x, currentSpawnPoint().z)
         let activeRoutePoints: [SIMD2<Float>] = {
             if let routePlan = fixedWingFlyByRoutePlan(targetAltitude: max(0.0, state.position.y)) {
                 return routePlan.routePoints
@@ -21484,6 +21890,9 @@ final class DroneSimulationViewModel: ObservableObject {
             return tacticalMapState.workingDraft.waypoints.map(\.position)
         }()
 
+        guard !activeRoutePoints.isEmpty else { return false }
+        let spawn = currentSpawnPoint()
+        let spawnPlanar = SIMD2<Float>(spawn.x, spawn.z)
         return activeRoutePoints.contains { simd_distance($0, spawnPlanar) <= 0.05 }
     }
 
@@ -21649,6 +22058,20 @@ final class DroneSimulationViewModel: ObservableObject {
     ) -> FixedWingFlyByRoutePlan? {
         guard selectedDroneProfile.airframeClass == .fixedWing ||
                 selectedDroneProfile.airframeClass == .hybridVTOL else {
+            return nil
+        }
+
+        // An empty route has no geometry to validate. Heading/altitude hold still requests
+        // route diagnostics every tick; building its key used to query support surfaces and
+        // construct a tactical viewport before discovering there were no segments.
+        let sourceDraft = isMissionMapVisible
+            ? tacticalMapState.workingDraft
+            : tacticalMapState.committedDraft
+        guard !(currentMissionPlan?.routePoints.isEmpty ?? true)
+                || tacticalMapState.previewRoute != nil
+                || sourceDraft.waypoints.count >= 2 else {
+            fixedWingFlyByRoutePlanCacheKey = nil
+            fixedWingFlyByRoutePlanCache = nil
             return nil
         }
 
@@ -25619,70 +26042,78 @@ final class DroneSimulationViewModel: ObservableObject {
         let routePlan = guidanceDeferred
             ? fixedWingFlyByRoutePlanCache
             : fixedWingFlyByRoutePlan(targetAltitude: max(0.0, state.position.y))
+        var nextState = fixedWingAssistState
+        defer {
+            // Guidance lookup below may rebuild a plan and advance these counters.
+            nextState.guidanceRecomputeCount = fixedWingGuidanceRecomputeCount
+            nextState.flyByPlanRecomputeCount = fixedWingGuidanceRecomputeCount
+            nextState.fullRouteRebuildCount = fixedWingFullRouteRebuildCount
+            if nextState != fixedWingAssistState { fixedWingAssistState = nextState }
+        }
         let previewUsesCachedFlyByPlan = routePlan?.previewUsesCachedFlyByPlan == true && (
             currentMissionPlan != nil || tacticalMapState.previewRoute != nil
         )
         let controllerUsesCachedFlyByPlan = routePlan?.controllerUsesCachedFlyByPlan == true && (
-            activeRouteTargetSource == .mission || fixedWingAssistState.mode == .waypointIntercept
+            activeRouteTargetSource == .mission || nextState.mode == .waypointIntercept
         )
-        fixedWingAssistState.previewUsesCachedFlyByPlan = previewUsesCachedFlyByPlan
-        fixedWingAssistState.controllerUsesCachedFlyByPlan = controllerUsesCachedFlyByPlan
-        fixedWingAssistState.guidanceDirectToWaypointSuppressed = controllerUsesCachedFlyByPlan &&
+        nextState.previewUsesCachedFlyByPlan = previewUsesCachedFlyByPlan
+        nextState.controllerUsesCachedFlyByPlan = controllerUsesCachedFlyByPlan
+        nextState.guidanceDirectToWaypointSuppressed = controllerUsesCachedFlyByPlan &&
             (routePlan?.guidanceDirectToWaypointSuppressed ?? false)
-        fixedWingAssistState.flyByPlanRecomputeCount = fixedWingGuidanceRecomputeCount
-        fixedWingAssistState.fullRouteRebuildCount = fixedWingFullRouteRebuildCount
-        fixedWingAssistState.overlayRebuildCount = terrainMapHeavyRebuildCount
-        fixedWingAssistState.guidanceRecomputeCount = fixedWingGuidanceRecomputeCount
-        fixedWingAssistState.heavyMapRebuildCount = terrainMapHeavyRebuildCount
-        fixedWingAssistState.frameTimeMs = cachedDiagnostics.frameTimeMs
-        if !fixedWingAssistState.flyByTransitionActive {
-            fixedWingAssistState.frameTimeDuringTransitionMs = nil
+        nextState.flyByPlanRecomputeCount = fixedWingGuidanceRecomputeCount
+        nextState.fullRouteRebuildCount = fixedWingFullRouteRebuildCount
+        nextState.overlayRebuildCount = terrainMapHeavyRebuildCount
+        nextState.guidanceRecomputeCount = fixedWingGuidanceRecomputeCount
+        nextState.heavyMapRebuildCount = terrainMapHeavyRebuildCount
+        nextState.frameTimeMs = cachedDiagnostics.frameTimeMs
+        if !nextState.flyByTransitionActive {
+            nextState.frameTimeDuringTransitionMs = nil
         } else {
-            fixedWingAssistState.frameTimeDuringTransitionMs = cachedDiagnostics.frameTimeMs
+            nextState.frameTimeDuringTransitionMs = cachedDiagnostics.frameTimeMs
         }
 
         guard let activeWaypoint = resolvedFixedWingAssistWaypoint(),
               let wing = selectedDroneProfile.fixedWingParameters else {
-            applyFixedWingAssistGeometryDiagnostics(nil)
-            clearFixedWingAssistTurnTransitionDiagnostics(&fixedWingAssistState)
-            fixedWingAssistState.activeGuidanceTargetType = "none"
+            applyFixedWingAssistGeometryDiagnostics(nil, to: &nextState)
+            clearFixedWingAssistTurnTransitionDiagnostics(&nextState)
+            nextState.activeGuidanceTargetType = "none"
             applyFixedWingWaypointClassification(
                 fixedWingAssistWaypointClassification(
-                    activeIndex: fixedWingAssistState.activeWaypointIndex
+                    activeIndex: nextState.activeWaypointIndex
                 ),
-                to: &fixedWingAssistState
+                to: &nextState
             )
             return
         }
 
         let classification = fixedWingAssistWaypointClassification(
-            activeIndex: fixedWingAssistState.activeWaypointIndex
+            activeIndex: nextState.activeWaypointIndex
         )
-        applyFixedWingWaypointClassification(classification, to: &fixedWingAssistState)
+        applyFixedWingWaypointClassification(classification, to: &nextState)
 
-        fixedWingAssistState.distanceToActiveWaypointMeters = simd_distance(
+        nextState.distanceToActiveWaypointMeters = simd_distance(
             currentPlanarPosition(),
             activeWaypoint.position
         )
 
-        if fixedWingAssistState.interceptCompleted {
-            fixedWingAssistState.interceptFeasibilityState = nil
-            fixedWingAssistState.headingErrorDegrees = nil
-            fixedWingAssistState.rawHeadingErrorDegrees = nil
-            fixedWingAssistState.estimatedTurnRadiusMeters = nil
-            fixedWingAssistState.commandedBankDegrees = nil
-            fixedWingAssistState.filteredBankCommandDegrees = nil
-            fixedWingAssistState.commandedTurnDirection = .none
-            fixedWingAssistState.flyByTransitionActive = false
-            fixedWingAssistState.flyByTransitionFeasible = false
-            fixedWingAssistState.activeGuidanceMode = classification.hasNextWaypoint
+        if nextState.interceptCompleted {
+            nextState.interceptFeasibilityState = nil
+            nextState.headingErrorDegrees = nil
+            nextState.rawHeadingErrorDegrees = nil
+            nextState.estimatedTurnRadiusMeters = nil
+            nextState.commandedBankDegrees = nil
+            nextState.filteredBankCommandDegrees = nil
+            nextState.commandedTurnDirection = .none
+            nextState.flyByTransitionActive = false
+            nextState.flyByTransitionFeasible = false
+            nextState.activeGuidanceMode = classification.hasNextWaypoint
                 ? "outboundLegTrack"
                 : "routeComplete"
-            fixedWingAssistState.interceptState = classification.hasNextWaypoint
+            nextState.interceptState = classification.hasNextWaypoint
                 ? .outboundLegTrack
                 : .routeComplete
-            fixedWingAssistState.activeGuidanceTargetType = fixedWingAssistState.activeGuidanceMode
-            fixedWingAssistState.usingObsoleteFixedWingMode = false
+            nextState.activeGuidanceTargetType = nextState.activeGuidanceMode
+            nextState.usingObsoleteFixedWingMode = false
             return
         }
 
@@ -25691,7 +26122,7 @@ final class DroneSimulationViewModel: ObservableObject {
             wing: wing,
             target: activeWaypoint.position
         )
-        if fixedWingAssistState.mode == .waypointIntercept {
+        if nextState.mode == .waypointIntercept {
             let guidanceSnapshot = precomputedGuidanceSnapshot ?? (
                 recomputeGuidance && !guidanceDeferred
                     ? fixedWingAssistFlyByGuidanceSnapshot(wing: wing)
@@ -25700,53 +26131,54 @@ final class DroneSimulationViewModel: ObservableObject {
             if let guidanceSnapshot {
                 applyFixedWingAssistFlyBySnapshot(
                     guidanceSnapshot,
-                    to: &fixedWingAssistState
+                    to: &nextState
                 )
             }
-            if fixedWingAssistState.interceptFeasibilityState == nil {
-                fixedWingAssistState.interceptFeasibilityState = geometryAssessment?.feasibilityState
+            if nextState.interceptFeasibilityState == nil {
+                nextState.interceptFeasibilityState = geometryAssessment?.feasibilityState
             }
-            if fixedWingAssistState.rawHeadingErrorDegrees == nil {
-                fixedWingAssistState.rawHeadingErrorDegrees = geometryAssessment?.headingErrorRadians.radiansToDegrees
+            if nextState.rawHeadingErrorDegrees == nil {
+                nextState.rawHeadingErrorDegrees = geometryAssessment?.headingErrorRadians.radiansToDegrees
             }
-            if fixedWingAssistState.filteredBankCommandDegrees == nil {
-                fixedWingAssistState.filteredBankCommandDegrees = fixedWingAssistState.commandedBankDegrees
+            if nextState.filteredBankCommandDegrees == nil {
+                nextState.filteredBankCommandDegrees = nextState.commandedBankDegrees
             }
-            fixedWingAssistState.activeGuidanceTargetType = fixedWingAssistState.activeGuidanceMode == "none"
+            nextState.activeGuidanceTargetType = nextState.activeGuidanceMode == "none"
                 ? "singlePointIntercept"
-                : fixedWingAssistState.activeGuidanceMode
+                : nextState.activeGuidanceMode
         } else {
-            applyFixedWingAssistGeometryDiagnostics(geometryAssessment)
-            clearFixedWingAssistTurnTransitionDiagnostics(&fixedWingAssistState)
-            fixedWingAssistState.activeGuidanceTargetType = "none"
+            applyFixedWingAssistGeometryDiagnostics(geometryAssessment, to: &nextState)
+            clearFixedWingAssistTurnTransitionDiagnostics(&nextState)
+            nextState.activeGuidanceTargetType = "none"
         }
     }
 
     private func applyFixedWingAssistGeometryDiagnostics(
-        _ assessment: FixedWingAssistGeometryAssessment?
+        _ assessment: FixedWingAssistGeometryAssessment?,
+        to nextState: inout FixedWingAssistState
     ) {
         guard let assessment else {
-            fixedWingAssistState.distanceToActiveWaypointMeters = nil
-            fixedWingAssistState.interceptFeasibilityState = nil
-            fixedWingAssistState.headingErrorDegrees = nil
-            fixedWingAssistState.rawHeadingErrorDegrees = nil
-            fixedWingAssistState.estimatedTurnRadiusMeters = nil
-            fixedWingAssistState.commandedBankDegrees = nil
-            fixedWingAssistState.filteredBankCommandDegrees = nil
-            fixedWingAssistState.commandedTurnDirection = .none
-            fixedWingAssistState.usingObsoleteFixedWingMode = false
+            nextState.distanceToActiveWaypointMeters = nil
+            nextState.interceptFeasibilityState = nil
+            nextState.headingErrorDegrees = nil
+            nextState.rawHeadingErrorDegrees = nil
+            nextState.estimatedTurnRadiusMeters = nil
+            nextState.commandedBankDegrees = nil
+            nextState.filteredBankCommandDegrees = nil
+            nextState.commandedTurnDirection = .none
+            nextState.usingObsoleteFixedWingMode = false
             return
         }
 
-        fixedWingAssistState.distanceToActiveWaypointMeters = assessment.distanceToWaypoint
-        fixedWingAssistState.interceptFeasibilityState = assessment.feasibilityState
-        fixedWingAssistState.headingErrorDegrees = assessment.headingErrorRadians.radiansToDegrees
-        fixedWingAssistState.rawHeadingErrorDegrees = assessment.headingErrorRadians.radiansToDegrees
-        fixedWingAssistState.estimatedTurnRadiusMeters = assessment.estimatedTurnRadius
-        fixedWingAssistState.commandedBankDegrees = assessment.commandedBankDegrees
-        fixedWingAssistState.filteredBankCommandDegrees = assessment.commandedBankDegrees
-        fixedWingAssistState.commandedTurnDirection = assessment.commandedTurnDirection
-        fixedWingAssistState.usingObsoleteFixedWingMode = false
+        nextState.distanceToActiveWaypointMeters = assessment.distanceToWaypoint
+        nextState.interceptFeasibilityState = assessment.feasibilityState
+        nextState.headingErrorDegrees = assessment.headingErrorRadians.radiansToDegrees
+        nextState.rawHeadingErrorDegrees = assessment.headingErrorRadians.radiansToDegrees
+        nextState.estimatedTurnRadiusMeters = assessment.estimatedTurnRadius
+        nextState.commandedBankDegrees = assessment.commandedBankDegrees
+        nextState.filteredBankCommandDegrees = assessment.commandedBankDegrees
+        nextState.commandedTurnDirection = assessment.commandedTurnDirection
+        nextState.usingObsoleteFixedWingMode = false
     }
 
     private func resetFixedWingAutopilotCommands() {
@@ -28823,6 +29255,10 @@ final class DroneSimulationViewModel: ObservableObject {
         markManual: Bool,
         fixedWingManualOverrideAxes: FixedWingAssistOverrideAxes = []
     ) {
+        #if DEBUG
+        let ctlPublishStarted = CACurrentMediaTime()
+        defer { ctlPublishMs += (CACurrentMediaTime() - ctlPublishStarted) * 1000.0 }
+        #endif
         var next = controlValues
         mutate(&next)
 
@@ -28841,8 +29277,18 @@ final class DroneSimulationViewModel: ObservableObject {
             return
         }
 
+        #if DEBUG
+        // Only the two published stores. `hasUnsavedChanges` has no equality guard and `@Published`
+        // notifies on willSet without comparing, so in flight this fires every tick whether or not
+        // the flag already stood true — that redundancy is part of what this number is measuring.
+        let ctlAssignStarted = CACurrentMediaTime()
+        #endif
         controlValues = next
-        hasUnsavedChanges = true
+        if !hasUnsavedChanges { hasUnsavedChanges = true }
+        #if DEBUG
+        ctlAssignMs += (CACurrentMediaTime() - ctlAssignStarted) * 1000.0
+        ctlPublishCount += 1
+        #endif
         if markManual {
             lastOperatorInputAt = Date()
             if selectedDroneProfile.airframeClass == .fixedWing,
@@ -30284,7 +30730,19 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func enforceRuntimeSafetyAndBounds(context: String) {
-        let spawn = currentSpawnPoint()
+        // ⚠️ The spawn point used to be resolved here, at the top, on every tick — and it is read
+        // in exactly one place below, the branch that recovers a NaN position. That branch fires
+        // essentially never, while the resolve runs ~60 times a second for the whole flight.
+        //
+        // It is not cheap. For any launch mode except `.standard` it goes through
+        // `currentLaunchSpawnPoint`, which probes the launch pad's support height five times, and
+        // each probe walks the whole support-surface list and, on a mesh world, casts against the
+        // terrain. Measured on an MQ-9B and on a Harop: `safetyBounds` sat at 16.32 ms mean against
+        // a 16.4 ms max — one full 60 Hz frame, every tick, for the launcher of an aircraft that
+        // had left it kilometres back.
+        //
+        // Moved to its use site. Not a cache and not a gate: the value is identical where it is
+        // read, it simply is not computed where it is not.
 
         if !isFinite(state.position) || !isFinite(state.velocity) || !isFinite(state.orientation) || !isFinite(state.angularVelocity) || !state.throttle.isFinite || !state.motorThrottle.isFinite {
             print("[RuntimeSafety][\(context)] Non-finite state detected, restoring last finite state.")
@@ -30328,7 +30786,7 @@ final class DroneSimulationViewModel: ObservableObject {
         }
 
         if !state.position.x.isFinite || !state.position.y.isFinite || !state.position.z.isFinite {
-            state.position = spawn
+            state.position = currentSpawnPoint()
             state.velocity = .zero
             state.angularVelocity = .zero
             state.throttle = 0.0
