@@ -562,9 +562,9 @@ check(effects.effects.isEmpty, "a restart-free run still retires every effect it
 
 // MARK: - What an interception contact costs the aircraft that made it
 
-// A ram is a ram. The carrier used to fly home from a collision that should have ended it, because
-// the two-body contact charged each airframe half the energy the same impact against a building
-// would have. These pin the outcome at the speeds an interception is actually flown at.
+// Two structures share the dissipated relative kinetic energy. Damage must
+// grow with closing speed and eventually exhaust their measured strength,
+// rather than assigning a guaranteed kill to one named manoeuvre/speed.
 func ramHull(_ mass: Float) -> VehicleComponentGraph {
     VehicleComponentGraph(components: [
         VehicleComponent(id: "frame", kind: .frame, parentID: nil, massKg: mass,
@@ -609,10 +609,10 @@ if let brush = ram(closing: 8) {
 }
 if let hard = ram(closing: 14) {
     check(hard.tier == .heavyImpact, "a 14 m/s closure is a heavy impact")
-    check(hard.carrier < 0.6, "a heavy impact leaves the carrier badly damaged")
+    check(hard.carrier < 0.8 && hard.carrier > 0, "a heavy impact degrades the frame without a scripted kill")
 }
-if let ramming = ram(closing: 20) {
-    check(ramming.tier == .criticalImpact, "an interception ram at 20 m/s is a critical impact")
+if let ramming = ram(closing: 30) {
+    check(ramming.tier == .criticalImpact, "a contact exceeding both frames' energy capacity is critical")
     check(ramming.carrier <= 0.001, "the aircraft that made the ram does not fly away from it")
     check(ramming.target <= 0.001, "and neither does the one it hit")
 }

@@ -12,6 +12,7 @@ struct VehicleRotor: Hashable {
     /// Actual thrust axis after structural deformation, body frame.
     /// Pristine multirotors point along +Y.
     var thrustDirectionBody: SIMD3<Float> = SIMD3<Float>(0.0, 1.0, 0.0)
+    var cruiseThrustDirectionBody: SIMD3<Float> = SIMD3<Float>(0.0, 0.0, -1.0)
     /// +1 / -1 blade spin direction (yaw reaction torque sign).
     let spinSign: Float
     /// SIMD4 telemetry lane (FL/FR/RL/RR -> 0-3) for `rotorAngularSpeed`;
@@ -46,6 +47,9 @@ struct VehicleRotorModel: Hashable {
     var rotors: [VehicleRotor]
     /// κ: reaction-torque-to-thrust ratio (N·m per N). Scales yaw authority.
     let torqueToThrustRatio: Float
+    /// Rotorcraft with a swashplate produce moments by cyclic disc tilt as
+    /// well as differential collective. Zero denotes fixed-axis motors.
+    var cyclicTiltLimitRad: Float = 0
 
     static let empty = VehicleRotorModel(rotors: [], torqueToThrustRatio: 0.02)
 
@@ -67,7 +71,8 @@ struct VehicleRotorModel: Hashable {
         return rotors.allSatisfy { rotor in
             rotor.thrustFactor > 0.999 &&
                 rotor.vibration01 < 0.001 &&
-                simd_distance_squared(rotor.thrustDirectionBody, nominalAxis) < 0.000001
+                simd_distance_squared(rotor.thrustDirectionBody, nominalAxis) < 0.000001 &&
+                simd_distance_squared(rotor.cruiseThrustDirectionBody, SIMD3<Float>(0, 0, -1)) < 0.000001
         }
     }
 
@@ -97,6 +102,26 @@ struct VehicleRotorModel: Hashable {
             }
         }
         return best
+    }
+
+    /// Cruise force and the moment caused by unequal or deflected propellers.
+    /// The mean mount is the pristine thrust-line reference already trimmed by
+    /// the aerodynamic model; only departure from that reference adds moment.
+    func cruiseWrench(nominalThrust: Float) -> (force: SIMD3<Float>, moment: SIMD3<Float>) {
+        if isPristine { return (SIMD3<Float>(0, 0, -nominalThrust), .zero) }
+        let cruise = rotors.filter { $0.slot.hasPrefix("cruise") }
+        let active = cruise.isEmpty ? rotors : cruise
+        guard !active.isEmpty else { return (SIMD3<Float>(0, 0, -nominalThrust), .zero) }
+        let center = active.reduce(SIMD3<Float>.zero) { $0 + $1.offsetBody } / Float(active.count)
+        let perRotor = nominalThrust / Float(active.count)
+        var force = SIMD3<Float>.zero, moment = SIMD3<Float>.zero
+        for rotor in active {
+            let direction = rotor.cruiseThrustDirectionBody
+            let localForce = direction * perRotor * rotor.thrustFactor
+            force += localForce
+            moment += simd_cross(rotor.offsetBody - center, localForce)
+        }
+        return (force, SIMD3<Float>(moment.z, moment.x, moment.y))
     }
 
     struct AllocationResult {
@@ -144,6 +169,10 @@ struct VehicleRotorModel: Hashable {
         desiredCollective: Float,
         maxRotorThrust: Float
     ) -> AllocationResult {
+        if cyclicTiltLimitRad > 0, !rotors.isEmpty, maxRotorThrust > 0.0001 {
+            return allocateCyclic(desiredTorque: desiredTorque, desiredCollective: desiredCollective,
+                                  maxRotorThrust: maxRotorThrust)
+        }
         guard !rotors.isEmpty, maxRotorThrust > 0.0001 else {
             return AllocationResult(
                 thrusts: [],
@@ -202,6 +231,55 @@ struct VehicleRotorModel: Hashable {
     }
 
     // MARK: - Damage factors
+
+    private func allocateCyclic(desiredTorque: SIMD3<Float>, desiredCollective: Float,
+                                maxRotorThrust: Float) -> AllocationResult {
+        let lever = max(0.05, rotors.map { simd_length($0.offsetBody) }.max() ?? 0.05)
+        let target = SIMD4<Float>(desiredCollective, desiredTorque.x / lever,
+                                  desiredTorque.y / lever, desiredTorque.z / lever)
+        func column(_ rotor: VehicleRotor, _ force: SIMD3<Float>) -> SIMD4<Float> {
+            let torque = simd_cross(rotor.offsetBody, force) + force * (rotor.spinSign * torqueToThrustRatio)
+            return SIMD4<Float>(force.y, torque.z / lever, torque.x / lever, torque.y / lever)
+        }
+        var forces = rotors.map { rotor in
+            rotor.thrustDirectionBody * min(maxRotorThrust * rotor.thrustFactor,
+                                           max(0, desiredCollective) / Float(rotors.count))
+        }
+        let axes = [SIMD3<Float>(1, 0, 0), SIMD3<Float>(0, 1, 0), SIMD3<Float>(0, 0, 1)]
+        let columns = rotors.map { rotor in axes.map { column(rotor, $0) } }
+        var produced = zip(rotors, forces).reduce(SIMD4<Float>.zero) { $0 + column($1.0, $1.1) }
+        // Projected coordinate descent on actual force/moment balance. Projection
+        // enforces each rotor's remaining thrust and cyclic cone, including a dead
+        // rotor. No torque is manufactured on an absent lateral rotor arm.
+        for _ in 0..<40 {
+            for i in rotors.indices {
+                for axis in 0..<3 {
+                    let c = columns[i][axis]
+                    let delta = simd_dot(target - produced, c) / max(0.0001, simd_dot(c, c)) * 0.7
+                    forces[i][axis] += delta
+                    produced += c * delta
+                }
+                let direction = simd_normalize(rotors[i].thrustDirectionBody)
+                let axial = max(0, simd_dot(forces[i], direction))
+                var lateral = forces[i] - direction * simd_dot(forces[i], direction)
+                let lateralLimit = axial * tan(cyclicTiltLimitRad)
+                if simd_length(lateral) > lateralLimit {
+                    lateral *= lateralLimit / max(0.0001, simd_length(lateral))
+                }
+                var projected = direction * axial + lateral
+                let ceiling = maxRotorThrust * rotors[i].thrustFactor
+                if simd_length(projected) > ceiling {
+                    projected *= ceiling / max(0.0001, simd_length(projected))
+                }
+                produced += column(rotors[i], projected - forces[i])
+                forces[i] = projected
+            }
+        }
+        let force = forces.reduce(SIMD3<Float>.zero, +)
+        return AllocationResult(thrusts: forces.map { simd_length($0) },
+            actualTorque: SIMD3<Float>(produced.y, produced.z, produced.w) * lever,
+            actualCollective: max(0, force.y), actualForceBody: force)
+    }
 
     /// Achievable-thrust fraction of a propeller at the given integrity —
     /// slightly superlinear: blade area loss costs more thrust than the raw

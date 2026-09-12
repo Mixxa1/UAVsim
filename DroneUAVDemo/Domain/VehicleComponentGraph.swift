@@ -121,18 +121,58 @@ struct VehicleStructuralConnection: Hashable {
     var residualStrength: Float = 1.0
     var stiffnessScale: Float = 1.0
     var state: VehicleAttachmentState = .attached
+    /// Where the joint is, which way it is loaded, and what it can take. Every connection
+    /// built by the graph has one; see `VehicleJointSection`.
+    var section: VehicleJointSection?
+    /// Whether the joint's bending capacity is gone (a hanging, folded panel) or the child
+    /// has separated.
+    var fracture: VehicleJointFracture = .intact
+    /// Miner's sum of cyclic damage (1 = fatigue rupture).
+    var fatigueDamage: Float = 0
+    /// Plastic hinge rotation already spent, radians (equivalent magnitude). Drives the
+    /// strength lost to yielding and the remaining rotation before rupture.
+    var plasticRotationSpent: Float = 0
 }
 
 // MARK: - Contact geometry
 
 /// One collision proxy sphere, body-frame (physics convention: +Y up,
 /// -Z forward), positioned relative to the same origin as
-/// `DroneState.position` — the ground/gear reference point, so a gear
-/// sphere's bottom sits at local y == 0 at rest attitude.
+/// the original visual body frame. A fixed rest offset relates that frame
+/// to `DroneState.position`, the original ground/gear reference point.
+/// One outside part of the airframe as the air sees it when the airframe turns: its box,
+/// where it sits and which way it faces, in the body frame, deformation included.
+struct RotationalDragElement: Hashable {
+    let center: SIMD3<Float>
+    let halfExtents: SIMD3<Float>
+    let rotation: simd_quatf
+}
+
+extension VehicleComponentGraph {
+    /// The attached outside parts, placed as deformed. Batteries, controllers, ESCs and radios
+    /// sit inside the skin and meet no air of their own.
+    func rotationalDragElements() -> [RotationalDragElement] {
+        let transforms = deformationTransforms()
+        return attachedComponents.compactMap { component in
+            switch component.kind {
+            case .battery, .flightController, .esc, .radio: return nil
+            default: break
+            }
+            let transform = transforms[component.id] ?? matrix_identity_float4x4
+            let p = transform * SIMD4<Float>(component.localPosition, 1)
+            return RotationalDragElement(center: SIMD3<Float>(p.x, p.y, p.z),
+                                         halfExtents: component.boundingHalfExtents,
+                                         rotation: simd_quatf(transform))
+        }
+    }
+}
+
 struct VehicleContactSphere: Hashable {
     let componentID: String
     let offset: SIMD3<Float>
     let radius: Float
+    var isGroundSupport: Bool = false
+    var supportIntegrity: Float = 1
 
     func worldCenter(position: SIMD3<Float>, orientation: simd_quatf) -> SIMD3<Float> {
         position + simd_act(orientation, offset)
@@ -147,6 +187,9 @@ struct VehicleContactProfile: Hashable {
     /// Radius of the sphere (centered at the state origin) that encloses all
     /// contact spheres — used to pad spatial queries.
     let boundingRadius: Float
+    /// Immutable offset from the original gear reference to the body frame.
+    /// Removing a support changes the body's resting height, not its origin.
+    var referenceGroundOffset: Float? = nil
 
     static let empty = VehicleContactProfile(spheres: [], boundingRadius: 0.0)
 
@@ -157,7 +200,8 @@ struct VehicleContactProfile: Hashable {
     /// contact-aware clamp compares this instead, so a rolled airframe rests
     /// on its wingtip/prop rather than sinking to the gear reference.
     func lowestPointY(position: SIMD3<Float>, orientation: simd_quatf) -> Float {
-        var lowest = position.y
+        guard !spheres.isEmpty else { return position.y }
+        var lowest = Float.greatestFiniteMagnitude
         for sphere in spheres {
             let bottom = sphere.worldCenter(position: position, orientation: orientation).y - sphere.radius
             if bottom < lowest {
@@ -183,15 +227,14 @@ struct VehicleContactProfile: Hashable {
         return simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(1.0, 0.0, 0.0))
     }
 
-    /// Rest-normalized ground clearance: how much higher than the legacy
-    /// gear-reference the origin must sit at this attitude so no contact
-    /// sphere penetrates the support plane. Normalizing against the rest
-    /// attitude keeps `position.y == supportY` exactly at rest (including a
-    /// tail-standing tailsitter), so every legacy ground/landing check keeps
-    /// its meaning; only *non-rest* attitudes (bank near the ground, tumble)
-    /// lift the origin so a wingtip/prop can't sink into the surface.
+    /// Position of the original gear reference when the surviving geometry
+    /// touches the surface. It can become negative after losing the gear;
+    /// recomputing the reference from surviving parts creates phantom support.
     func groundClearanceOffset(orientation: simd_quatf, restOrientation: simd_quatf) -> Float {
-        max(0.0, lowestPointOffset(orientation: orientation) - lowestPointOffset(orientation: restOrientation))
+        if let referenceGroundOffset, !isEmpty {
+            return -lowestPointY(position: .zero, orientation: orientation) - referenceGroundOffset
+        }
+        return max(0.0, lowestPointOffset(orientation: orientation) - lowestPointOffset(orientation: restOrientation))
     }
 
     func lowestContact(
@@ -220,38 +263,31 @@ struct VehicleContactProfile: Hashable {
         let radius = remaining.reduce(Float(0.0)) { partial, sphere in
             max(partial, simd_length(sphere.offset) + sphere.radius)
         }
-        return VehicleContactProfile(spheres: remaining, boundingRadius: radius)
+        return VehicleContactProfile(spheres: remaining, boundingRadius: radius,
+            referenceGroundOffset: referenceGroundOffset)
     }
 
     func applyingDeformations(from graph: VehicleComponentGraph) -> VehicleContactProfile {
         guard !spheres.isEmpty else { return self }
+        let transforms = graph.deformationTransforms()
         let deformed = spheres.map { sphere -> VehicleContactSphere in
             guard let component = graph.component(id: sphere.componentID), component.isAttached else {
                 return sphere
             }
-            let bend = component.deformation.bendRadians
-            let rawAngle = simd_length(bend)
-            let rotatedOffset: SIMD3<Float>
-            if rawAngle > 0.0001 {
-                let angle = min(Float(25.0) * .pi / 180.0, rawAngle)
-                let rotation = simd_quatf(angle: angle, axis: bend / rawAngle)
-                rotatedOffset = component.localPosition + simd_act(
-                    rotation,
-                    sphere.offset - component.localPosition
-                )
-            } else {
-                rotatedOffset = sphere.offset
-            }
+            let p = (transforms[component.id] ?? matrix_identity_float4x4) * SIMD4<Float>(sphere.offset, 1)
             return VehicleContactSphere(
                 componentID: sphere.componentID,
-                offset: rotatedOffset + component.deformation.translationMeters,
-                radius: sphere.radius
+                offset: SIMD3<Float>(p.x, p.y, p.z),
+                radius: sphere.radius,
+                isGroundSupport: sphere.isGroundSupport,
+                supportIntegrity: min(component.integrity, component.stiffnessScale, component.residualStrength)
             )
         }
         let radius = deformed.reduce(Float(0.0)) {
             max($0, simd_length($1.offset) + $1.radius)
         }
-        return VehicleContactProfile(spheres: deformed, boundingRadius: max(boundingRadius, radius))
+        return VehicleContactProfile(spheres: deformed, boundingRadius: max(boundingRadius, radius),
+            referenceGroundOffset: referenceGroundOffset)
     }
 }
 
@@ -349,6 +385,80 @@ struct VehicleDetachedSubtree: Hashable {
 // MARK: - Graph
 
 struct VehicleComponentGraph: Hashable {
+    /// Largest permanent hinge rotation a joint can hold, radians. A panel folded past this
+    /// has torn free; the fracture solver separates it before it gets here.
+    static let maximumHingeRotation: Float = 170 * .pi / 180
+
+    /// The joint about which a component's permanent rotation pivots: its connection's
+    /// section anchor, or — for a graph restored without sections — its parent's centre.
+    func hingeAnchor(for component: VehicleComponent) -> SIMD3<Float> {
+        if let anchor = connection(childComponentID: component.id)?.section?.anchor { return anchor }
+        return component.parentID.flatMap { self.component(id: $0)?.localPosition } ?? component.localPosition
+    }
+
+    private func localDeformation(of current: VehicleComponent) -> simd_float4x4 {
+        let bend = current.deformation.bendRadians
+        let angle = simd_length(bend)
+        let rotation = angle > 0.0001
+            ? simd_quatf(angle: min(Self.maximumHingeRotation, angle), axis: bend / angle)
+            : simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
+        let anchor = hingeAnchor(for: current)
+        var local = simd_float4x4(rotation)
+        local.columns.3 = SIMD4<Float>(anchor - simd_act(rotation, anchor) + current.deformation.translationMeters, 1)
+        return local
+    }
+
+    /// Permanent body-frame transform, including every ancestor on the load
+    /// path. A motor on a bent wing moves with that wing in both physics and
+    /// rendering. Each bend pivots at its own joint, not the world origin.
+    func deformationTransform(for componentID: String) -> simd_float4x4 {
+        var chain: [VehicleComponent] = []
+        var cursor = component(id: componentID)
+        var visited: Set<String> = []
+        while let current = cursor, visited.insert(current.id).inserted {
+            chain.append(current)
+            cursor = current.parentID.flatMap { component(id: $0) }
+        }
+        var result = matrix_identity_float4x4
+        for current in chain.reversed() {
+            result = result * localDeformation(of: current)
+        }
+        return result
+    }
+
+    /// Every component's deformation transform in one pass — parents are composed once and
+    /// reused by their children, instead of re-walking the chain per component.
+    func deformationTransforms() -> [String: simd_float4x4] {
+        var result: [String: simd_float4x4] = [:]
+        result.reserveCapacity(components.count)
+        func resolve(_ component: VehicleComponent, depth: Int) -> simd_float4x4 {
+            if let known = result[component.id] { return known }
+            let parentTransform: simd_float4x4
+            if depth < 64, let parentID = component.parentID, let parent = self.component(id: parentID) {
+                parentTransform = resolve(parent, depth: depth + 1)
+            } else {
+                parentTransform = matrix_identity_float4x4
+            }
+            let transform = parentTransform * localDeformation(of: component)
+            result[component.id] = transform
+            return transform
+        }
+        for component in components { _ = resolve(component, depth: 0) }
+        return result
+    }
+
+    var hasDeformation: Bool {
+        components.contains {
+            simd_length_squared($0.deformation.bendRadians) > 1e-10 ||
+                simd_length_squared($0.deformation.translationMeters) > 1e-12
+        }
+    }
+
+    func deformedPosition(_ point: SIMD3<Float>, attachedTo id: String) -> SIMD3<Float> {
+        let p = deformationTransform(for: id) * SIMD4<Float>(point, 1)
+        return SIMD3<Float>(p.x, p.y, p.z)
+    }
+
     private(set) var components: [VehicleComponent]
     private(set) var structuralConnections: [VehicleStructuralConnection]
     private(set) var massPropertiesRevision: UInt64
@@ -369,7 +479,12 @@ struct VehicleComponentGraph: Hashable {
         /// belongs to a 5,670 kg one. Sizing a mount off the structural budget would size
         /// it for half an aircraft. Zero means "not supplied" and the mount keeps the
         /// strength its impact energy gives it.
-        designTakeoffMassKg: Float = 0.0
+        designTakeoffMassKg: Float = 0.0,
+        /// Designed sections of discretised members (wing, tail, boom, arm stations), keyed
+        /// by child component id. Every other joint gets an attachment section derived from
+        /// its scalar limits.
+        sections: [String: VehicleJointSection] = [:],
+        material: VehicleStructuralMaterial = .aluminium
     ) {
         self.components = components
         self.massPropertiesRevision = massPropertiesRevision
@@ -381,7 +496,8 @@ struct VehicleComponentGraph: Hashable {
         self.indexByID = index
 
         let resolvedConnections = structuralConnections
-            ?? Self.makeConnections(for: components, designTakeoffMassKg: designTakeoffMassKg)
+            ?? Self.makeConnections(for: components, designTakeoffMassKg: designTakeoffMassKg,
+                                    sections: sections, material: material)
         self.structuralConnections = resolvedConnections
         var connectionIndex: [String: Int] = [:]
         connectionIndex.reserveCapacity(resolvedConnections.count)
@@ -436,6 +552,9 @@ struct VehicleComponentGraph: Hashable {
             structuralConnections[index].residualStrength = old.residualStrength
             structuralConnections[index].stiffnessScale = old.stiffnessScale
             structuralConnections[index].state = old.state
+            structuralConnections[index].fracture = old.fracture
+            structuralConnections[index].fatigueDamage = old.fatigueDamage
+            structuralConnections[index].plasticRotationSpent = old.plasticRotationSpent
         }
         massPropertiesRevision = previous.massPropertiesRevision
     }
@@ -468,6 +587,13 @@ struct VehicleComponentGraph: Hashable {
         structuralConnections[index].residualStrength = residualStrength.clamped(to: 0.0...1.0)
         structuralConnections[index].stiffnessScale = stiffnessScale.clamped(to: 0.0...1.0)
         structuralConnections[index].state = state
+        // Snapshots predate the fracture field: a joint saved as partially detached with
+        // strength left was a folded panel; one with none had come apart.
+        if state == .detached || residualStrength <= 0.015 {
+            structuralConnections[index].fracture = .separated
+        } else if state == .partiallyDetached {
+            structuralConnections[index].fracture = .hinged
+        }
     }
 
     mutating func restoreMassPropertiesRevision(_ revision: UInt64) {
@@ -488,7 +614,7 @@ struct VehicleComponentGraph: Hashable {
     // MARK: Mass properties
 
     var massProperties: VehicleMassProperties {
-        Self.massProperties(for: attachedComponents)
+        Self.massProperties(for: attachedComponents, transforms: deformationTransforms())
     }
 
     /// Rigid-body properties of the still-attached airframe after excluding
@@ -498,18 +624,29 @@ struct VehicleComponentGraph: Hashable {
     /// detach operation.
     func massProperties(excludingComponentIDs excludedIDs: Set<String>) -> VehicleMassProperties {
         Self.massProperties(
-            for: attachedComponents.filter { !excludedIDs.contains($0.id) }
+            for: attachedComponents.filter { !excludedIDs.contains($0.id) }, transforms: deformationTransforms()
         )
     }
 
-    private static func massProperties(for components: [VehicleComponent]) -> VehicleMassProperties {
+    /// Rigid-body properties of an arbitrary set of this graph's components.
+    func massProperties(of componentIDs: Set<String>) -> VehicleMassProperties {
+        Self.massProperties(for: components.filter { componentIDs.contains($0.id) },
+                            transforms: deformationTransforms())
+    }
+
+    private static func massProperties(for components: [VehicleComponent],
+                                       transforms: [String: simd_float4x4]) -> VehicleMassProperties {
         guard !components.isEmpty else { return .fallback }
 
         var totalMass: Float = 0.0
         var weightedPosition = SIMD3<Float>(repeating: 0.0)
+        func position(_ component: VehicleComponent) -> SIMD3<Float> {
+            let p = (transforms[component.id] ?? matrix_identity_float4x4) * SIMD4<Float>(component.localPosition, 1)
+            return SIMD3<Float>(p.x, p.y, p.z)
+        }
         for component in components {
             totalMass += component.massKg
-            weightedPosition += (component.localPosition + component.deformation.translationMeters) * component.massKg
+            weightedPosition += position(component) * component.massKg
         }
         guard totalMass > 0.0001 else { return .fallback }
         let centerOfMass = weightedPosition / totalMass
@@ -517,13 +654,17 @@ struct VehicleComponentGraph: Hashable {
         var inertia = SIMD3<Float>(repeating: 0.0)
         for component in components {
             let m = component.massKg
-            let d = component.localPosition + component.deformation.translationMeters - centerOfMass
+            let d = position(component) - centerOfMass
             let h = component.boundingHalfExtents
+            let matrix = transforms[component.id] ?? matrix_identity_float4x4
+            let localInertia = SIMD3<Float>(h.y * h.y + h.z * h.z, h.x * h.x + h.z * h.z, h.x * h.x + h.y * h.y) * (m / 3)
+            let x = SIMD3<Float>(matrix.columns.0.x, matrix.columns.0.y, matrix.columns.0.z)
+            let y = SIMD3<Float>(matrix.columns.1.x, matrix.columns.1.y, matrix.columns.1.z)
+            let z = SIMD3<Float>(matrix.columns.2.x, matrix.columns.2.y, matrix.columns.2.z)
+            let rotatedInertia = x * x * localInertia.x + y * y * localInertia.y + z * z * localInertia.z
             // Parallel-axis point-mass term + the component's own box inertia
             // (1/12·m·(a²+b²) with full extents a=2h → m/3·(h²+h²)).
-            inertia.x += m * (d.y * d.y + d.z * d.z) + m / 3.0 * (h.y * h.y + h.z * h.z)
-            inertia.y += m * (d.x * d.x + d.z * d.z) + m / 3.0 * (h.x * h.x + h.z * h.z)
-            inertia.z += m * (d.x * d.x + d.y * d.y) + m / 3.0 * (h.x * h.x + h.y * h.y)
+            inertia += SIMD3<Float>(d.y * d.y + d.z * d.z, d.x * d.x + d.z * d.z, d.x * d.x + d.y * d.y) * m + rotatedInertia
         }
         // Floor keeps the contact-impulse denominator finite for degenerate
         // (tiny/single-component) graphs.
@@ -569,7 +710,9 @@ struct VehicleComponentGraph: Hashable {
         energyJ: Float,
         damageFactor: Float,
         spreadRadius: Float,
-        contactPointBody: SIMD3<Float>? = nil
+        contactPointBody: SIMD3<Float>? = nil,
+        elasticReserveScale: Float = 1.0,
+        impulseBody: SIMD3<Float> = .zero
     ) -> [ImpactDamageEntry] {
         guard energyJ > 0.0, damageFactor > 0.0,
               let primary = component(id: primaryComponentID) else {
@@ -607,7 +750,11 @@ struct VehicleComponentGraph: Hashable {
             let before = target.integrity
             let residualBefore = target.residualStrength
             let stiffnessBefore = target.stiffnessScale
-            let normalized = energyJ * damageFactor * share / max(0.5, target.strengthJ)
+            let absorbedEnergy = energyJ * damageFactor * share
+            // Elastic energy is recovered without permanent damage. Cracks reduce
+            // that reserve; abrasion callers pass accumulated work separately.
+            let elasticReserve = target.strengthJ * 0.012 * target.residualStrength * elasticReserveScale.clamped(to: 0...1)
+            let normalized = max(0, absorbedEnergy - elasticReserve) / max(0.5, target.strengthJ)
             let brittleness = 1.0 + (1.0 - before) * 0.5
             let after = (before - normalized * brittleness).clamped(to: 0.0...1.0)
             guard after < before - 0.000001 else { continue }
@@ -626,6 +773,29 @@ struct VehicleComponentGraph: Hashable {
             components[targetIndex].performance.efficiencyScale = performanceScale
             components[targetIndex].performance.responseSpeedScale = (0.25 + performanceScale * 0.75).clamped(to: 0.0...1.0)
             components[targetIndex].performance.dragScale = 1.0 + (1.0 - after) * 0.8
+            if target.kind.isStructural {
+                components[targetIndex].deformation.vibrationScale = max(target.deformation.vibrationScale, (1 - after) * after)
+                // Bending and folding belong to the joint solvers, which rotate the part
+                // about its own attachment. What local crushing can do on its own is push a
+                // small, stiffly mounted part back into its mount — a gear leg collapsing,
+                // a motor driven into its pod. Translating a whole wing station or fuselage
+                // that way would open a gap in the rendered structure.
+                switch target.kind {
+                case .landingGear, .motor:
+                    let direction = simd_length_squared(impulseBody) > 1e-10
+                        ? simd_normalize(impulseBody)
+                        : -simd_normalize(simd_length_squared(impactPoint - target.localPosition) > 1e-10
+                            ? impactPoint - target.localPosition : SIMD3<Float>(0, -1, 0))
+                    let crush = min(0.6, normalized * 0.5)
+                    let limit = simd_length(target.boundingHalfExtents) * 0.8
+                    var translation = components[targetIndex].deformation.translationMeters
+                        + direction * simd_length(target.boundingHalfExtents) * crush
+                    if simd_length(translation) > limit { translation = simd_normalize(translation) * limit }
+                    components[targetIndex].deformation.translationMeters = translation
+                default:
+                    break
+                }
+            }
             entries.append(
                 ImpactDamageEntry(
                     componentID: target.id,
@@ -643,196 +813,173 @@ struct VehicleComponentGraph: Hashable {
         return entries
     }
 
-    /// Degrades the chain of joints carrying a local impact. Direction and
-    /// lever arm matter independently from the scalar energy used for local
-    /// component damage, so a wing-tip strike can fail the root joint before
-    /// destroying the whole wing skin.
-    mutating func applyConnectionImpact(
-        primaryComponentID: String,
-        contactPointBody: SIMD3<Float>,
-        impulseBody: SIMD3<Float>,
-        energyJ: Float,
-        damageFactor: Float,
-        contactDuration: Float
-    ) -> [ConnectionDamageEntry] {
-        guard energyJ > 0.0, simd_length_squared(impulseBody) > 0.000001 else { return [] }
-
-        var entries: [ConnectionDamageEntry] = []
-        var childID: String? = primaryComponentID
-        var propagation: Float = 1.0
-        var depth = 0
-        while let currentChildID = childID, depth < 4 {
-            guard let connectionIndex = connectionIndexByChildID[currentChildID],
-                  let child = component(id: currentChildID),
-                  let parent = component(id: structuralConnections[connectionIndex].parentComponentID) else {
-                childID = component(id: currentChildID)?.parentID
-                depth += 1
-                propagation *= 0.55
-                continue
-            }
-
-            let duration = max(0.004, contactDuration)
-            let force = impulseBody / duration
-            let lever = contactPointBody - parent.localPosition
-            let moment = simd_cross(lever, force)
-            let jointAxisRaw = child.localPosition - parent.localPosition
-            let jointAxis = simd_length_squared(jointAxisRaw) > 0.000001
-                ? simd_normalize(jointAxisRaw)
-                : SIMD3<Float>(0.0, 1.0, 0.0)
-            let tensileForce = abs(simd_dot(force, jointAxis))
-            let shearForce = simd_length(force - jointAxis * simd_dot(force, jointAxis))
-            let torsionalMoment = abs(simd_dot(moment, jointAxis))
-            let bendingMoment = simd_length(moment - jointAxis * simd_dot(moment, jointAxis))
-            let connection = structuralConnections[connectionIndex]
-            let tensileRatio = tensileForce / max(0.01, connection.tensileLimitN)
-            let shearRatio = shearForce / max(0.01, connection.shearLimitN)
-            let bendingRatio = bendingMoment / max(0.01, connection.bendingLimitNm)
-            let torsionRatio = torsionalMoment / max(0.01, connection.torsionLimitNm)
-            let energyRatio = energyJ / max(0.5, child.strengthJ)
-            let structuralRatio = max(tensileRatio, shearRatio, bendingRatio, torsionRatio)
-            let residualCapacity = max(0.015, connection.residualStrength)
-            // Structural force and moment travel through the whole load path.
-            // Do not attenuate them while walking from a wing tip toward the
-            // fuselage: the root sees the same impulse at a longer lever arm.
-            // Energy spreading still decays with depth because skin/internal
-            // damage is absorbed locally.
-            let exceedsResidualCapacity = structuralRatio > residualCapacity
-            let severity = max(
-                structuralRatio / residualCapacity,
-                energyRatio * 0.85 * damageFactor * propagation
-            )
-            // A joint that exceeds its residual load envelope fails in this
-            // contact. Sub-limit contacts can still bend/loosen it and make a
-            // later, smaller hit decisive.
-            let loss = exceedsResidualCapacity
-                ? connection.residualStrength
-                : max(0.0, severity - 0.25) * 0.55
-
-            if loss > 0.0005 {
-                let residualBefore = connection.residualStrength
-                let stateBefore = connection.state
-                structuralConnections[connectionIndex].residualStrength = (
-                    residualBefore - loss * (1.0 + (1.0 - residualBefore) * 0.6)
-                ).clamped(to: 0.0...1.0)
-                structuralConnections[connectionIndex].stiffnessScale = (
-                    connection.stiffnessScale - loss * 0.6
-                ).clamped(to: 0.05...1.0)
-                structuralConnections[connectionIndex].state = Self.attachmentState(
-                    residualStrength: structuralConnections[connectionIndex].residualStrength
-                )
-
-                if let componentIndex = indexByID[currentChildID] {
-                    let bendAxis = simd_length_squared(moment) > 0.000001
-                        ? simd_normalize(moment)
-                        : SIMD3<Float>(1.0, 0.0, 0.0)
-                    let bendMagnitude = min(Float(18.0).degreesToRadians, loss * Float(14.0).degreesToRadians)
-                    components[componentIndex].deformation.bendRadians += bendAxis * bendMagnitude
-                    components[componentIndex].deformation.bendRadians = simd_clamp(
-                        components[componentIndex].deformation.bendRadians,
-                        SIMD3<Float>(repeating: -Float(25.0).degreesToRadians),
-                        SIMD3<Float>(repeating: Float(25.0).degreesToRadians)
-                    )
-                    components[componentIndex].residualStrength = min(
-                        components[componentIndex].residualStrength,
-                        structuralConnections[connectionIndex].residualStrength
-                    )
-                    components[componentIndex].stiffnessScale = min(
-                        components[componentIndex].stiffnessScale,
-                        structuralConnections[connectionIndex].stiffnessScale
-                    )
-                    components[componentIndex].attachmentState = structuralConnections[connectionIndex].state
-                }
-
-                entries.append(
-                    ConnectionDamageEntry(
-                        connectionID: connection.id,
-                        childComponentID: currentChildID,
-                        residualStrengthBefore: residualBefore,
-                        residualStrengthAfter: structuralConnections[connectionIndex].residualStrength,
-                        stateBefore: stateBefore,
-                        stateAfter: structuralConnections[connectionIndex].state
-                    )
-                )
-            }
-
-            childID = child.parentID
-            depth += 1
-            propagation *= 0.55
-        }
-        return entries
-    }
-
-    /// Applies flight-load fatigue to one joint and mirrors the resulting
-    /// loosened/partial state onto its child component.
-    mutating func applyStructuralOverload(
+    /// Records what a structural solver decided for one joint. The plastic rotation is the
+    /// joint's new *total* permanent rotation (body frame, about its section anchor) and is
+    /// mirrored onto the child as `bendRadians`, so geometry, contacts, mass properties and
+    /// aerodynamics all see the same bent or folded part.
+    ///
+    /// ⚠️ Nothing here erodes a joint over time. A load either exceeds what the section can
+    /// carry — and then it yields or breaks in that event — or it does not, and then it does
+    /// nothing. The only slow mechanism is `fatigueDamage`, which the solvers accumulate
+    /// from real load cycles.
+    @discardableResult
+    mutating func applyJointOutcome(
         childComponentID: String,
-        loadRatio: Float,
-        deltaTime: Float
+        plasticRotationBody: SIMD3<Float>,
+        plasticRotationSpent: Float,
+        residualStrength: Float,
+        stiffnessScale: Float,
+        fracture: VehicleJointFracture,
+        fatigueDamage: Float? = nil
     ) -> ConnectionDamageEntry? {
-        guard loadRatio > 1.0,
-              let index = connectionIndexByChildID[childComponentID],
-              structuralConnections[index].state != .detached else {
-            return nil
-        }
+        guard let index = connectionIndexByChildID[childComponentID],
+              structuralConnections[index].state != .detached else { return nil }
         let before = structuralConnections[index]
-        // Constant loads below the certified limit do not irreversibly eat
-        // the joint. Cycle fatigue needs its own accumulated cycle/range
-        // state; treating 72–100% static load as damage creates runaway
-        // self-weakening in an otherwise nominal flight.
-        let rate = (loadRatio - 1.0) * 1.15
-        let loss = max(0.0, rate * max(0.0, deltaTime))
-        guard loss > 0.000001 else { return nil }
+        var rotation = plasticRotationBody
+        let angle = simd_length(rotation)
+        if angle > Self.maximumHingeRotation { rotation *= Self.maximumHingeRotation / angle }
 
-        structuralConnections[index].residualStrength = (
-            before.residualStrength - loss * (1.0 + (1.0 - before.residualStrength))
-        ).clamped(to: 0.0...1.0)
-        structuralConnections[index].stiffnessScale = (
-            before.stiffnessScale - loss * 0.55
-        ).clamped(to: 0.05...1.0)
-        structuralConnections[index].state = Self.attachmentState(
-            residualStrength: structuralConnections[index].residualStrength
-        )
+        var updated = before
+        updated.fracture = fracture
+        updated.plasticRotationSpent = max(before.plasticRotationSpent, plasticRotationSpent)
+        if let fatigueDamage { updated.fatigueDamage = max(before.fatigueDamage, fatigueDamage) }
+        switch fracture {
+        case .separated:
+            updated.residualStrength = 0
+            updated.stiffnessScale = 0
+            updated.state = .partiallyDetached
+        case .hinged:
+            updated.residualStrength = min(before.residualStrength, residualStrength.clamped(to: 0.016...1.0))
+            updated.stiffnessScale = min(before.stiffnessScale, stiffnessScale.clamped(to: 0.0...1.0))
+            updated.state = .partiallyDetached
+        case .intact:
+            updated.residualStrength = min(before.residualStrength, residualStrength.clamped(to: 0.016...1.0))
+            updated.stiffnessScale = min(before.stiffnessScale, stiffnessScale.clamped(to: 0.05...1.0))
+            updated.state = Self.attachmentState(residualStrength: updated.residualStrength)
+        }
+        let rotationChanged = simd_distance(rotation, components[indexByID[childComponentID] ?? 0].deformation.bendRadians) > 1e-5
+        guard updated != before || rotationChanged else { return nil }
+        structuralConnections[index] = updated
         if let componentIndex = indexByID[childComponentID] {
+            components[componentIndex].deformation.bendRadians = rotation
             components[componentIndex].residualStrength = min(
-                components[componentIndex].residualStrength,
-                structuralConnections[index].residualStrength
-            )
+                components[componentIndex].residualStrength, max(0.016, updated.residualStrength))
             components[componentIndex].stiffnessScale = min(
-                components[componentIndex].stiffnessScale,
-                structuralConnections[index].stiffnessScale
-            )
-            components[componentIndex].attachmentState = structuralConnections[index].state
+                components[componentIndex].stiffnessScale, max(0.05, updated.stiffnessScale))
+            components[componentIndex].attachmentState = updated.state
         }
         return ConnectionDamageEntry(
             connectionID: before.id,
             childComponentID: childComponentID,
             residualStrengthBefore: before.residualStrength,
-            residualStrengthAfter: structuralConnections[index].residualStrength,
+            residualStrengthAfter: updated.residualStrength,
             stateBefore: before.state,
-            stateAfter: structuralConnections[index].state
+            stateAfter: updated.state
         )
     }
 
-    var failedConnectionRootIDs: [String] {
-        let failedChildren: [String] = structuralConnections.compactMap { connection in
-            guard connection.state != .detached,
-                  connection.residualStrength <= 0.015 else { return nil }
-            return connection.childComponentID
+    /// Raises every joint to carry at least `envelope × factor` — the design floor that makes
+    /// a pristine airframe survive its own design cases however its sections were first sized.
+    mutating func raiseSectionCapacities(to envelopes: [String: VehicleJointEnvelope], factor: Float) {
+        for index in structuralConnections.indices {
+            let connection = structuralConnections[index]
+            guard let section = connection.section, let envelope = envelopes[connection.childComponentID] else { continue }
+            let raised = section.raised(to: envelope, factor: factor)
+            guard raised != section else { continue }
+            var updated = VehicleStructuralConnection(
+                id: connection.id,
+                parentComponentID: connection.parentComponentID,
+                childComponentID: connection.childComponentID,
+                connectionType: connection.connectionType,
+                tensileLimitN: max(connection.tensileLimitN, raised.axialUltimateN),
+                shearLimitN: max(connection.shearLimitN, raised.shearUltimateN),
+                bendingLimitNm: max(connection.bendingLimitNm, raised.flapUltimateNm),
+                torsionLimitNm: max(connection.torsionLimitNm, raised.torsionUltimateNm),
+                section: raised)
+            updated.residualStrength = connection.residualStrength
+            updated.stiffnessScale = connection.stiffnessScale
+            updated.state = connection.state
+            updated.fracture = connection.fracture
+            updated.fatigueDamage = connection.fatigueDamage
+            updated.plasticRotationSpent = connection.plasticRotationSpent
+            structuralConnections[index] = updated
         }
-        let candidates = Set(failedChildren)
-        // If both an outer section and its root fail in the same impact,
-        // detach the highest failed ancestor once. Otherwise the outer piece
-        // would be spawned first and the remaining wing root as a second body.
-        return candidates.filter { candidate in
-            var parentID = component(id: candidate)?.parentID
-            var depth = 0
-            while let parent = parentID, depth < 32 {
-                if candidates.contains(parent) { return false }
-                parentID = component(id: parent)?.parentID
-                depth += 1
+    }
+
+    /// Depth of every component below the root, in one pass.
+    func depths() -> [String: Int] {
+        var result: [String: Int] = [:]
+        result.reserveCapacity(components.count)
+        func resolve(_ component: VehicleComponent, guardDepth: Int) -> Int {
+            if let known = result[component.id] { return known }
+            let depth: Int
+            if guardDepth < 64, let parentID = component.parentID, let parent = self.component(id: parentID) {
+                depth = resolve(parent, guardDepth: guardDepth + 1) + 1
+            } else {
+                depth = 0
             }
-            return true
-        }.sorted()
+            result[component.id] = depth
+            return depth
+        }
+        for component in components { _ = resolve(component, guardDepth: 0) }
+        return result
+    }
+
+    /// Mass and mass-weighted centre of every attached component's subtree, in one pass.
+    func subtreeMass(transforms: [String: simd_float4x4]) -> [String: (mass: Float, center: SIMD3<Float>)] {
+        let depthMap = depths()
+        var mass: [String: Float] = [:]
+        var moment: [String: SIMD3<Float>] = [:]
+        for component in attachedComponents.sorted(by: { (depthMap[$0.id] ?? 0) > (depthMap[$1.id] ?? 0) }) {
+            let p = (transforms[component.id] ?? matrix_identity_float4x4) * SIMD4<Float>(component.localPosition, 1)
+            let ownMass = mass[component.id, default: 0] + component.massKg
+            let ownMoment = moment[component.id, default: .zero] + SIMD3<Float>(p.x, p.y, p.z) * component.massKg
+            mass[component.id] = ownMass
+            moment[component.id] = ownMoment
+            if let parent = component.parentID {
+                mass[parent, default: 0] += ownMass
+                moment[parent, default: .zero] += ownMoment
+            }
+        }
+        return mass.reduce(into: [:]) { result, entry in
+            result[entry.key] = (entry.value, (moment[entry.key] ?? .zero) / max(1e-6, entry.value))
+        }
+    }
+
+    /// Depth of a component below the root, for ordering nested fractures.
+    func depth(of componentID: String) -> Int {
+        var depth = 0
+        var cursor = component(id: componentID)?.parentID
+        while let parent = cursor, depth < 64 {
+            depth += 1
+            cursor = component(id: parent)?.parentID
+        }
+        return depth
+    }
+
+    /// Joints that have come apart and whose subtrees are still on the aircraft, deepest
+    /// first. Two breaks on one wing are two pieces: the tip is taken off as its own body
+    /// before the panel it was attached to, so each keeps its own motion.
+    var failedConnectionRootIDs: [String] {
+        structuralConnections.compactMap { connection -> String? in
+            guard connection.state != .detached,
+                  connection.fracture == .separated || connection.residualStrength <= 0.015,
+                  component(id: connection.childComponentID)?.isAttached == true else { return nil }
+            return connection.childComponentID
+        }.sorted { lhs, rhs in
+            let l = depth(of: lhs), r = depth(of: rhs)
+            return l == r ? lhs < rhs : l > r
+        }
+    }
+
+    /// The ids of the stations of every discretised member, root → tip, keyed by member.
+    var memberChains: [String: [String]] {
+        var chains: [String: [String]] = [:]
+        for connection in structuralConnections {
+            guard let section = connection.section, section.isMemberStation, !section.memberID.isEmpty else { continue }
+            chains[section.memberID, default: []].append(connection.childComponentID)
+        }
+        return chains.mapValues { ids in ids.sorted { depth(of: $0) < depth(of: $1) } }
     }
 
     /// Returns the complete attached subtree and its rigid-body properties
@@ -855,15 +1002,22 @@ struct VehicleComponentGraph: Hashable {
 
         var minimum = SIMD3<Float>(repeating: Float.greatestFiniteMagnitude)
         var maximum = SIMD3<Float>(repeating: -Float.greatestFiniteMagnitude)
+        let transforms = deformationTransforms()
         for component in detached {
-            minimum = simd_min(minimum, component.localPosition - component.boundingHalfExtents)
-            maximum = simd_max(maximum, component.localPosition + component.boundingHalfExtents)
+            let transform = transforms[component.id] ?? matrix_identity_float4x4
+            for x: Float in [-1, 1] { for y: Float in [-1, 1] { for z: Float in [-1, 1] {
+                let corner = transform * SIMD4<Float>(
+                    component.localPosition + component.boundingHalfExtents * SIMD3<Float>(x, y, z), 1)
+                let point = SIMD3<Float>(corner.x, corner.y, corner.z)
+                minimum = simd_min(minimum, point)
+                maximum = simd_max(maximum, point)
+            } } }
         }
 
         return VehicleDetachedSubtree(
             rootComponentID: rootComponentID,
             components: detached,
-            massProperties: Self.massProperties(for: detached),
+            massProperties: Self.massProperties(for: detached, transforms: transforms),
             localBoundsCenter: (minimum + maximum) * 0.5,
             localBoundsHalfExtents: simd_max((maximum - minimum) * 0.5, SIMD3<Float>(repeating: 0.01))
         )
@@ -879,9 +1033,16 @@ struct VehicleComponentGraph: Hashable {
     /// be sitting on screen in one piece. Anything that means "this airframe is no longer an
     /// airframe" has to say so here as well.
     mutating func failAllConnections() {
-        for index in structuralConnections.indices where structuralConnections[index].state != .detached {
+        // The major assemblies part from the airframe root. Failing every nested station
+        // too would scatter each wing into a dozen pieces for what is a single decision
+        // that the airframe is finished.
+        let rootIDs = Set(components.filter { $0.parentID == nil }.map(\.id))
+        for index in structuralConnections.indices
+        where structuralConnections[index].state != .detached
+            && rootIDs.contains(structuralConnections[index].parentComponentID) {
             structuralConnections[index].residualStrength = 0
             structuralConnections[index].stiffnessScale = 0
+            structuralConnections[index].fracture = .separated
         }
     }
 
@@ -969,7 +1130,9 @@ struct VehicleComponentGraph: Hashable {
 
     private static func makeConnections(
         for components: [VehicleComponent],
-        designTakeoffMassKg: Float = 0.0
+        designTakeoffMassKg: Float = 0.0,
+        sections: [String: VehicleJointSection] = [:],
+        material: VehicleStructuralMaterial = .aluminium
     ) -> [VehicleStructuralConnection] {
         let byID = Dictionary(uniqueKeysWithValues: components.map { ($0.id, $0) })
         let totalMass = max(0.05, components.reduce(Float(0.0)) { $0 + $1.massKg })
@@ -1094,15 +1257,39 @@ struct VehicleComponentGraph: Hashable {
             // to make aircraft fragile. It is derived from the connection's own id, so a
             // given airframe always fails the same way and a replay stays a replay.
             let scatter = 1.0 + 0.04 * Self.unitJitter(for: "connection.\(parentID)->\(child.id)")
+            if let designed = sections[child.id] {
+                // A designed station keeps its own section; the scalar limits mirror it so
+                // any reader of the legacy fields sees the same strength.
+                return VehicleStructuralConnection(
+                    id: "connection.\(parentID)->\(child.id)",
+                    parentComponentID: parentID,
+                    childComponentID: child.id,
+                    connectionType: connectionType,
+                    tensileLimitN: designed.axialUltimateN,
+                    shearLimitN: designed.shearUltimateN,
+                    bendingLimitNm: designed.flapUltimateNm,
+                    torsionLimitNm: designed.torsionUltimateNm,
+                    section: designed
+                )
+            }
+            let tensile = baseForce * 1.15 * scatter
+            let shear = baseForce * 0.82 * scatter
+            let bending = bendingLimit * scatter
+            let torsion = max(0.25, child.strengthJ * 0.65) * scatter
             return VehicleStructuralConnection(
                 id: "connection.\(parentID)->\(child.id)",
                 parentComponentID: parentID,
                 childComponentID: child.id,
                 connectionType: connectionType,
-                tensileLimitN: baseForce * 1.15 * scatter,
-                shearLimitN: baseForce * 0.82 * scatter,
-                bendingLimitNm: bendingLimit * scatter,
-                torsionLimitNm: max(0.25, child.strengthJ * 0.65) * scatter
+                tensileLimitN: tensile,
+                shearLimitN: shear,
+                bendingLimitNm: bending,
+                torsionLimitNm: torsion,
+                section: VehicleSectionDesign.attachment(
+                    parent: parent, child: child,
+                    tensileLimitN: tensile, shearLimitN: shear,
+                    bendingLimitNm: bending, torsionLimitNm: torsion,
+                    material: material)
             )
         }
     }

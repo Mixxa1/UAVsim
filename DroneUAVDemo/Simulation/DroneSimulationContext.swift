@@ -57,6 +57,9 @@ struct DroneSimulationContext {
     let rotorModel: VehicleRotorModel
     /// Aerodynamic deltas from structural damage (wing sections, tails).
     let aeroDamage: FixedWingAeroDamage
+    /// The airframe's outside parts, for the air's resistance to its rotation. Empty leaves
+    /// that resistance out, which is what every caller that does not set it gets.
+    var rotationalDragElements: [RotationalDragElement] = []
     /// Control surfaces seized by servo/structure failures: channel ->
     /// frozen deflection fraction, bypassing command and slew.
     let jammedSurfaces: [FlightSurfaceChannel: Float]

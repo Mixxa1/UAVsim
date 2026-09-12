@@ -103,10 +103,12 @@ enum VehiclePairContactService {
         let tangentVelocity = relative + n * closing
         let tangentSpeed = simd_length(tangentVelocity)
         var impulse = n * j
+        var frictionWork: Float = 0
         if tangentSpeed > 0.001, closing > 0.01 {
             let tangent = tangentVelocity / tangentSpeed
             let friction = min(material.friction * j, tangentSpeed / max(0.0001, inverseEffectiveMass(tangent)))
             impulse -= tangent * friction
+            frictionWork = max(0, friction * tangentSpeed - 0.5 * inverseEffectiveMass(tangent) * friction * friction)
         }
         if closing > 0.01 {
             first.position = aPose + n * 0.003
@@ -118,29 +120,24 @@ enum VehiclePairContactService {
             addOmega(inverseInertia(simd_cross(ar, impulse), aq, aMass), to: &first, kind: firstClass, orientation: aq)
             addOmega(inverseInertia(simd_cross(br, -impulse), bq, bMass), to: &second, kind: secondClass, orientation: bq)
         }
-        // The same energy the rest of the simulator charges an airframe for a contact — see
-        // `ImpactResolutionService`: what the normal impulse transmits past the material's own
-        // absorption, plus what the sliding tangential component abrades away.
-        //
-        // Not halved between the two bodies. An earlier version split it, on the reasoning that
-        // both structures deform — which made a vehicle-to-vehicle ram roughly half as damaging as
-        // hitting a wall at the same closing speed, and left an interceptor flying home from a
-        // collision that should have ended it. Both airframes are charged what the contact put
-        // through them, exactly as a single airframe is against a building.
+        // Both deforming bodies share the dissipated kinetic energy. The
+        // softer component absorbs the greater share; charging each body the
+        // full relative energy violates that contact's single energy budget.
         let impactEnergy = 0.5 * effectiveMass * closing * closing
-        let absorption = min(1, max(0, material.energyAbsorption))
-        let transmittedEnergy = impactEnergy * (1 - absorption * 0.65)
-        let abrasionEnergy = 0.5 * effectiveMass * tangentSpeed * tangentSpeed * material.abrasionFactor * 0.16
-        let energy = transmittedEnergy + abrasionEnergy
+        let energy = impactEnergy * (1 - material.restitution * material.restitution)
+            + frictionWork * material.abrasionFactor
+        let aStrength = max(0.5, firstGraph.component(id: contact.firstSphere.componentID)?.strengthJ ?? 40)
+        let bStrength = max(0.5, secondGraph.component(id: contact.secondSphere.componentID)?.strengthJ ?? 40)
+        let aShare = bStrength / (aStrength + bStrength)
 
         let impactID = UUID()
         let aReport = report(graph: &firstGraph, componentID: contact.firstSphere.componentID,
             orientation: aq, position: aPose, point: contact.point, normal: n, impulse: impulse,
-            energy: energy, closing: closing, tangent: tangentSpeed, id: impactID,
+            energy: energy * aShare, closing: closing, tangent: tangentSpeed, id: impactID,
             deltaTime: deltaTime, applyDamage: applyDamage)
         let bReport = report(graph: &secondGraph, componentID: contact.secondSphere.componentID,
             orientation: bq, position: bPose, point: contact.point, normal: -n, impulse: -impulse,
-            energy: energy, closing: closing, tangent: tangentSpeed, id: impactID,
+            energy: energy * (1 - aShare), closing: closing, tangent: tangentSpeed, id: impactID,
             deltaTime: deltaTime, applyDamage: applyDamage)
         return (aReport, bReport)
     }
@@ -157,10 +154,32 @@ enum VehiclePairContactService {
         // enough hit is not a dent in one component, it goes through the structure around it.
         let spreadRadius = 0.15 + 0.45 * min(1, ratio)
         let damage = applyDamage ? graph.applyImpact(primaryComponentID: componentID, energyJ: energy,
-            damageFactor: material.damageFactor, spreadRadius: spreadRadius, contactPointBody: bodyPoint) : []
-        let connections = applyDamage ? graph.applyConnectionImpact(primaryComponentID: componentID,
-            contactPointBody: bodyPoint, impulseBody: simd_act(orientation.conjugate, impulse), energyJ: energy,
-            damageFactor: material.damageFactor, contactDuration: deltaTime) : []
+            damageFactor: material.damageFactor, spreadRadius: spreadRadius, contactPointBody: bodyPoint,
+            impulseBody: simd_act(orientation.conjugate, impulse)) : []
+        // The ram's contact force lands on the struck part's mount; everything else carries
+        // the inertia of what hangs off it while the airframe is shoved aside.
+        var connections: [VehicleComponentGraph.ConnectionDamageEntry] = []
+        if applyDamage {
+            let properties = graph.massProperties
+            let pulse = ImpactResolutionService.contactDuration(component: graph.component(id: componentID),
+                                                                material: material, closingSpeed: closing)
+            let peakForce = simd_act(orientation.conjugate, impulse) * (Float.pi / (2 * max(0.001, pulse)))
+            let lever = bodyPoint - properties.centerOfMassOffset
+            connections = ImpactResolutionService.applyInertialShock(
+                graph: &graph,
+                massProperties: properties,
+                history: .halfSine(
+                    peakLinear: peakForce / max(0.05, properties.totalMassKg),
+                    peakAngular: simd_cross(lever, peakForce)
+                        / simd_max(properties.inertiaDiagonal, SIMD3<Float>(repeating: 0.0005)),
+                    duration: pulse),
+                excludedMember: nil,
+                stationAccelerations: [:],
+                directForce: StructuralPointForce(componentID: componentID, pointBody: bodyPoint, forceBody: peakForce),
+                preload: ImpactResolutionService.flightPreload(graph: graph, massProperties: properties,
+                                                              orientation: orientation),
+                thermalWeakening: 0)
+        }
         return ImpactReport(componentID: componentID, obstacleID: id, obstacleSource: InterceptContactSource.vehicle,
             material: material, acousticSurface: .metal,
             vehicleMaterial: ImpactResolutionService.vehicleMaterial(componentID: componentID, graph: graph, skin: .aluminium),

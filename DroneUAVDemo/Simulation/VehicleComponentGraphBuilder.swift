@@ -101,16 +101,18 @@ enum VehicleComponentGraphBuilder {
         let payloadMass = max(0.0, vehicleMassModel.payloadMass)
         let batteryMass = vehicleMassModel.batteryMass ?? totalMass * 0.24
         let structuralBudget = max(0.05, totalMass - payloadMass - batteryMass)
+        let material = VehicleStructuralMaterial.resolve(profile: profile)
 
         var drafts: [ComponentDraft]
+        var stations: [StationDraft]
         let rotorSlots: [RotorSlotPair]
         switch profile.airframeClass {
         case .multirotor:
-            (drafts, rotorSlots) = multirotorDrafts(geometry: geometry)
+            (drafts, rotorSlots, stations) = multirotorDrafts(geometry: geometry)
         case .fixedWing:
-            (drafts, rotorSlots) = fixedWingDrafts(geometry: geometry, includeLiftRotors: false, profile: profile)
+            (drafts, rotorSlots, stations) = fixedWingDrafts(geometry: geometry, includeLiftRotors: false, profile: profile)
         case .hybridVTOL:
-            (drafts, rotorSlots) = fixedWingDrafts(geometry: geometry, includeLiftRotors: true, profile: profile)
+            (drafts, rotorSlots, stations) = fixedWingDrafts(geometry: geometry, includeLiftRotors: true, profile: profile)
         }
 
         // Shared internals every airframe carries.
@@ -161,16 +163,17 @@ enum VehicleComponentGraphBuilder {
         ))
 
         // Distribute the structural budget over every draft without a fixed
-        // (known-real) mass, preserving the weight ratios.
+        // (known-real) mass, preserving the weight ratios. A station carries its
+        // share of the member it was cut from.
         let weightedDrafts = drafts.filter { $0.fixedMass == nil }
-        let totalWeight = weightedDrafts.reduce(Float(0.0)) { $0 + massWeight(for: $1.kind) }
+        let totalWeight = weightedDrafts.reduce(Float(0.0)) { $0 + $1.massWeight }
         let massPerWeight = structuralBudget / max(0.0001, totalWeight)
 
         var components: [VehicleComponent] = []
         components.reserveCapacity(drafts.count)
         let strengthReferenceMass = max(0.20, totalMass - payloadMass)
         for draft in drafts {
-            let mass = draft.fixedMass ?? massWeight(for: draft.kind) * massPerWeight
+            let mass = draft.fixedMass ?? draft.massWeight * massPerWeight
             components.append(
                 VehicleComponent(
                     id: draft.id,
@@ -179,7 +182,7 @@ enum VehicleComponentGraphBuilder {
                     massKg: max(0.001, mass),
                     localPosition: draft.position,
                     boundingHalfExtents: simd_max(draft.halfExtents, SIMD3<Float>(repeating: 0.005)),
-                    strengthJ: strengthJPerKg(for: draft.kind) * strengthReferenceMass * profile.structuralQualityFactor,
+                    strengthJ: draft.strengthPerKg * strengthReferenceMass * profile.structuralQualityFactor,
                     integrity: 1.0,
                     legacyComponent: draft.legacy,
                     functionalDependencies: drafts
@@ -197,25 +200,378 @@ enum VehicleComponentGraphBuilder {
         // `resolvedCurrentTotalMass` is 78, and it is a 170 kg aircraft. Sizing from the
         // live mass left its propeller mount at 1,150 N against the 1,370 N of thrust its
         // own engine makes standing still, so it still threw the propeller.
-        let graph = VehicleComponentGraph(
+        let designMass = max(totalMass, profile.takeoffMassKg)
+        let limitLoadFactor = designLimitLoadFactor(profile: profile, designMassKg: designMass, stations: stations)
+        let ultimateLoadFactor = limitLoadFactor * material.ultimateOverLimit
+        let sections = designSections(
+            stations: stations,
             components: components,
-            designTakeoffMassKg: max(totalMass, profile.takeoffMassKg)
+            designMassKg: designMass,
+            maxThrustToWeight: maxThrustToWeight(profile: profile, vehicleMassModel: vehicleMassModel),
+            rotorCount: max(1, rotorSlots.count),
+            material: material,
+            ultimateLoadFactor: ultimateLoadFactor,
+            qualityFactor: profile.structuralQualityFactor
+        )
+        var graph = VehicleComponentGraph(
+            components: components,
+            designTakeoffMassKg: designMass,
+            sections: sections,
+            material: material
         )
         let contactProfile = contactProfile(
             for: profile,
             geometry: geometry,
             drafts: drafts
         )
+        // Every joint is then floored at what the same load solver the aircraft will fly with
+        // puts through it in the design cases. Sizing and loading can no longer disagree: a
+        // pristine airframe carries its design loads, whatever path they take.
+        let envelopes = designEnvelopes(
+            graph: graph,
+            profile: profile,
+            designMassKg: designMass,
+            maxThrustToWeight: maxThrustToWeight(profile: profile, vehicleMassModel: vehicleMassModel),
+            ultimateLoadFactor: ultimateLoadFactor,
+            ultimateOverLimit: material.ultimateOverLimit,
+            contactProfile: contactProfile,
+            wingAreaM2: 2 * stations.reduce(Float(0)) { total, station in
+                guard case .wing = station.loading else { return total }
+                return total + station.chord * station.length
+            } / 2
+        )
+        graph.raiseSectionCapacities(to: envelopes, factor: max(1, profile.structuralQualityFactor))
         return Output(
             graph: graph,
             contactProfile: contactProfile,
-            rotorModel: rotorModel(from: rotorSlots, massProperties: graph.massProperties)
+            rotorModel: rotorModel(from: rotorSlots, massProperties: graph.massProperties,
+                hasCyclic: profile.resolvedUAVProfile?.vehicleType == .helicopter)
         )
+    }
+
+    /// Limit load factor the airframe is designed to: the normal-category manoeuvre factor
+    /// for its weight, or — for anything that flies on a wing — the 50 ft/s gust factor at
+    /// cruise if that is larger. The gust case uses the wing loading the aerodynamics
+    /// calibrates its wing area from (`½ρV_s²·CLmax`), so the two agree on the wing.
+    private static func designLimitLoadFactor(
+        profile: DroneModelProfile,
+        designMassKg: Float,
+        stations: [StationDraft]
+    ) -> Float {
+        let manoeuvre = VehicleSectionDesign.manoeuvreLimitLoadFactor(designMassKg: designMassKg)
+        guard let wing = profile.fixedWingParameters else { return manoeuvre }
+        let lift = FixedWingAerodynamics.designLiftCharacteristics(for: wing.family)
+        let stall = max(3, wing.minSustainableSpeedMps)
+        let loading = 0.5 * 1.225 * stall * stall * lift.maximumLift
+        let wingStations = stations.filter { if case .wing = $0.loading { return true }; return false }
+        let chord = wingStations.isEmpty ? 0.3
+            : wingStations.reduce(Float(0)) { $0 + $1.chord } / Float(wingStations.count)
+        let gust = VehicleSectionDesign.gustLimitLoadFactor(
+            wingLoadingPa: loading, meanChordM: chord, liftSlopePerRad: lift.liftSlope,
+            speedMps: max(wing.cruiseAirspeed, stall))
+        return max(manoeuvre, gust)
+    }
+
+    /// Full-throttle thrust over weight. A rotor arm exists to carry its rotor's thrust, so
+    /// it is sized for the most the propulsion can pull — on an FPV racer that is several
+    /// times the aircraft's weight, far above any flight load factor.
+    private static func maxThrustToWeight(profile: DroneModelProfile, vehicleMassModel: VehicleMassModel) -> Float {
+        guard profile.airframeClass != .fixedWing else { return 0 }
+        let baseline = FlightBaselineResolver.resolve(
+            runtimeProfile: profile,
+            activeUAVProfile: profile.resolvedUAVProfile,
+            vehicleMassModel: vehicleMassModel,
+            flightMode: .manual
+        )
+        return max(1.0, baseline.effectiveStabilizationThrust + baseline.effectiveThrottleAuthority * 0.35)
+    }
+
+    /// Designs every station section from the loads its member exists to carry.
+    ///
+    /// - Lifting surfaces carry the ultimate load factor times their share of the
+    ///   aircraft's design weight. The main wing's share along the span follows Schrenk's
+    ///   approximation (the mean of the planform and an ellipse over the full semi-span),
+    ///   so the part hidden in the fuselage keeps its lift and the stations do not.
+    /// - Tail surfaces and the fin take the ultimate load factor on their area share of the
+    ///   airframe's lifting surface — the same rule the flight solver loads them with.
+    /// - A boom carries the tail group at its end; an arm carries its rotor's thrust.
+    private static func designSections(
+        stations: [StationDraft],
+        components: [VehicleComponent],
+        designMassKg: Float,
+        maxThrustToWeight: Float,
+        rotorCount: Int,
+        material: VehicleStructuralMaterial,
+        ultimateLoadFactor: Float,
+        qualityFactor: Float
+    ) -> [String: VehicleJointSection] {
+        guard !stations.isEmpty else { return [:] }
+        let byID = Dictionary(uniqueKeysWithValues: components.map { ($0.id, $0) })
+        let g: Float = 9.81
+        let weight = designMassKg * g
+        var children: [String: [String]] = [:]
+        for component in components {
+            if let parent = component.parentID { children[parent, default: []].append(component.id) }
+        }
+        let stationIDs = Set(stations.map(\.id))
+        /// Mass and centre of a station plus everything mounted on it that is not itself a
+        /// later station of a member.
+        func lumped(_ id: String) -> (mass: Float, center: SIMD3<Float>) {
+            var mass: Float = 0
+            var moment = SIMD3<Float>(repeating: 0)
+            var pending = [id]
+            while let current = pending.popLast() {
+                guard let component = byID[current] else { continue }
+                mass += component.massKg
+                moment += component.localPosition * component.massKg
+                for child in children[current] ?? [] where !stationIDs.contains(child) { pending.append(child) }
+            }
+            return (max(0.0005, mass), moment / max(0.0005, mass))
+        }
+        let totalLiftingArea = components.reduce(Float(0)) { $0 + ($1.liftingSurface?.area ?? 0) }
+        let wingArea = components.reduce(Float(0)) { total, component in
+            if case .wingSection = component.kind { return total + (component.liftingSurface?.area ?? 0) }
+            return total
+        }
+        let perRotorThrust = weight * max(maxThrustToWeight, ultimateLoadFactor / 1.5)
+            / Float(rotorCount)
+
+        var members: [String: [StationDraft]] = [:]
+        for station in stations { members[station.memberID, default: []].append(station) }
+        var result: [String: VehicleJointSection] = [:]
+        for (memberID, memberStations) in members {
+            let ordered = memberStations.sorted { $0.index < $1.index }
+            let first = ordered[0]
+            var designStations: [VehicleSectionDesign.Station] = []
+            for station in ordered {
+                let mass = lumped(station.id)
+                let area = byID[station.id]?.liftingSurface?.area ?? 0
+                var force: Float = 0
+                var forceCenter = byID[station.id]?.localPosition ?? station.anchor
+                switch station.loading {
+                case .wing(let schrenkShare):
+                    // Each half carries half the design lift; the wing, not the tail,
+                    // carries the airframe in a manoeuvre.
+                    force = ultimateLoadFactor * weight * 0.5 * schrenkShare
+                case .liftingSurface:
+                    let share = totalLiftingArea > 0.0001 ? area / totalLiftingArea : 0
+                    force = ultimateLoadFactor * weight * share
+                case .rotorTip:
+                    force = 1.5 * perRotorThrust
+                    forceCenter = station.tipPoint
+                case .carriesTail(let tailArea, let tailCenter):
+                    let share = totalLiftingArea > 0.0001 ? tailArea / totalLiftingArea : 0
+                    force = ultimateLoadFactor * weight * share
+                    forceCenter = tailCenter
+                case .none:
+                    force = 0
+                }
+                designStations.append(VehicleSectionDesign.Station(
+                    id: station.id,
+                    anchor: station.anchor,
+                    spanAxis: station.spanAxis,
+                    normalAxis: station.normalAxis,
+                    length: station.length,
+                    chord: station.chord,
+                    depth: station.depth,
+                    mass: mass.mass,
+                    massCenter: mass.center,
+                    designForce: force,
+                    designForceCenter: forceCenter
+                ))
+            }
+            _ = wingArea
+            let designed = VehicleSectionDesign.sections(
+                for: designStations,
+                memberID: memberID,
+                material: material,
+                ultimateLoadFactor: ultimateLoadFactor,
+                constantSection: first.constantSection,
+                symmetricFlap: first.symmetricFlap,
+                scatter: { id in (1.0 + 0.04 * unitJitter(for: "section.\(id)")) * max(1.0, qualityFactor) }
+            )
+            result.merge(designed) { $1 }
+        }
+        return result
+    }
+
+    /// Joint load envelope over the design cases, at ultimate (limit × `ultimateOverLimit`,
+    /// which is 1.5 unless the material yields early):
+    /// - symmetric pull at the ultimate factor, lift on the horizontal surfaces by area — or,
+    ///   for anything that hovers, thrust at the lift rotors at the larger of that and
+    ///   1.5 × its full-throttle thrust-to-weight;
+    /// - push-over at −0.4 × that (the negative limit of the normal category);
+    /// - side load of 0.75 g limit on the fins with 1 g lift (gust and rudder-kick cases);
+    /// - landing at 2.67 g limit on the undercarriage with no lift, which is what bends a
+    ///   wing down at touchdown (the landing load factor of CS-23.473);
+    /// - emergency-landing inertia of every item of mass (already ultimate).
+    private static func designEnvelopes(
+        graph: VehicleComponentGraph,
+        profile: DroneModelProfile,
+        designMassKg: Float,
+        maxThrustToWeight: Float,
+        ultimateLoadFactor: Float,
+        ultimateOverLimit: Float,
+        contactProfile: VehicleContactProfile,
+        wingAreaM2: Float
+    ) -> [String: VehicleJointEnvelope] {
+        let g: Float = 9.81
+        let weight = designMassKg * g
+        let properties = graph.massProperties
+        let transforms = graph.deformationTransforms()
+        func position(_ component: VehicleComponent) -> SIMD3<Float> {
+            let p = (transforms[component.id] ?? matrix_identity_float4x4) * SIMD4<Float>(component.localPosition, 1)
+            return SIMD3<Float>(p.x, p.y, p.z)
+        }
+        let attached = graph.attachedComponents
+        let horizontal = attached.filter { component in
+            switch component.kind {
+            case .wingSection, .horizontalTail, .elevator: return true
+            default: return false
+            }
+        }
+        let vertical = attached.filter { $0.kind == .verticalTail || $0.kind == .rudder }
+        let motors = attached.filter { if case .motor = $0.kind { return true }; return false }
+        let horizontalArea = horizontal.reduce(Float(0)) { $0 + ($1.liftingSurface?.area ?? 0) }
+        let verticalArea = vertical.reduce(Float(0)) { $0 + ($1.liftingSurface?.area ?? 0) }
+        let hovers = profile.airframeClass != .fixedWing
+        let wingborne = profile.airframeClass != .multirotor && horizontalArea > 0.0001
+        let gearID = attached.first { if case .landingGear = $0.kind { return true }; return false }?.id
+
+        func lift(_ total: Float) -> [StructuralPointForce] {
+            guard wingborne else { return [] }
+            return horizontal.map { component in
+                let share = (component.liftingSurface?.area ?? 0) / horizontalArea
+                return StructuralPointForce(componentID: component.id, pointBody: position(component),
+                                            forceBody: SIMD3<Float>(0, total * share, 0))
+            }
+        }
+        func sideForces(_ total: Float) -> [StructuralPointForce] {
+            guard verticalArea > 0.0001 else { return [] }
+            return vertical.map { component in
+                let share = (component.liftingSurface?.area ?? 0) / verticalArea
+                return StructuralPointForce(componentID: component.id, pointBody: position(component),
+                                            forceBody: SIMD3<Float>(total * share, 0, 0))
+            }
+        }
+        func thrust(_ total: Float) -> [StructuralPointForce] {
+            guard hovers, !motors.isEmpty else { return [] }
+            return motors.map { motor in
+                StructuralPointForce(componentID: motor.id, pointBody: position(motor),
+                                     forceBody: SIMD3<Float>(0, total / Float(motors.count), 0))
+            }
+        }
+        let n = ultimateLoadFactor
+        let hoverFactor = max(n, 1.5 * maxThrustToWeight)
+        let side = 0.75 * ultimateOverLimit
+        var cases: [StructuralLoadCase] = []
+        func add(_ factor: SIMD3<Float>, _ forces: [StructuralPointForce]) {
+            cases.append(StructuralLoadCase(specificForceBody: factor * g,
+                                            centerOfMass: properties.centerOfMassOffset, pointForces: forces))
+        }
+        if wingborne {
+            add(SIMD3<Float>(0, n, 0), lift(n * weight))
+            add(SIMD3<Float>(0, -VehicleSectionDesign.negativeFlapRatio * n, 0),
+                lift(-VehicleSectionDesign.negativeFlapRatio * n * weight))
+            for sign: Float in [-1, 1] {
+                add(SIMD3<Float>(sign * side, 1, 0), lift(weight) + sideForces(sign * side * weight))
+            }
+        }
+        if hovers {
+            add(SIMD3<Float>(0, hoverFactor, 0), thrust(hoverFactor * weight))
+        }
+        let landing: Float = 2.67 * ultimateOverLimit
+        if let gearID, let gear = graph.component(id: gearID) {
+            add(SIMD3<Float>(0, landing, 0), [StructuralPointForce(
+                componentID: gearID, pointBody: position(gear), forceBody: SIMD3<Float>(0, landing * weight, 0))])
+        }
+        // Emergency-landing inertia of every item of mass (CS-25.561, ultimate): 9 g forward,
+        // 3 g sideward, 6 g down, 3 g up, 1.5 g aft. What these retain is equipment — a
+        // battery, a gimbal, a control surface — through the deceleration of a crash that the
+        // airframe itself survives. Body frame: the nose is −Z, so a forward inertia load is
+        // the airframe decelerating toward +Z.
+        for inertia in [SIMD3<Float>(0, 0, 9), SIMD3<Float>(3, 0, 0), SIMD3<Float>(-3, 0, 0),
+                        SIMD3<Float>(0, 6, 0), SIMD3<Float>(0, -3, 0), SIMD3<Float>(0, 0, -1.5)] {
+            add(inertia, [])
+        }
+        var envelopes: [String: VehicleJointEnvelope] = [:]
+        for loadCase in cases {
+            let loads = StructuralLoadField.jointLoads(graph: graph, loadCase: loadCase, transforms: transforms)
+            for (id, load) in loads { envelopes[id, default: VehicleJointEnvelope()].include(load) }
+        }
+
+        // Equipment is qualified to MIL-STD-810 (Method 516): functional shock of 20 g with no
+        // damage, and crash-hazard shock of 40 g that its mounts must still hold. Those are
+        // the figures UAV equipment is bought against, and they are several times the 9 g
+        // emergency-landing inertia of a transport cabin; with that as its only case a battery
+        // strap let go when a pusher propeller touched the runway. Applied to the mounts of
+        // equipment only — a wing is sized by what it flies, not by what its battery survives.
+        let equipment = Set(graph.structuralConnections.compactMap { connection -> String? in
+            guard let section = connection.section, !section.isMemberStation,
+                  let child = graph.component(id: connection.childComponentID) else { return nil }
+            if case .landingGear = child.kind { return nil }
+            return child.id
+        })
+        let crashHazard = max(40, 20 * ultimateOverLimit)
+        for axis in [SIMD3<Float>(1, 0, 0), SIMD3<Float>(-1, 0, 0), SIMD3<Float>(0, 1, 0),
+                     SIMD3<Float>(0, -1, 0), SIMD3<Float>(0, 0, 1), SIMD3<Float>(0, 0, -1)] {
+            let loadCase = StructuralLoadCase(specificForceBody: axis * crashHazard * g,
+                                              centerOfMass: properties.centerOfMassOffset)
+            let loads = StructuralLoadField.jointLoads(graph: graph, loadCase: loadCase, transforms: transforms)
+            for (id, load) in loads where equipment.contains(id) {
+                envelopes[id, default: VehicleJointEnvelope()].include(load)
+            }
+        }
+
+        // The undercarriage is sized for the blow the contact solver will actually hand it: a
+        // touchdown at the design sink speed of CS-23.473(d), V = 4.4·(W/S)^¼ ft/s held to
+        // 7–10 ft/s, struck at each of its contact points with the impulse, pulse length and
+        // lever the impact path uses. A static load at the middle of the gear, which is what it
+        // had, is not the load it gets: a touchdown on one corner of it put a bending moment
+        // through the mount the design had never seen, and a 2 m/s landing tore it off.
+        if let gearID, let gear = graph.component(id: gearID) {
+            let wingLoadingLbFt2 = wingAreaM2 > 0.01 ? weight / wingAreaM2 * 0.020_885 : 0
+            let sinkFtS = wingLoadingLbFt2 > 0 ? min(10, max(7, 4.4 * pow(wingLoadingLbFt2, 0.25))) : 7
+            let sink = sinkFtS * 0.3048
+            let inertia = simd_max(properties.inertiaDiagonal, SIMD3<Float>(repeating: 0.0005))
+            let up = SIMD3<Float>(0, 1, 0)
+            let duration = ImpactResolutionService.contactDuration(component: gear, material: .asphalt, closingSpeed: sink)
+            for sphere in contactProfile.spheres where sphere.componentID == gearID {
+                let point = sphere.offset - up * sphere.radius
+                let lever = point - properties.centerOfMassOffset
+                let angularPerImpulse = simd_cross(lever, up) / inertia
+                let inverseMass = 1 / designMassKg + simd_dot(simd_cross(angularPerImpulse, lever), up)
+                let impulse = (1 + ImpactSurfaceMaterial.asphalt.restitution) * sink / max(1e-6, inverseMass)
+                let force = up * impulse * Float.pi / (2 * max(0.001, duration)) * ultimateOverLimit
+                // Wing lift equal to the weight through the touchdown (CS-23.473(e)): the
+                // aircraft is at 1 g plus the blow, and the lift acts on the wing, not here.
+                var loadCase = StructuralLoadCase(specificForceBody: force / designMassKg + up * g,
+                                                  centerOfMass: properties.centerOfMassOffset,
+                                                  pointForces: [StructuralPointForce(componentID: gearID, pointBody: point,
+                                                                                      forceBody: force)])
+                loadCase.angularAccelerationBody = simd_cross(lever, force) / inertia
+                let loads = StructuralLoadField.jointLoads(graph: graph, loadCase: loadCase, transforms: transforms)
+                if let load = loads[gearID] { envelopes[gearID, default: VehicleJointEnvelope()].include(load) }
+            }
+        }
+        return envelopes
+    }
+
+    /// Stable −1...1 from a string (FNV-1a), so build scatter belongs to the airframe and a
+    /// replay fails the same way.
+    private static func unitJitter(for key: String) -> Float {
+        var hash: UInt64 = 0xcbf2_9ce4_8422_2325
+        for byte in key.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x0000_0100_0000_01b3
+        }
+        return Float(Double(hash % 20_001) / 10_000.0 - 1.0)
     }
 
     private static func rotorModel(
         from rotorSlots: [RotorSlotPair],
-        massProperties: VehicleMassProperties
+        massProperties: VehicleMassProperties,
+        hasCyclic: Bool
     ) -> VehicleRotorModel {
         guard !rotorSlots.isEmpty else { return .empty }
 
@@ -248,7 +604,8 @@ enum VehicleComponentGraphBuilder {
         // κ scales with arm length so yaw authority stays proportionate
         // across airframe sizes (0.02 N·m/N at a typical 0.15 m arm).
         let kappa = max(0.004, 0.02 * meanArm / 0.15)
-        return VehicleRotorModel(rotors: rotors, torqueToThrustRatio: kappa)
+        return VehicleRotorModel(rotors: rotors, torqueToThrustRatio: kappa,
+                                 cyclicTiltLimitRad: hasCyclic ? Float.pi / 12 : 0)
     }
 
     // MARK: - Drafts
@@ -261,6 +618,10 @@ enum VehicleComponentGraphBuilder {
         let parentID: String?
         let legacy: DamageComponent?
         let fixedMass: Float?
+        /// Share of the structural budget (only ratios matter).
+        let massWeight: Float
+        /// Impact energy per kg of aircraft that destroys the part in one hit.
+        let strengthPerKg: Float
 
         init(
             kind: VehicleComponentKind,
@@ -269,7 +630,10 @@ enum VehicleComponentGraphBuilder {
             parentID: String?,
             legacy: DamageComponent?,
             fixedMass: Float? = nil,
-            idSuffix: String? = nil
+            idSuffix: String? = nil,
+            id explicitID: String? = nil,
+            massWeight: Float? = nil,
+            strengthPerKg: Float? = nil
         ) {
             self.kind = kind
             self.position = position
@@ -277,7 +641,9 @@ enum VehicleComponentGraphBuilder {
             self.parentID = parentID
             self.legacy = legacy
             self.fixedMass = fixedMass
-            self.id = Self.identifier(for: kind, suffix: idSuffix)
+            self.id = explicitID ?? Self.identifier(for: kind, suffix: idSuffix)
+            self.massWeight = massWeight ?? VehicleComponentGraphBuilder.massWeight(for: kind)
+            self.strengthPerKg = strengthPerKg ?? VehicleComponentGraphBuilder.strengthJPerKg(for: kind)
         }
 
         static func identifier(for kind: VehicleComponentKind, suffix: String?) -> String {
@@ -305,6 +671,101 @@ enum VehicleComponentGraphBuilder {
             if let suffix { return "\(base).\(suffix)" }
             return base
         }
+    }
+
+    /// How a station is loaded when its section is designed.
+    private enum StationLoading {
+        /// Main-wing station with its Schrenk share of the half-wing's design lift.
+        case wing(schrenkShare: Float)
+        /// Tail surface or fin: area share of the airframe's lifting surface.
+        case liftingSurface
+        /// The outermost arm station carries its rotor's full thrust at the tip point.
+        case rotorTip
+        /// The outermost boom station carries the tail group's load at its end.
+        case carriesTail(area: Float, center: SIMD3<Float>)
+        case none
+    }
+
+    /// Geometry of one station of a discretised member, in the builder's body frame.
+    private struct StationDraft {
+        let id: String
+        let memberID: String
+        let index: Int
+        /// Inboard joint on the elastic axis.
+        let anchor: SIMD3<Float>
+        let spanAxis: SIMD3<Float>
+        let normalAxis: SIMD3<Float>
+        let length: Float
+        let chord: Float
+        let depth: Float
+        let loading: StationLoading
+        let tipPoint: SIMD3<Float>
+        let constantSection: Bool
+        let symmetricFlap: Bool
+    }
+
+    /// Stations per member. Twelve per half-wing puts a possible break every ~8 % of the
+    /// exposed span — finer than any real control-surface segment — while the chain solver
+    /// stays a few thousand operations per impact. Tail surfaces, booms and arms are
+    /// shorter and get four.
+    private static let wingStationCount = 12
+    private static let shortMemberStationCount = 4
+
+    /// A straight chain of `count` stations from `root` along `axis` for `length`, each a box
+    /// of the given cross-section. Returns drafts parented root→tip under `parentID`.
+    private static func straightMember(
+        memberID: String,
+        kind: (Int) -> VehicleComponentKind,
+        root: SIMD3<Float>,
+        axis: SIMD3<Float>,
+        normal: SIMD3<Float>,
+        length: Float,
+        count: Int,
+        crossSection: SIMD2<Float>,
+        parentID: String,
+        legacy: DamageComponent?,
+        totalMassWeight: Float,
+        totalStrengthPerKg: Float,
+        loading: (Int) -> StationLoading,
+        constantSection: Bool,
+        symmetricFlap: Bool
+    ) -> (drafts: [ComponentDraft], stations: [StationDraft]) {
+        let span = simd_normalize(axis)
+        var normalAxis = normal - span * simd_dot(normal, span)
+        if simd_length_squared(normalAxis) < 1e-6 { normalAxis = SIMD3<Float>(0, 1, 0) }
+        normalAxis = simd_normalize(normalAxis)
+        let chordAxis = simd_normalize(simd_cross(span, normalAxis))
+        let step = max(0.002, length) / Float(count)
+        var drafts: [ComponentDraft] = []
+        var stations: [StationDraft] = []
+        var parent = parentID
+        for index in 0..<count {
+            let anchor = root + span * (step * Float(index))
+            let center = anchor + span * (step * 0.5)
+            // Axis-aligned half extents of the oriented station box.
+            let half = simd_abs(span) * (step * 0.5)
+                + simd_abs(normalAxis) * (crossSection.y * 0.5)
+                + simd_abs(chordAxis) * (crossSection.x * 0.5)
+            let id = "\(memberID).s\(String(format: "%02d", index))"
+            drafts.append(ComponentDraft(
+                kind: kind(index),
+                position: center,
+                halfExtents: half,
+                parentID: parent,
+                legacy: legacy,
+                id: id,
+                massWeight: totalMassWeight / Float(count),
+                strengthPerKg: totalStrengthPerKg / Float(count)
+            ))
+            stations.append(StationDraft(
+                id: id, memberID: memberID, index: index,
+                anchor: anchor, spanAxis: span, normalAxis: normalAxis,
+                length: step, chord: crossSection.x, depth: crossSection.y,
+                loading: loading(index), tipPoint: root + span * max(0.002, length),
+                constantSection: constantSection, symmetricFlap: symmetricFlap))
+            parent = id
+        }
+        return (drafts, stations)
     }
 
     /// Quadrant naming in the physics body frame: nose toward -Z, +X right.
@@ -346,10 +807,11 @@ enum VehicleComponentGraphBuilder {
 
     private static func multirotorDrafts(
         geometry: DroneVisualGeometrySample
-    ) -> (drafts: [ComponentDraft], rotorSlots: [RotorSlotPair]) {
+    ) -> (drafts: [ComponentDraft], rotorSlots: [RotorSlotPair], stations: [StationDraft]) {
         let center = geometry.boundsCenter
         let size = geometry.boundsSize
         var drafts: [ComponentDraft] = []
+        var stations: [StationDraft] = []
         var rotorSlots: [RotorSlotPair] = []
 
         let frame = ComponentDraft(
@@ -375,24 +837,46 @@ enum VehicleComponentGraphBuilder {
             usedSlots.insert(quadrant.slot)
             rotorSlots.append((quadrant.slot, prop))
 
-            let armVector = prop.center - center
-            let armMid = center + armVector * 0.55
-            drafts.append(ComponentDraft(
-                kind: .arm(slot: quadrant.slot),
-                position: SIMD3<Float>(armMid.x, prop.center.y - 0.01, armMid.z),
-                halfExtents: SIMD3<Float>(
-                    max(0.01, abs(armVector.x) * 0.5),
-                    max(0.008, size.y * 0.06),
-                    max(0.01, abs(armVector.z) * 0.5)
-                ),
-                parentID: frame.id,
-                legacy: quadrant.arm
-            ))
+            // The arm is a tube from the edge of the central body to the motor. Its
+            // stations let it crack at the clamp, buckle mid-length or lose its tip with
+            // the motor, wherever the load actually peaks.
+            var horizontal = prop.center - center
+            horizontal.y = 0
+            let armLength = simd_length(horizontal)
+            let motorParent: String
+            if armLength > 0.01 {
+                let axis = horizontal / armLength
+                let root = SIMD3<Float>(center.x, prop.center.y - 0.01, center.z) + axis * (armLength * 0.25)
+                let length = armLength * 0.75
+                let member = straightMember(
+                    memberID: "arm.\(quadrant.slot)",
+                    kind: { _ in .arm(slot: quadrant.slot) },
+                    root: root,
+                    axis: axis,
+                    normal: SIMD3<Float>(0, 1, 0),
+                    length: length,
+                    count: shortMemberStationCount,
+                    crossSection: SIMD2<Float>(max(0.016, armLength * 0.12), max(0.012, size.y * 0.10)),
+                    parentID: frame.id,
+                    legacy: quadrant.arm,
+                    totalMassWeight: massWeight(for: .arm(slot: quadrant.slot)),
+                    totalStrengthPerKg: strengthJPerKg(for: .arm(slot: quadrant.slot)),
+                    loading: { $0 == shortMemberStationCount - 1 ? .rotorTip : .none },
+                    constantSection: true,
+                    symmetricFlap: true
+                )
+                drafts.append(contentsOf: member.drafts)
+                stations.append(contentsOf: member.stations)
+                motorParent = member.drafts.last?.id ?? frame.id
+            } else {
+                // A rotor on the hub (coaxial mast, single-rotor): no arm to break.
+                motorParent = frame.id
+            }
             drafts.append(ComponentDraft(
                 kind: .motor(slot: quadrant.slot),
                 position: prop.center - SIMD3<Float>(0.0, 0.015, 0.0),
                 halfExtents: SIMD3<Float>(repeating: max(0.012, prop.radius * 0.18)),
-                parentID: ComponentDraft.identifier(for: .arm(slot: quadrant.slot), suffix: nil),
+                parentID: motorParent,
                 legacy: quadrant.motor
             ))
             drafts.append(ComponentDraft(
@@ -412,24 +896,176 @@ enum VehicleComponentGraphBuilder {
             legacy: nil
         ))
 
-        return (drafts, rotorSlots)
+        return (drafts, rotorSlots, stations)
+    }
+
+    /// One half of the main wing, cut into stations along the real planform.
+    ///
+    /// The exposed wing starts at the side of the fuselage; inboard of that the wing box
+    /// is carried through the body and its lift belongs to the body. Each station keeps the
+    /// chord, sweep, depth and dihedral of the strip it was cut from, so a tapered tip is
+    /// light and weak and a swept station sits aft of the one inboard of it.
+    private static func wingMember(
+        side: VehicleBodySide,
+        geometry: DroneVisualGeometrySample,
+        fallback: (center: SIMD3<Float>, halfExtents: SIMD3<Float>),
+        parentID: String
+    ) -> (drafts: [ComponentDraft], stations: [StationDraft]) {
+        let centerX = fallback.center.x
+        let sign: Float = side == .left ? -1 : 1
+        var slices = geometry.wingPlanform.filter { ($0.centerX - centerX) * sign > 0 }
+        if slices.count < 2 {
+            // No sampled planform (procedural visual): a rectangle over the bucket boxes.
+            let half = fallback.halfExtents
+            let count = 24
+            slices = (0..<count).map { index in
+                let a = centerX + sign * half.x * Float(index) / Float(count)
+                let b = centerX + sign * half.x * Float(index + 1) / Float(count)
+                return DroneVisualGeometryPlanformSlice(
+                    x0: min(a, b), x1: max(a, b),
+                    leadingZ: fallback.center.z - half.z, trailingZ: fallback.center.z + half.z,
+                    lowerY: fallback.center.y - half.y, upperY: fallback.center.y + half.y)
+            }
+        }
+        slices.sort { abs($0.centerX - centerX) < abs($1.centerX - centerX) }
+        let tipX = side == .left ? slices.map(\.x0).min()! : slices.map(\.x1).max()!
+        let semiSpan = max(0.01, abs(tipX - centerX))
+        let rootOffset = min(max(0, geometry.fuselageHalfWidth), semiSpan * 0.35)
+        let rootX = centerX + sign * rootOffset
+        let exposed = abs(tipX - rootX)
+        guard exposed > 0.02 else { return ([], []) }
+
+        func planform(at x: Float) -> DroneVisualGeometryPlanformSlice {
+            slices.min { abs($0.centerX - x) < abs($1.centerX - x) }!
+        }
+        /// Overlap-weighted average of the strips between two span positions.
+        func strip(_ a: Float, _ b: Float) -> DroneVisualGeometryPlanformSlice {
+            let lo = min(a, b), hi = max(a, b)
+            var weight: Float = 0, lead: Float = 0, trail: Float = 0, low: Float = 0, high: Float = 0
+            for slice in slices {
+                let overlap = min(hi, slice.x1) - max(lo, slice.x0)
+                guard overlap > 0 else { continue }
+                weight += overlap
+                lead += slice.leadingZ * overlap; trail += slice.trailingZ * overlap
+                low += slice.lowerY * overlap; high += slice.upperY * overlap
+            }
+            guard weight > 0 else { return planform(at: (a + b) * 0.5) }
+            return DroneVisualGeometryPlanformSlice(x0: lo, x1: hi, leadingZ: lead / weight,
+                trailingZ: trail / weight, lowerY: low / weight, upperY: high / weight)
+        }
+        // The spar is straight. Following each strip's own 35 % chord point instead let a
+        // tail-boom root or an engine nacelle faired into the wing drag the axis 0.25 m
+        // forward and back again: on the FT5 three stations came out swept ±48°, and a pure
+        // lift moment read across such a kinked axis became torsion as large as a third of
+        // the bending — enough to yield the root at 3.6 g. Theil–Sen (median of pairwise
+        // slopes) fits the line through the strips and ignores up to ~29 % of them being
+        // something other than wing, which a least-squares line does not.
+        let axisSamples: [SIMD3<Float>] = (0...24).map { index in
+            let x = rootX + sign * exposed * Float(index) / 24
+            let slice = planform(at: x)
+            return SIMD3<Float>(x, slice.midY, slice.leadingZ + slice.chord * 0.35)
+        }
+        func theilSen(_ value: (SIMD3<Float>) -> Float) -> (at: Float, slope: Float) {
+            var slopes: [Float] = []
+            for i in axisSamples.indices {
+                for j in axisSamples.indices where j > i {
+                    let dx = axisSamples[j].x - axisSamples[i].x
+                    guard abs(dx) > 1e-5 else { continue }
+                    slopes.append((value(axisSamples[j]) - value(axisSamples[i])) / dx)
+                }
+            }
+            func median(_ values: [Float]) -> Float {
+                guard !values.isEmpty else { return 0 }
+                let sorted = values.sorted()
+                return sorted.count % 2 == 1 ? sorted[sorted.count / 2]
+                    : 0.5 * (sorted[sorted.count / 2 - 1] + sorted[sorted.count / 2])
+            }
+            let slope = median(slopes)
+            return (median(axisSamples.map { value($0) - slope * ($0.x - rootX) }), slope)
+        }
+        let axisY = theilSen { $0.y }
+        let axisZ = theilSen { $0.z }
+        func elasticAxis(at x: Float) -> SIMD3<Float> {
+            SIMD3<Float>(x, axisY.at + axisY.slope * (x - rootX), axisZ.at + axisZ.slope * (x - rootX))
+        }
+        // Schrenk: the mean of the planform's own area distribution and an ellipse over the
+        // full semi-span from the centreline.
+        let semiArea = slices.reduce(Float(0)) { $0 + $1.chord * ($1.x1 - $1.x0) }
+        func ellipse(_ u: Float) -> Float {
+            let c = min(1, max(0, u))
+            return 0.5 * (c * sqrt(max(0, 1 - c * c)) + asin(c))
+        }
+
+        let count = wingStationCount
+        var drafts: [ComponentDraft] = []
+        var stations: [StationDraft] = []
+        var parent = parentID
+        let areas: [Float] = (0..<count).map { index in
+            let a = rootX + sign * exposed * Float(index) / Float(count)
+            let b = rootX + sign * exposed * Float(index + 1) / Float(count)
+            return strip(a, b).chord * abs(b - a)
+        }
+        let totalArea = max(1e-6, areas.reduce(0, +))
+        let perSideWeight = massWeight(for: .wingSection(side: side, segment: .root))
+            + massWeight(for: .wingSection(side: side, segment: .outer))
+        let perSideStrength = strengthJPerKg(for: .wingSection(side: side, segment: .root))
+            + strengthJPerKg(for: .wingSection(side: side, segment: .outer))
+        let legacy: DamageComponent = side == .left ? .armFL : .armFR
+        let tip = elasticAxis(at: tipX)
+        for index in 0..<count {
+            let a = rootX + sign * exposed * Float(index) / Float(count)
+            let b = rootX + sign * exposed * Float(index + 1) / Float(count)
+            let piece = strip(a, b)
+            let anchor = elasticAxis(at: a)
+            let next = index + 1 < count ? elasticAxis(at: b) : tip
+            var spanAxis = next - anchor
+            if simd_length_squared(spanAxis) < 1e-8 { spanAxis = SIMD3<Float>(sign, 0, 0) }
+            spanAxis = simd_normalize(spanAxis)
+            let up = SIMD3<Float>(0, 1, 0)
+            let normal = simd_normalize(up - spanAxis * simd_dot(up, spanAxis))
+            let segment: VehicleWingSegment = index < count / 2 ? .root : .outer
+            let id = "wing.\(side.rawValue).\(segment.rawValue).s\(String(format: "%02d", index))"
+            let share = areas[index] / totalArea
+            drafts.append(ComponentDraft(
+                kind: .wingSection(side: side, segment: segment),
+                position: SIMD3<Float>((a + b) * 0.5, piece.midY, piece.leadingZ + piece.chord * 0.5),
+                halfExtents: SIMD3<Float>(abs(b - a) * 0.5, piece.depth * 0.5, piece.chord * 0.5),
+                parentID: parent,
+                legacy: legacy,
+                id: id,
+                massWeight: perSideWeight * share,
+                strengthPerKg: perSideStrength * share
+            ))
+            let u0 = abs(a - centerX) / semiSpan, u1 = abs(b - centerX) / semiSpan
+            let schrenk = 0.5 * areas[index] / max(1e-6, semiArea)
+                + 0.5 * (ellipse(u1) - ellipse(u0)) / (Float.pi / 4)
+            stations.append(StationDraft(
+                id: id, memberID: "wing.\(side.rawValue)", index: index,
+                anchor: anchor, spanAxis: spanAxis, normalAxis: normal,
+                length: simd_distance(anchor, next), chord: piece.chord, depth: piece.depth,
+                loading: .wing(schrenkShare: schrenk), tipPoint: tip,
+                constantSection: false, symmetricFlap: false))
+            parent = id
+        }
+        return (drafts, stations)
     }
 
     private static func fixedWingDrafts(
         geometry: DroneVisualGeometrySample,
         includeLiftRotors: Bool,
         profile: DroneModelProfile
-    ) -> (drafts: [ComponentDraft], rotorSlots: [RotorSlotPair]) {
+    ) -> (drafts: [ComponentDraft], rotorSlots: [RotorSlotPair], stations: [StationDraft]) {
         let center = geometry.boundsCenter
         let size = geometry.boundsSize
         var drafts: [ComponentDraft] = []
+        var stations: [StationDraft] = []
         var rotorSlots: [RotorSlotPair] = []
 
         let fuselage = ComponentDraft(
             kind: .fuselage,
             position: center,
             halfExtents: SIMD3<Float>(
-                max(0.03, size.x * 0.07),
+                max(0.03, max(size.x * 0.07, geometry.fuselageHalfWidth)),
                 size.y * 0.42,
                 size.z * 0.46
             ),
@@ -444,91 +1080,118 @@ enum VehicleComponentGraphBuilder {
         // only half a fixed wing whenever both mappings existed.
         let wingBoxes = geometry.boxes(for: .armFL) + geometry.boxes(for: .armFR)
         let wingBounds = unionBounds(of: wingBoxes)
-        let wingCenter = wingBounds?.center ?? center
-        let wingHalfSpan = wingBounds?.halfExtents.x ?? size.x * 0.5
-        let wingHalfChord = max(0.03, wingBounds?.halfExtents.z ?? size.z * 0.16)
-        let wingHalfThickness = max(0.008, wingBounds?.halfExtents.y ?? size.y * 0.06)
-
+        let fallback = (
+            center: SIMD3<Float>(center.x, wingBounds?.center.y ?? center.y, wingBounds?.center.z ?? center.z),
+            halfExtents: SIMD3<Float>(
+                wingBounds?.halfExtents.x ?? size.x * 0.5,
+                max(0.008, wingBounds?.halfExtents.y ?? size.y * 0.06),
+                max(0.03, wingBounds?.halfExtents.z ?? size.z * 0.16)
+            )
+        )
         for side in [VehicleBodySide.left, .right] {
-            let sign: Float = side == .left ? -1.0 : 1.0
-            let rootCenter = SIMD3<Float>(
-                wingCenter.x + sign * wingHalfSpan * 0.25,
-                wingCenter.y,
-                wingCenter.z
-            )
-            let outerCenter = SIMD3<Float>(
-                wingCenter.x + sign * wingHalfSpan * 0.75,
-                wingCenter.y,
-                wingCenter.z
-            )
-            let sectionHalf = SIMD3<Float>(wingHalfSpan * 0.25, wingHalfThickness, wingHalfChord)
-            let legacy: DamageComponent = side == .left ? .armFL : .armFR
-            let root = ComponentDraft(
-                kind: .wingSection(side: side, segment: .root),
-                position: rootCenter,
-                halfExtents: sectionHalf,
-                parentID: fuselage.id,
-                legacy: legacy
-            )
-            drafts.append(root)
-            drafts.append(ComponentDraft(
-                kind: .wingSection(side: side, segment: .outer),
-                position: outerCenter,
-                halfExtents: sectionHalf,
-                parentID: root.id,
-                legacy: legacy
-            ))
+            let member = wingMember(side: side, geometry: geometry, fallback: fallback, parentID: fuselage.id)
+            drafts.append(contentsOf: member.drafts)
+            stations.append(contentsOf: member.stations)
         }
 
-        // Tail group at the rear extreme (+Z in the body frame — nose is -Z).
-        // A separate root lets one stabilizer fail locally while a stronger
-        // tail strike can detach the entire empennage as one dependent subtree.
-        let tailZ = center.z + size.z * 0.42
-        let tailSection = ComponentDraft(
-            kind: .tailSection,
-            position: SIMD3<Float>(center.x, center.y, center.z + size.z * 0.30),
-            halfExtents: SIMD3<Float>(
-                max(0.018, size.x * 0.055),
-                max(0.018, size.y * 0.12),
-                max(0.035, size.z * 0.14)
-            ),
-            parentID: fuselage.id,
-            legacy: nil
-        )
-        drafts.append(tailSection)
-        let horizontalHalfChord = max(0.03, size.z * 0.08)
-        let horizontalTail = ComponentDraft(
-            kind: .horizontalTail,
-            position: SIMD3<Float>(center.x, center.y, tailZ - horizontalHalfChord * 0.30),
-            halfExtents: SIMD3<Float>(size.x * 0.18, max(0.008, size.y * 0.05), horizontalHalfChord * 0.70),
-            parentID: tailSection.id,
-            legacy: .armRL
-        )
-        drafts.append(horizontalTail)
-        drafts.append(ComponentDraft(
-            kind: .elevator,
-            position: SIMD3<Float>(center.x, center.y, tailZ + horizontalHalfChord * 0.70),
-            halfExtents: SIMD3<Float>(size.x * 0.17, max(0.006, size.y * 0.04), horizontalHalfChord * 0.30),
-            parentID: horizontalTail.id,
-            legacy: .armRL
-        ))
+        // Tail group at the rear extreme (+Z in the body frame — nose is -Z): a boom carrying
+        // a two-piece stabiliser and a fin, each a chain of stations that can crack or fold
+        // anywhere along its length.
+        //
+        // ⚠️ Only if the aircraft has one. A flying wing's model draws no empennage, and the
+        // generic tail used to be added regardless: it put contact spheres, mass and — now —
+        // a load-bearing structure behind the trailing edge where nothing is drawn.
+        let hasTail = profile.airframeStyle != .flyingWing
+            && !(geometry.boxes(for: .armRL) + geometry.boxes(for: .armRR)).isEmpty
+            || (geometry.componentBoxes.isEmpty && profile.airframeStyle != .flyingWing)
+        if hasTail {
+            let tailZ = center.z + size.z * 0.42
+            let horizontalHalfChord = max(0.03, size.z * 0.08)
+            let verticalHalfChord = max(0.03, size.z * 0.08)
+            let horizontalArea = 0.36 * size.x * 1.4 * horizontalHalfChord
+            let verticalArea = 0.5 * size.y * 1.4 * verticalHalfChord
+            let tailCenter = SIMD3<Float>(center.x, center.y + size.y * 0.1, tailZ)
+            let boom = straightMember(
+                memberID: "tail.section",
+                kind: { _ in .tailSection },
+                root: SIMD3<Float>(center.x, center.y, center.z + size.z * 0.16),
+                axis: SIMD3<Float>(0, 0, 1),
+                normal: SIMD3<Float>(0, 1, 0),
+                length: size.z * 0.28,
+                count: shortMemberStationCount,
+                crossSection: SIMD2<Float>(2 * max(0.018, size.x * 0.055), 2 * max(0.018, size.y * 0.12)),
+                parentID: fuselage.id,
+                legacy: nil,
+                totalMassWeight: massWeight(for: .tailSection),
+                totalStrengthPerKg: strengthJPerKg(for: .tailSection),
+                loading: { index in
+                    index == shortMemberStationCount - 1
+                        ? .carriesTail(area: horizontalArea + verticalArea, center: tailCenter) : .none
+                },
+                constantSection: true,
+                symmetricFlap: true
+            )
+            drafts.append(contentsOf: boom.drafts)
+            stations.append(contentsOf: boom.stations)
+            let tailRoot = boom.drafts.last?.id ?? fuselage.id
 
-        let verticalHalfChord = max(0.03, size.z * 0.08)
-        let verticalTail = ComponentDraft(
-            kind: .verticalTail,
-            position: SIMD3<Float>(center.x, center.y + size.y * 0.25, tailZ - verticalHalfChord * 0.30),
-            halfExtents: SIMD3<Float>(max(0.008, size.x * 0.02), size.y * 0.25, verticalHalfChord * 0.70),
-            parentID: tailSection.id,
-            legacy: .armRR
-        )
-        drafts.append(verticalTail)
-        drafts.append(ComponentDraft(
-            kind: .rudder,
-            position: SIMD3<Float>(center.x, center.y + size.y * 0.25, tailZ + verticalHalfChord * 0.70),
-            halfExtents: SIMD3<Float>(max(0.006, size.x * 0.015), size.y * 0.23, verticalHalfChord * 0.30),
-            parentID: verticalTail.id,
-            legacy: .armRR
-        ))
+            for side in [VehicleBodySide.left, .right] {
+                let sign: Float = side == .left ? -1 : 1
+                let half = straightMember(
+                    memberID: "tail.horizontal.\(side.rawValue)",
+                    kind: { _ in .horizontalTail },
+                    root: SIMD3<Float>(center.x, center.y, tailZ - horizontalHalfChord * 0.30),
+                    axis: SIMD3<Float>(sign, 0, 0),
+                    normal: SIMD3<Float>(0, 1, 0),
+                    length: size.x * 0.18,
+                    count: shortMemberStationCount,
+                    crossSection: SIMD2<Float>(1.4 * horizontalHalfChord, 2 * max(0.008, size.y * 0.05)),
+                    parentID: tailRoot,
+                    legacy: .armRL,
+                    totalMassWeight: massWeight(for: .horizontalTail) * 0.5,
+                    totalStrengthPerKg: strengthJPerKg(for: .horizontalTail) * 0.5,
+                    loading: { _ in .liftingSurface },
+                    constantSection: false,
+                    symmetricFlap: true
+                )
+                drafts.append(contentsOf: half.drafts)
+                stations.append(contentsOf: half.stations)
+            }
+            drafts.append(ComponentDraft(
+                kind: .elevator,
+                position: SIMD3<Float>(center.x, center.y, tailZ + horizontalHalfChord * 0.70),
+                halfExtents: SIMD3<Float>(size.x * 0.17, max(0.006, size.y * 0.04), horizontalHalfChord * 0.30),
+                parentID: tailRoot,
+                legacy: .armRL
+            ))
+
+            let fin = straightMember(
+                memberID: "tail.vertical",
+                kind: { _ in .verticalTail },
+                root: SIMD3<Float>(center.x, center.y, tailZ - verticalHalfChord * 0.30),
+                axis: SIMD3<Float>(0, 1, 0),
+                normal: SIMD3<Float>(1, 0, 0),
+                length: size.y * 0.5,
+                count: shortMemberStationCount,
+                crossSection: SIMD2<Float>(1.4 * verticalHalfChord, 2 * max(0.008, size.x * 0.02)),
+                parentID: tailRoot,
+                legacy: .armRR,
+                totalMassWeight: massWeight(for: .verticalTail),
+                totalStrengthPerKg: strengthJPerKg(for: .verticalTail),
+                loading: { _ in .liftingSurface },
+                constantSection: false,
+                symmetricFlap: true
+            )
+            drafts.append(contentsOf: fin.drafts)
+            stations.append(contentsOf: fin.stations)
+            drafts.append(ComponentDraft(
+                kind: .rudder,
+                position: SIMD3<Float>(center.x, center.y + size.y * 0.25, tailZ + verticalHalfChord * 0.70),
+                halfExtents: SIMD3<Float>(max(0.006, size.x * 0.015), size.y * 0.23, verticalHalfChord * 0.30),
+                parentID: fin.drafts.first?.id ?? tailRoot,
+                legacy: .armRR
+            ))
+        }
 
         // Propulsion from the actual propeller geometry (pusher/tractor and,
         // for hybrid VTOL, the lift rotors as well).
@@ -609,7 +1272,7 @@ enum VehicleComponentGraphBuilder {
             legacy: nil
         ))
 
-        return (drafts, rotorSlots)
+        return (drafts, rotorSlots, stations)
     }
 
     // MARK: - Contact profile
@@ -838,12 +1501,24 @@ enum VehicleComponentGraphBuilder {
             spheres = Array(spheres.prefix(maximumContactSpheres))
         }
 
+        for index in spheres.indices {
+            guard let draft = drafts.first(where: { $0.id == spheres[index].componentID }) else { continue }
+            switch draft.kind {
+            case .landingGear: spheres[index].isGroundSupport = true
+            case .tailSection, .horizontalTail, .verticalTail:
+                spheres[index].isGroundSupport = profile.airframeStyle == .tailsitterVTOL
+            default: break
+            }
+        }
         var boundingRadius: Float = profile.collisionRadius
         for sphere in spheres {
             boundingRadius = max(boundingRadius, simd_length(sphere.offset) + sphere.radius)
         }
 
-        return VehicleContactProfile(spheres: spheres, boundingRadius: boundingRadius)
+        var contacts = VehicleContactProfile(spheres: spheres, boundingRadius: boundingRadius)
+        contacts.referenceGroundOffset = contacts.lowestPointOffset(
+            orientation: VehicleContactProfile.restOrientation(for: profile.airframeStyle))
+        return contacts
     }
 
     private static func addSurfaceContactGrid(
@@ -860,15 +1535,12 @@ enum VehicleComponentGraphBuilder {
             0.16,
             max(0.022, thicknessHalf * 1.5, min(primaryHalf, secondaryHalf) * 0.30)
         )
-        let preferredSpacing = max(0.04, radius * 1.75)
-        let primaryCount = min(
-            4,
-            max(1, Int((primaryHalf * 2.0 / preferredSpacing).rounded(.up)))
-        )
-        let secondaryCount = min(
-            3,
-            max(1, Int((secondaryHalf * 2.0 / preferredSpacing).rounded(.up)))
-        )
+        // The cell diagonal must fit inside its contact sphere. A fixed 4×3
+        // cap left metre-wide holes on large wings, while even 1.75r spacing
+        // leaves gaps at cell corners. Keep coverage at every aircraft scale.
+        let preferredSpacing = radius * 1.35
+        let primaryCount = max(1, Int((primaryHalf * 2.0 / preferredSpacing).rounded(.up)))
+        let secondaryCount = max(1, Int((secondaryHalf * 2.0 / preferredSpacing).rounded(.up)))
         let primaryInterval = primaryHalf * 2.0 / Float(primaryCount)
         let secondaryInterval = secondaryHalf * 2.0 / Float(secondaryCount)
 

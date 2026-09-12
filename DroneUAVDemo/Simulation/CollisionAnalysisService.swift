@@ -1047,7 +1047,8 @@ final class CollisionAnalysisService {
         toPosition: SIMD3<Float>,
         fromOrientation: simd_quatf,
         toOrientation: simd_quatf,
-        obstacles: [CollisionObstacle]
+        obstacles: [CollisionObstacle],
+        includesContact: (VehicleSweptContact) -> Bool = { _ in true }
     ) -> VehicleSweptContact? {
         guard !contactSpheres.isEmpty, !obstacles.isEmpty else {
             return nil
@@ -1092,7 +1093,7 @@ final class CollisionAnalysisService {
                     continue
                 }
                 let centerAtHit = start + (end - start) * hit.fraction
-                best = VehicleSweptContact(
+                let contact = VehicleSweptContact(
                     obstacle: obstacle,
                     componentID: sphere.componentID,
                     contactPoint: centerAtHit - hit.normal * sphere.radius,
@@ -1102,6 +1103,7 @@ final class CollisionAnalysisService {
                     sphereOffset: sphere.offset,
                     sphereRadius: sphere.radius
                 )
+                if includesContact(contact) { best = contact }
             }
         }
         return best

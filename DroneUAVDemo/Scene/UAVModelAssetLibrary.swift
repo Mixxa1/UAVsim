@@ -608,7 +608,7 @@ final class UAVModelAssetLibrary {
         if contains(["tail", "stabil", "elevator", "rudder", "fin", "boom", "empennage", "canard"]) {
             return left ? .armRL : .armRR
         }
-        if contains(["motor"]) {
+        if contains(["motor", "engine", "nacelle"]) {
             return corner(of: centre, centre: modelCentre, extent: modelExtent).motor
         }
         if contains(["blade", "prop", "rotor", "pusher", "tractor", "hub"]) {

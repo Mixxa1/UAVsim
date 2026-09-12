@@ -23,6 +23,7 @@ tr '\n' '\0' < "$BUILD/sources.txt" \
       DroneUAVDemo/Scene/DroneModelBuilder.swift \
       DroneUAVDemo/Scene/DroneVisualGeometrySample.swift \
       DroneUAVDemo/Scene/UAVVisualFactory.swift \
+      DroneUAVDemo/Scene/UAVModelAssetLibrary.swift \
       Tools/WingtraGroundProbe/main.swift
 
 "$BUILD/probe" "$@"

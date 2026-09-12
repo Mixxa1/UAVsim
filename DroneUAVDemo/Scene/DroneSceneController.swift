@@ -388,16 +388,9 @@ final class DroneSceneController {
     private var pendingDetachedVehiclePartImpactEvents: [DetachedVehiclePartImpactEvent] = []
     private let detachedVehiclePartCollisionService = CollisionAnalysisService()
     private(set) var detachedVehicleComponentIDs: Set<String> = []
-    private var detachedVehicleLegacyComponents: Set<DamageComponent> = []
     private var detachedVehicleVisualNodeIDs: Set<ObjectIdentifier> = []
     private var batteryFireFlameNode: SCNNode?
     private var batteryFireSmokeNode: SCNNode?
-    /// Some procedural fixed-wing models use one render node for both wing
-    /// halves, while the physical graph has root/outer sections per side.
-    /// Once only part of such a node remains attached, compact section boxes
-    /// replace that indivisible source mesh so the visual topology continues
-    /// to match the authoritative graph.
-    private let retainedVehicleSectionProxiesNode = SCNNode()
     private var visualBoundsCenter = SIMD3<Float>(repeating: 0.0)
     private var visualBoundsSize = SIMD3<Float>(repeating: 0.36)
     private var cachedSubjectScale: Float = 0.36
@@ -566,10 +559,9 @@ final class DroneSceneController {
     private var pathDebugSignature: Int = 0
     private var lastWeatherVisualSignature: Int?
     private var lastComponentOverlaySignature: Int?
-    private var undeformedComponentTransforms: [ObjectIdentifier: simd_float4x4] = [:]
+    private var componentVisualBinding: VehicleComponentVisualBinding?
     /// The nodes carrying a deformation right now — the only ones the next pass has to
     /// restore. Usually empty, which is the point.
-    private var deformedComponentNodes: [SCNNode] = []
     private var lastTerrainConfig: TerrainConfiguration?
     private var lastGeneratedCityKey: CityGenerationKey?
     private let snowDecorationsNode = SCNNode()
@@ -680,9 +672,6 @@ final class DroneSceneController {
         self.currentVisualGeometry = DroneVisualGeometrySample.capture(from: droneVisual)
 
         scene.rootNode.addChildNode(droneNode)
-
-        retainedVehicleSectionProxiesNode.name = "retainedVehicleSectionProxiesNode"
-        visualRootNode.addChildNode(retainedVehicleSectionProxiesNode)
 
         detachedVehiclePartsRootNode.name = "detachedVehiclePartsRootNode"
         scene.rootNode.addChildNode(detachedVehiclePartsRootNode)
@@ -1582,11 +1571,14 @@ final class DroneSceneController {
         if token == "cameragimbal" { return .frontCameraGimbal }
         if token.hasPrefix("wing.left") { return .armFL }
         if token.hasPrefix("wing.right") { return .armFR }
-        if token == "tail.horizontal" { return .armRL }
-        if token == "tail.vertical" { return .armRR }
+        // Tail surfaces are chains of stations ("tail.horizontal.left.s02").
+        if token.hasPrefix("tail.horizontal") || token == "tail.elevator" { return .armRL }
+        if token.hasPrefix("tail.vertical") || token == "tail.rudder" { return .armRR }
 
-        let slot = id.split(separator: ".").last.map(String.init)?.uppercased()
-        switch (id.split(separator: ".").first.map(String.init), slot) {
+        // "arm.FL", "arm.FL.s02", "motor.FL": the slot is the second token, whatever follows.
+        let tokens = id.split(separator: ".").map(String.init)
+        let slot = tokens.count > 1 ? tokens[1].uppercased() : nil
+        switch (tokens.first, slot) {
         case ("arm", "FL"): return .armFL
         case ("arm", "FR"): return .armFR
         case ("arm", "RL"): return .armRL
@@ -4581,7 +4573,6 @@ final class DroneSceneController {
     /// the post-fracture world-space solution calculated at the failed joint.
     func spawnDetachedVehiclePart(
         _ part: VehicleDetachedSubtree,
-        retainedLegacyComponents: Set<DamageComponent>,
         vehicleWorldPosition: SIMD3<Float>,
         vehicleOrientation: simd_quatf,
         inheritedVelocity: SIMD3<Float>,
@@ -4596,40 +4587,9 @@ final class DroneSceneController {
         }
         detachedVehiclePartCollisionRuntime.removeValue(forKey: key)
 
-        // A fixed-wing root and outer section can share one legacy visual
-        // node. Only clone/hide that full node when every graph component
-        // represented by it left the airframe; otherwise use the subtree's
-        // physical fallback bounds for the fragment and retain the root.
-        let fullyDetachedLegacyComponents = part.legacyComponents
-            .subtracting(retainedLegacyComponents)
-        var sourceNodes = detachedVisualSourceNodes(for: fullyDetachedLegacyComponents)
+        let sourceEntries = (componentVisualBinding?.entries ?? []).filter { part.componentIDs.contains($0.componentID) }
+        let sourceNodes = sourceEntries.map(\.node)
         detachedVehicleComponentIDs.formUnion(part.componentIDs)
-        detachedVehicleLegacyComponents.formUnion(fullyDetachedLegacyComponents)
-
-        // A wing that breaks halfway out still has to be a wing on the ground.
-        //
-        // The four legacy arm buckets cannot express half of one: the graph splits a
-        // wing into `wing.left.root` and `wing.left.outer` and both carry `.armFL`, so
-        // when only the outer panel fails the bucket is still retained, the subtraction
-        // above comes out empty, and the fragment fell back to a bare box with the debris
-        // material — a grey rectangle sliding across the runway where an outer wing panel
-        // should be. Selecting by the geometry that actually lies inside the detached
-        // subtree's own volume asks the question the buckets cannot: not "did this whole
-        // bucket leave" but "which meshes went with it".
-        var geometricallyDetachedNodes: [SCNNode] = []
-        if sourceNodes.isEmpty {
-            geometricallyDetachedNodes = visualNodes(
-                within: part.localBoundsCenter,
-                halfExtents: part.localBoundsHalfExtents,
-                ownedBy: part.legacyComponents
-            )
-            sourceNodes = geometricallyDetachedNodes
-            // They left with the fragment, so they stop being drawn on the aircraft.
-            for node in geometricallyDetachedNodes {
-                detachedVehicleVisualNodeIDs.insert(ObjectIdentifier(node))
-                node.isHidden = true
-            }
-        }
 
         let minimumHalfExtent: Float = 0.018
         let halfExtents = simd_max(
@@ -4651,54 +4611,30 @@ final class DroneSceneController {
         partNode.simdOrientation = vehicleOrientation
         detachedVehiclePartsRootNode.addChildNode(partNode)
 
-        let partWorldTransformInverse = simd_inverse(partNode.simdWorldTransform)
+        var vehicleTransform = simd_float4x4(vehicleOrientation)
+        vehicleTransform.columns.3 = SIMD4<Float>(vehicleWorldPosition, 1)
         var installedVisualClone = false
-        for sourceNode in sourceNodes {
-            let sourceWorldTransform = sourceNode.presentation.simdWorldTransform
-            let clone = sourceNode.clone()
-            prepareDetachedVehiclePartClone(clone)
-            clone.simdTransform = simd_mul(partWorldTransformInverse, sourceWorldTransform)
+        for entry in sourceEntries {
+            let clone = VehicleDetachedPartPhysics.snapshot(entry.node, bodyFrame: droneNode,
+                vehicleTransform: vehicleTransform, partTransform: partNode.simdWorldTransform)
+            makeMaterialsIndependent(clone)
+            if entry.componentID == part.rootComponentID {
+                // The piece that tore off shows the inside of its broken shell.
+                clone.enumerateHierarchy { node, _ in
+                    node.geometry?.materials.forEach { $0.isDoubleSided = true }
+                }
+            }
+            applyCategoryBitMask(RenderCategory.standardVisible, to: clone)
             partNode.addChildNode(clone)
             installedVisualClone = true
+        }
+        // ...and so does the stump it left on the aircraft.
+        if let parent = part.components.first(where: { $0.id == part.rootComponentID })?.parentID {
+            componentVisualBinding?.exposeFracture(components: [parent])
         }
         if !installedVisualClone {
             partNode.geometry = box
         }
-
-        let shape = SCNPhysicsShape(
-            geometry: box,
-            options: [SCNPhysicsShape.Option.type: SCNPhysicsShape.ShapeType.boundingBox]
-        )
-        let body = SCNPhysicsBody(type: .dynamic, shape: shape)
-        body.mass = CGFloat(max(0.005, part.massProperties.totalMassKg))
-        body.centerOfMassOffset = SCNVector3(
-            part.massProperties.centerOfMassOffset.x - part.localBoundsCenter.x,
-            part.massProperties.centerOfMassOffset.y - part.localBoundsCenter.y,
-            part.massProperties.centerOfMassOffset.z - part.localBoundsCenter.z
-        )
-        body.usesDefaultMomentOfInertia = false
-        body.momentOfInertia = SCNVector3(
-            max(0.000_01, part.massProperties.inertiaDiagonal.x),
-            max(0.000_01, part.massProperties.inertiaDiagonal.y),
-            max(0.000_01, part.massProperties.inertiaDiagonal.z)
-        )
-        body.isAffectedByGravity = true
-        body.allowsResting = true
-        body.friction = 0.72
-        body.rollingFriction = 0.18
-        body.restitution = 0.14
-        body.damping = 0.035
-        body.angularDamping = 0.055
-        body.continuousCollisionDetectionThreshold = CGFloat(
-            max(0.008, min(halfExtents.x, halfExtents.y, halfExtents.z) * 0.35)
-        )
-        // Manual environment geometry is resolved analytically below. Keeping
-        // the `.drone` bit here would also activate abandoned-city SceneKit
-        // mesh bodies (their masks target `.drone`) and apply the same impact
-        // twice. Ground and debris/debris contacts use the dedicated bit.
-        body.categoryBitMask = PhysicsCategory.detachedVehiclePart
-        body.collisionBitMask = PhysicsCategory.environment | PhysicsCategory.detachedVehiclePart | PhysicsCategory.drone
-        body.contactTestBitMask = PhysicsCategory.environment | PhysicsCategory.detachedVehiclePart | PhysicsCategory.drone
 
         let worldAngularVelocity = initialAngularVelocityWorld ??
             simd_act(vehicleOrientation, inheritedAngularVelocity)
@@ -4709,16 +4645,8 @@ final class DroneSceneController {
         let centerOfMassVelocity = initialCenterOfMassVelocityWorld ?? (
             inheritedVelocity + simd_cross(worldAngularVelocity, worldCenterOfMassOffset)
         )
-        body.velocity = SCNVector3(
-            centerOfMassVelocity.x,
-            centerOfMassVelocity.y,
-            centerOfMassVelocity.z
-        )
-        let angularSpeed = simd_length(worldAngularVelocity)
-        if angularSpeed > 0.0001 {
-            let axis = worldAngularVelocity / angularSpeed
-            body.angularVelocity = SCNVector4(axis.x, axis.y, axis.z, angularSpeed)
-        }
+        let body = VehicleDetachedPartPhysics.makeBody(part: part, shapeGeometry: box,
+            velocity: centerOfMassVelocity, angularVelocity: worldAngularVelocity)
         partNode.physicsBody = body
         detachedVehiclePartNodes[key] = partNode
         let contactSpheres = detachedPartContactSpheres(
@@ -4744,11 +4672,9 @@ final class DroneSceneController {
             lastColliderID: nil
         )
 
-        for legacyComponent in fullyDetachedLegacyComponents {
-            for sourceNode in componentNodes[legacyComponent] ?? [] {
-                detachedVehicleVisualNodeIDs.insert(ObjectIdentifier(sourceNode))
-                sourceNode.isHidden = true
-            }
+        for source in sourceNodes {
+            detachedVehicleVisualNodeIDs.insert(ObjectIdentifier(source))
+            source.isHidden = true
         }
         lastComponentOverlaySignature = nil
 
@@ -4780,9 +4706,10 @@ final class DroneSceneController {
 
         let previouslyHiddenNodeIDs = detachedVehicleVisualNodeIDs
         detachedVehicleComponentIDs.removeAll()
-        detachedVehicleLegacyComponents.removeAll()
         detachedVehicleVisualNodeIDs.removeAll()
-        retainedVehicleSectionProxiesNode.childNodes.forEach { $0.removeFromParentNode() }
+        for entry in componentVisualBinding?.entries ?? [] {
+            entry.node.isHidden = false
+        }
         for nodes in componentNodes.values {
             for node in nodes where previouslyHiddenNodeIDs.contains(ObjectIdentifier(node)) {
                 node.isHidden = false
@@ -4843,93 +4770,11 @@ final class DroneSceneController {
         }
     }
 
-    /// Reconciles indivisible legacy meshes with the graph after one or more
-    /// subtrees detach. Normal, independently mapped source nodes keep their
-    /// original high-detail geometry. Shared or partially detached nodes are
-    /// hidden and only their still-attached physical sections are redrawn.
+    /// Physical ownership is preserved after every fracture, including meshes
+    /// partitioned into multiple wing sections when the aircraft was built.
     func reconcileDetachedVehicleVisuals(_ graph: VehicleComponentGraph) {
-        retainedVehicleSectionProxiesNode.childNodes.forEach { $0.removeFromParentNode() }
-        if retainedVehicleSectionProxiesNode.parent !== visualRootNode {
-            retainedVehicleSectionProxiesNode.removeFromParentNode()
-            visualRootNode.addChildNode(retainedVehicleSectionProxiesNode)
-        }
-
-        let attachedLegacy = Set(graph.attachedComponents.compactMap(\.legacyComponent))
-        let detachedLegacy = Set(
-            graph.components.lazy
-                .filter { !$0.isAttached }
-                .compactMap(\.legacyComponent)
-        )
-        let partiallyDetachedLegacy = attachedLegacy.intersection(detachedLegacy)
-        var proxyLegacy = partiallyDetachedLegacy
-
-        // A node may be registered in both armFL and armFR (or both tail
-        // buckets). If any of its owners detached, the mesh cannot represent
-        // the remaining topology and must be replaced for every retained owner.
-        var ownersByNodeID: [ObjectIdentifier: Set<DamageComponent>] = [:]
-        var nodeByID: [ObjectIdentifier: SCNNode] = [:]
-        for (legacy, nodes) in componentNodes {
-            for node in nodes {
-                let id = ObjectIdentifier(node)
-                ownersByNodeID[id, default: []].insert(legacy)
-                nodeByID[id] = node
-            }
-        }
-        for (nodeID, owners) in ownersByNodeID {
-            let hasDetachedOwner = !owners.intersection(detachedLegacy).isEmpty
-            let retainedOwners = owners.intersection(attachedLegacy)
-            guard hasDetachedOwner, !retainedOwners.isEmpty,
-                  let node = nodeByID[nodeID] else { continue }
-            node.isHidden = true
-            detachedVehicleVisualNodeIDs.insert(nodeID)
-            proxyLegacy.formUnion(retainedOwners)
-        }
-
-        for legacy in partiallyDetachedLegacy {
-            for node in componentNodes[legacy] ?? [] {
-                node.isHidden = true
-                detachedVehicleVisualNodeIDs.insert(ObjectIdentifier(node))
-            }
-        }
-
-        for component in graph.attachedComponents
-        where component.kind.isStructural {
-            guard let legacy = component.legacyComponent,
-                  proxyLegacy.contains(legacy) else { continue }
-
-            let halfExtents = simd_max(
-                component.boundingHalfExtents,
-                SIMD3<Float>(repeating: 0.006)
-            )
-            let geometry = SCNBox(
-                width: CGFloat(halfExtents.x * 2.0),
-                height: CGFloat(halfExtents.y * 2.0),
-                length: CGFloat(halfExtents.z * 2.0),
-                chamferRadius: CGFloat(min(halfExtents.x, halfExtents.y, halfExtents.z) * 0.08)
-            )
-            if let sourceMaterial = componentNodes[legacy]?
-                .lazy
-                .compactMap({ $0.geometry?.firstMaterial })
-                .first,
-               let material = sourceMaterial.copy() as? SCNMaterial {
-                geometry.materials = [material]
-            } else {
-                geometry.materials = [detachedVehiclePartFallbackMaterial()]
-            }
-
-            let proxy = SCNNode(geometry: geometry)
-            proxy.name = "retainedVehicleSection.\(component.id)"
-            proxy.simdPosition = component.localPosition + component.deformation.translationMeters
-            let bend = component.deformation.bendRadians
-            let bendMagnitude = simd_length(bend)
-            if bendMagnitude > 0.0001 {
-                proxy.simdOrientation = simd_quatf(
-                    angle: min(Float(25.0).degreesToRadians, bendMagnitude),
-                    axis: bend / bendMagnitude
-                )
-            }
-            retainedVehicleSectionProxiesNode.addChildNode(proxy)
-        }
+        componentVisualBinding?.apply(graph)
+        exposeHingedFractures(graph)
         lastComponentOverlaySignature = nil
     }
 
@@ -5013,7 +4858,8 @@ final class DroneSceneController {
                 toPosition: currentPosition,
                 fromOrientation: runtime.previousWorldOrientation,
                 toOrientation: currentOrientation,
-                obstacles: candidates
+                obstacles: candidates,
+                includesContact: { !ImpactResolutionService.isPenetrable($0) }
             ) else {
                 runtime.previousWorldPosition = currentPosition
                 runtime.previousWorldOrientation = currentOrientation
@@ -5044,13 +4890,16 @@ final class DroneSceneController {
             let contactLever = contact.contactPoint - worldCenterOfMass
             let contactVelocity = velocity + simd_cross(angularVelocity, contactLever)
             let closingSpeed = max(0.0, -simd_dot(contactVelocity, normal))
-            let correctedPosition = runtime.previousWorldPosition +
-                (currentPosition - runtime.previousWorldPosition) * contact.hitFraction +
-                normal * 0.003
-            node.simdWorldPosition = correctedPosition
-            body.resetTransform()
-
+            // A fragment already leaving a contact must keep its integrated
+            // position. Rewinding every overlap to t=0 freezes it in mid-air.
+            let correctedPosition = closingSpeed > 0.02
+                ? runtime.previousWorldPosition +
+                    (currentPosition - runtime.previousWorldPosition) * contact.hitFraction + normal * 0.003
+                : currentPosition
             if closingSpeed > 0.02 {
+                node.simdWorldPosition = correctedPosition
+                node.simdWorldOrientation = currentOrientation
+                body.resetTransform()
                 let restitution: Float = 0.14
                 let leverCrossNormal = simd_cross(contactLever, normal)
                 let leverCrossNormalLocal = simd_act(
@@ -5135,16 +4984,7 @@ final class DroneSceneController {
     func restoreDetachedVehicleComponentVisibility(_ graph: VehicleComponentGraph) {
         clearDetachedVehicleParts()
         let detached = graph.components.filter { !$0.isAttached }
-        let retainedLegacy = Set(graph.attachedComponents.compactMap(\.legacyComponent))
         detachedVehicleComponentIDs = Set(detached.map(\.id))
-        detachedVehicleLegacyComponents = Set(detached.compactMap(\.legacyComponent))
-            .subtracting(retainedLegacy)
-        for component in detachedVehicleLegacyComponents {
-            for node in componentNodes[component] ?? [] {
-                detachedVehicleVisualNodeIDs.insert(ObjectIdentifier(node))
-                node.isHidden = true
-            }
-        }
         reconcileDetachedVehicleVisuals(graph)
         lastComponentOverlaySignature = nil
     }
@@ -5152,78 +4992,22 @@ final class DroneSceneController {
     /// Applies permanent structural bend/translation without accumulating a
     /// transform every frame. The component graph remains authoritative;
     /// pristine/reset graphs restore the exact original node transforms.
-    func applyVehicleComponentDeformations(_ graph: VehicleComponentGraph) {
-        // ⚠️ Only the nodes that were actually bent last time get their transform put
-        // back, not every mapped node on the aircraft.
-        //
-        // This runs on every physics tick once anything at all is damaged
-        // (`refreshDamagePhysicsModels` is called from the failure runtime's tick), and
-        // the authored models map an order of magnitude more nodes than the procedural
-        // rigs did — 117 on an MQ-9B against about fifteen. Rewriting all of them 90
-        // times a second to the value they already hold is pure cost.
-        //
-        // It was also wrong. The propeller spin nodes are mapped like any other
-        // geometry, so the reset overwrote the rotation `updatePropellers` had just
-        // written and a damaged aircraft's propellers stopped turning. Deformation is
-        // redirected to the rotor's mount — the parent that carries its position and
-        // shaft aim — which bends the propeller with its pod and leaves the spin alone.
-        for node in deformedComponentNodes {
-            if let baseline = undeformedComponentTransforms[ObjectIdentifier(node)] {
-                node.simdTransform = baseline
-            }
-        }
-        deformedComponentNodes.removeAll(keepingCapacity: true)
-
-        var strongestByLegacy: [DamageComponent: VehicleComponentDeformation] = [:]
-        for component in graph.components where component.isAttached {
-            guard let legacy = component.legacyComponent else { continue }
-            let deformation = component.deformation
-            let magnitude = simd_length(deformation.bendRadians) +
-                simd_length(deformation.translationMeters) * 4.0
-            let existingMagnitude = strongestByLegacy[legacy].map {
-                simd_length($0.bendRadians) + simd_length($0.translationMeters) * 4.0
-            } ?? -1.0
-            if magnitude > existingMagnitude {
-                strongestByLegacy[legacy] = deformation
-            }
-        }
-
-        for (legacy, deformation) in strongestByLegacy {
-            let rawAngle = simd_length(deformation.bendRadians)
-            let hasBend = rawAngle > 0.0001
-            let hasShift = simd_length_squared(deformation.translationMeters) > 1e-10
-            guard hasBend || hasShift else { continue }
-
-            for mapped in componentNodes[legacy] ?? [] {
-                guard let node = deformationTarget(for: mapped) else { continue }
-                let key = ObjectIdentifier(node)
-                if undeformedComponentTransforms[key] == nil {
-                    undeformedComponentTransforms[key] = node.simdTransform
-                }
-                if hasBend {
-                    let angle = min(Float(25.0) * .pi / 180.0, rawAngle)
-                    let axis = deformation.bendRadians / rawAngle
-                    node.simdOrientation = node.simdOrientation * simd_quatf(angle: angle, axis: axis)
-                }
-                node.simdPosition += deformation.translationMeters
-                deformedComponentNodes.append(node)
-            }
-        }
+    /// A panel folded on its torn skin is open at the break on both sides.
+    private func exposeHingedFractures(_ graph: VehicleComponentGraph) {
+        let broken = graph.structuralConnections.filter { $0.fracture != .intact && $0.state != .detached }
+        guard !broken.isEmpty else { return }
+        componentVisualBinding?.exposeFracture(
+            components: Set(broken.flatMap { [$0.childComponentID, $0.parentComponentID] }))
     }
 
-    /// Where a component's bend is actually applied.
-    ///
-    /// For most geometry that is the node itself. A propeller is the exception: the node
-    /// mapped into the damage buckets is the one the simulator spins, so writing a
-    /// deformation onto it puts the two in a fight the spin loses. The rotor mount above
-    /// it carries the same pose without being touched every frame, so the pod bends and
-    /// the disc keeps turning. A propeller with no such mount — the procedural rigs
-    /// attach theirs straight to the airframe root — is left alone rather than bending
-    /// the whole aircraft.
-    private func deformationTarget(for node: SCNNode) -> SCNNode? {
-        guard propellerNodes.contains(where: { $0 === node }) else { return node }
-        guard let mount = node.parent, mount.name?.hasPrefix("rotorMount.") == true else { return nil }
-        return mount
+    func applyVehicleComponentDeformations(_ graph: VehicleComponentGraph) {
+        if componentVisualBinding == nil {
+            componentVisualBinding = VehicleComponentVisualBinding(
+                root: visualRootNode, bodyFrame: droneNode, legacyNodes: componentNodes,
+                propellers: propellerNodes, graph: graph)
+        }
+        componentVisualBinding?.apply(graph)
+        exposeHingedFractures(graph)
     }
 
     func dollyFreeCamera(by step: Float) {
@@ -5324,17 +5108,13 @@ final class DroneSceneController {
         propellerNodes = droneVisual.propellerNodes
         spinDirections = droneVisual.propellerSpinDirections
         componentNodes = droneVisual.componentNodes
-        undeformedComponentTransforms.removeAll(keepingCapacity: false)
-        // The old aircraft's nodes are gone; nothing here is still bent.
-        deformedComponentNodes.removeAll(keepingCapacity: false)
+        componentVisualBinding = nil
         spinAngles = Array(repeating: 0.0, count: propellerNodes.count)
         tiltPivotNodes = droneVisual.tiltPivotNodes
         visualBoundsCenter = droneVisual.visualBoundsCenter
         visualBoundsSize = droneVisual.visualBoundsSize
         cachedSubjectScale = droneVisual.subjectScale
         currentVisualGeometry = DroneVisualGeometrySample.capture(from: droneVisual)
-        retainedVehicleSectionProxiesNode.removeFromParentNode()
-        visualRootNode.addChildNode(retainedVehicleSectionProxiesNode)
         fpvLookAngles = .zero
         orbitLookAngles = .zero
         topLookAngles = .zero
@@ -11335,101 +11115,6 @@ final class DroneSceneController {
         detachedVehiclePartsGroundNode.simdPosition = SIMD3<Float>(0.0, -0.053, 0.0)
         detachedVehiclePartsGroundNode.physicsBody = body
         scene.rootNode.addChildNode(detachedVehiclePartsGroundNode)
-    }
-
-    /// Select only the highest mapped nodes. Some builders map a parent and
-    /// one of its children to the same legacy damage component; cloning both
-    /// would duplicate the child geometry in the detached proxy.
-    /// The aircraft's own meshes that lie inside a detached subtree's volume.
-    ///
-    /// Restricted to the buckets the subtree claims, so a wing fragment can only take
-    /// wing geometry — the box is in the flight-root frame and a generous one, and
-    /// without that restriction a fuselage panel standing inside the same volume would
-    /// fly away with the wing. Membership is by the node's centre rather than by overlap:
-    /// a mesh is either mostly inside the broken-off section or it is not, and a wing
-    /// skin that straddles the fracture belongs to the half that holds most of it.
-    private func visualNodes(
-        within center: SIMD3<Float>,
-        halfExtents: SIMD3<Float>,
-        ownedBy legacyComponents: Set<DamageComponent>
-    ) -> [SCNNode] {
-        let limits = simd_max(halfExtents, SIMD3<Float>(repeating: 0.02))
-        var seen: Set<ObjectIdentifier> = []
-        var selected: [SCNNode] = []
-        for legacy in legacyComponents.sorted(by: { $0.rawValue < $1.rawValue }) {
-            for node in componentNodes[legacy] ?? [] {
-                guard node.geometry != nil,
-                      seen.insert(ObjectIdentifier(node)).inserted,
-                      !detachedVehicleVisualNodeIDs.contains(ObjectIdentifier(node)) else { continue }
-                let box = node.boundingBox
-                let localCenter = SIMD3<Float>(
-                    Float(box.min.x + box.max.x) * 0.5,
-                    Float(box.min.y + box.max.y) * 0.5,
-                    Float(box.min.z + box.max.z) * 0.5
-                )
-                let inFlightFrame = droneNode.simdConvertPosition(localCenter, from: node)
-                let offset = simd_abs(inFlightFrame - center)
-                if offset.x <= limits.x, offset.y <= limits.y, offset.z <= limits.z {
-                    selected.append(node)
-                }
-            }
-        }
-        return selected
-    }
-
-    private func detachedVisualSourceNodes(
-        for legacyComponents: Set<DamageComponent>
-    ) -> [SCNNode] {
-        var candidates: [SCNNode] = []
-        var seen: Set<ObjectIdentifier> = []
-        for component in legacyComponents.sorted(by: { $0.rawValue < $1.rawValue }) {
-            for node in componentNodes[component] ?? [] {
-                let identifier = ObjectIdentifier(node)
-                if seen.insert(identifier).inserted {
-                    candidates.append(node)
-                }
-            }
-        }
-
-        // A mesh registered under several legacy buckets is indivisible (a
-        // common example is one full-span wing used by armFL + armFR). It
-        // cannot be an accurate detached subtree, so let the physical-bounds
-        // fallback represent the debris and rebuild retained sections below.
-        let ownershipCount: [ObjectIdentifier: Int] = componentNodes.reduce(into: [:]) { result, entry in
-            for node in Set(entry.value.map(ObjectIdentifier.init)) {
-                result[node, default: 0] += 1
-            }
-        }
-        candidates.removeAll { ownershipCount[ObjectIdentifier($0), default: 0] > 1 }
-
-        let candidateIDs = Set(candidates.map(ObjectIdentifier.init))
-        return candidates.filter { candidate in
-            var ancestor = candidate.parent
-            while let node = ancestor {
-                if candidateIDs.contains(ObjectIdentifier(node)) {
-                    return false
-                }
-                ancestor = node.parent
-            }
-            return true
-        }
-    }
-
-    private func prepareDetachedVehiclePartClone(_ node: SCNNode) {
-        node.physicsBody = nil
-        node.camera = nil
-        node.light = nil
-        node.removeAllActions()
-        node.isHidden = false
-        node.opacity = 1.0
-        node.enumerateChildNodes { child, _ in
-            child.physicsBody = nil
-            child.camera = nil
-            child.light = nil
-            child.removeAllActions()
-        }
-        makeMaterialsIndependent(node)
-        applyCategoryBitMask(RenderCategory.standardVisible, to: node)
     }
 
     private func detachedVehiclePartFallbackMaterial() -> SCNMaterial {

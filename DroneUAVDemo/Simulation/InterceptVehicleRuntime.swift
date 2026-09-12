@@ -256,7 +256,7 @@ final class InterceptVehicleRuntime {
             && state.damageCondition != .destroyed
         let legacy = graph.projectedLegacyDamageState(base: .pristine)
 
-        let context = DroneSimulationContext(
+        var context = DroneSimulationContext(
             profile: profile,
             activeUAVProfile: profile.resolvedUAVProfile,
             weather: weather,
@@ -274,6 +274,7 @@ final class InterceptVehicleRuntime {
             controlSystemFactor: controller,
             groundHeight: groundHeight - contactProfile.boundingRadius - Self.physicsFloorClearance
         )
+        context.rotationalDragElements = graph.rotationalDragElements()
         let input = isFixedWing
             ? fixedWingInput(aimPoint: desiredPosition, groundHeight: groundHeight, canPower: canPower, deltaTime: deltaTime)
             : DroneControlInput(
@@ -289,10 +290,8 @@ final class InterceptVehicleRuntime {
         state.armState = canPower ? .armed : .disarmed
 
         var reports: [ImpactReport] = []
-        if let report = resolveObstacleContact(obstacles: obstacles, rotorsSpinning: canPower, deltaTime: deltaTime) {
-            reports.append(report)
-        }
-        if let report = resolveGroundContact(groundHeight: groundHeight, rotorsSpinning: canPower, deltaTime: deltaTime) {
+        reports.append(contentsOf: resolveObstacleContacts(obstacles: obstacles, rotorsSpinning: state.hasRotorMotion, deltaTime: deltaTime))
+        if let report = resolveGroundContact(groundHeight: groundHeight, rotorsSpinning: state.hasRotorMotion, deltaTime: deltaTime) {
             reports.append(report)
         }
 
@@ -408,19 +407,35 @@ final class InterceptVehicleRuntime {
         )
     }
 
-    private func resolveObstacleContact(
+    private func resolveObstacleContacts(
         obstacles: [CollisionObstacle],
         rotorsSpinning: Bool,
         deltaTime: Float
-    ) -> ImpactReport? {
+    ) -> [ImpactReport] {
+        var reports: [ImpactReport] = []
+        // Tree crowns are flown through for as long as the aircraft is in them, the same as
+        // for the player's aircraft.
+        for crown in obstacles where ImpactResolutionService.isTreeCrown(crown) {
+            if let report = impactResolver.resolveCrownPassage(
+                canopy: crown, previousPosition: previousState.position, state: &state, graph: &graph,
+                massProperties: graph.massProperties, airframeClass: profile.airframeClass,
+                rotorsSpinning: rotorsSpinning, deltaTime: deltaTime) {
+                receive(report)
+                if report.normalClosingSpeed > 0.05 || !report.damage.isEmpty { reports.append(report) }
+            }
+        }
+        for penetrable in [true, false] {
         guard let contact = collision.firstSweptVehicleCollision(
             contactSpheres: contactProfile.spheres,
             fromPosition: previousState.position,
             toPosition: state.position,
             fromOrientation: previousState.attitudeQuat,
             toOrientation: state.attitudeQuat,
-            obstacles: obstacles
-        ) else { return nil }
+            obstacles: obstacles,
+            includesContact: { ImpactResolutionService.isPenetrable($0) == penetrable
+                && !ImpactResolutionService.isTreeCrown($0.obstacle)
+                && !ImpactResolutionService.isTreeTrunkProxy($0.obstacle) }
+        ) else { continue }
         let report = impactResolver.resolve(
             contact: contact,
             previousPosition: previousState.position,
@@ -432,73 +447,42 @@ final class InterceptVehicleRuntime {
             deltaTime: deltaTime
         )
         receive(report)
+        if !penetrable { state.groundApproach = nil }
         // A sub-centimetre-per-second brush is the solver settling, not an event.
-        return report.normalClosingSpeed > 0.05 ? report : nil
+        if report.normalClosingSpeed > 0.05 || !report.damage.isEmpty { reports.append(report) }
+        }
+        return reports
     }
 
-    /// Terrain contact. Only the first touch of a landing/crash produces damage and an event; the
-    /// aircraft then rests on the surface without the resolver restarting every tick.
-    private func resolveGroundContact(
-        groundHeight: Float,
-        rotorsSpinning: Bool,
-        deltaTime: Float
-    ) -> ImpactReport? {
-        guard let lowest = contactProfile.lowestContact(position: state.position, orientation: state.attitudeQuat),
-              lowest.point.y <= groundHeight else {
+    /// Uses the same component contacts, abrasion and secondary impacts as
+    /// the player aircraft. A prior touchdown cannot immunize a target.
+    private func resolveGroundContact(groundHeight: Float, rotorsSpinning: Bool, deltaTime: Float) -> ImpactReport? {
+        let obstacle = CollisionObstacle(id: groundID,
+            center: SIMD3<Float>(state.position.x, groundHeight, state.position.z),
+            radius: 10000, source: InterceptContactSource.terrain,
+            baseY: groundHeight - 1, topY: groundHeight, acousticSurface: .soil)
+        let reports = VehicleGroundContactSolver().resolve(previousState: previousState,
+            state: &state, graph: &graph, profile: contactProfile, massProperties: graph.massProperties,
+            airframeClass: profile.airframeClass, obstacle: obstacle,
+            hasWheels: profile.fixedWingParameters?.hasWheeledUndercarriage ?? false,
+            rotorsSpinning: rotorsSpinning, deltaTime: deltaTime, skinMaterial: profile.skinMaterial)
+        for report in reports { receive(report) }
+        let lowest = contactProfile.lowestPointY(position: state.position, orientation: state.attitudeQuat)
+        guard lowest <= groundHeight + 0.035 else {
             wasGrounded = false
             state.motionState = simd_length(state.angularVelocity) > Self.tumblingRate ? .tumbling
-                : state.velocity.y < Self.fallingSpeed ? .falling
-                : .airborne
-            return nil
+                : state.velocity.y < Self.fallingSpeed ? .falling : .airborne
+            return reports.first
         }
-        let previousLow = contactProfile.lowestPointY(position: previousState.position, orientation: previousState.attitudeQuat)
-        let fraction = max(0, min(1, (previousLow - groundHeight) / max(0.0001, previousLow - lowest.point.y)))
-        let obstacle = CollisionObstacle(
-            id: groundID,
-            center: SIMD3<Float>(state.position.x, groundHeight, state.position.z),
-            radius: 10000,
-            source: InterceptContactSource.terrain,
-            baseY: groundHeight - 1,
-            topY: groundHeight,
-            acousticSurface: .soil
-        )
-        let contact = VehicleSweptContact(
-            obstacle: obstacle,
-            componentID: lowest.sphere.componentID,
-            contactPoint: SIMD3<Float>(lowest.point.x, groundHeight, lowest.point.z),
-            contactNormal: SIMD3<Float>(0, 1, 0),
-            hitFraction: fraction,
-            isSupportSurfaceContact: true,
-            sphereOffset: lowest.sphere.offset,
-            sphereRadius: lowest.sphere.radius
-        )
-        let isFirstTouch = !wasGrounded
-        let report = impactResolver.resolve(
-            contact: contact,
-            previousPosition: previousState.position,
-            state: &state,
-            graph: &graph,
-            massProperties: graph.massProperties,
-            airframeClass: profile.airframeClass,
-            rotorsSpinning: rotorsSpinning,
-            deltaTime: deltaTime,
-            applyDamage: isFirstTouch,
-            restingSpeedThreshold: 0.1
-        )
-        state.position.y += max(0, groundHeight - contactProfile.lowestPointY(position: state.position, orientation: state.attitudeQuat))
-        if isFirstTouch { receive(report) }
-        // An aircraft that arrives on the ground already broken, or arrives hard, has crashed —
-        // as opposed to one that simply set down.
-        if !snapshot.functionalState.canAttempt || report.tier == .criticalImpact || report.tier == .heavyImpact {
-            state.physicalState = .crashed
-        }
+        state.position.y += max(0, groundHeight - lowest)
+        if !snapshot.functionalState.canAttempt { state.physicalState = .crashed }
         if simd_length(state.velocity) < Self.restingSpeed {
             state.velocity = .zero
             state.angularVelocity *= 0.9
         }
         state.motionState = simd_length(state.velocity) < Self.restingSpeed ? .settled : .sliding
         wasGrounded = true
-        return isFirstTouch ? report : nil
+        return reports.first
     }
 
     // MARK: - Damage
@@ -528,6 +512,14 @@ final class InterceptVehicleRuntime {
                     * InterceptRFDamageAdapter.factor("esc", graph, failures)
                 : 0
             rotorModel.rotors[index].vibration01 = VehicleRotorModel.propellerVibration(integrity: prop)
+            if let propeller = graph.component(id: "propeller.\(slot)") {
+                rotorModel.rotors[index].offsetBody = graph.deformedPosition(
+                    propeller.localPosition, attachedTo: propeller.id) - graph.massProperties.centerOfMassOffset
+                rotorModel.rotors[index].thrustDirectionBody = simd_act(
+                    simd_quatf(graph.deformationTransform(for: propeller.id)), SIMD3<Float>(0, 1, 0))
+                rotorModel.rotors[index].cruiseThrustDirectionBody = simd_act(
+                    simd_quatf(graph.deformationTransform(for: propeller.id)), SIMD3<Float>(0, 0, -1))
+            }
         }
 
         let coreLost = ["frame", "fuselage"].contains { graph.component(id: $0) != nil && graph.integrity(id: $0) <= 0.001 }

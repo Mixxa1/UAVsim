@@ -217,17 +217,13 @@ final class ComponentFailureRuntime {
 
     /// Structural section -> control-surface mapping: ailerons ride the
     /// outer wing sections, elevator the horizontal tail, rudder the fin.
+    /// Members are chains of stations ("wing.left.outer.s08", "tail.horizontal.right.s01"),
+    /// so the channel follows from the member a station belongs to.
     static func surfaceChannel(forComponentID id: String) -> FlightSurfaceChannel? {
-        switch id {
-        case "wing.left.outer", "wing.right.outer":
-            return .aileron
-        case "tail.horizontal":
-            return .elevator
-        case "tail.vertical":
-            return .rudder
-        default:
-            return nil
-        }
+        if id.hasPrefix("wing.left.outer") || id.hasPrefix("wing.right.outer") { return .aileron }
+        if id.hasPrefix("tail.horizontal") || id == "tail.elevator" { return .elevator }
+        if id.hasPrefix("tail.vertical") || id == "tail.rudder" { return .rudder }
+        return nil
     }
 
     // MARK: - Seeded random helpers

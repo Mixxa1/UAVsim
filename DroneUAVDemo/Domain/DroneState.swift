@@ -72,7 +72,26 @@ enum UAVControlState: String, CaseIterable, Codable {
     case none
 }
 
+/// Transient approach motion captured before a ground constraint removes momentum.
+/// Cleared at the start of each physics step; never persisted as damage state.
+struct VehicleGroundApproach {
+    let velocity: SIMD3<Float>
+    let rates: SIMD3<Float>
+    let attitude: simd_quatf
+    var euler: SIMD3<Float> = .zero
+}
+
 struct DroneState {
+    var groundApproach: VehicleGroundApproach? = nil
+    /// What the flight forces (aerodynamics and propulsion, not gravity) accelerated the
+    /// airframe with on the last physics step, per unit mass, body frame (x right, y up,
+    /// z aft). This is the load factor vector the structure carries. Published by the
+    /// engine so structural loads never come from differencing a velocity that clamps,
+    /// governors and contact corrections have also touched.
+    var specificForceBody: SIMD3<Float>? = nil
+    /// Angular acceleration of the last physics step, in the rate order of
+    /// `bodyAngularVelocity` (roll, pitch, yaw).
+    var angularAccelerationRates: SIMD3<Float>? = nil
     var position: SIMD3<Float>
     var velocity: SIMD3<Float>
     var orientation: SIMD3<Float> // roll, pitch, yaw in radians. Derived display copy of attitudeQuat for every airframe class (see note below).
@@ -90,6 +109,9 @@ struct DroneState {
     var throttle: Float
     var motorThrottle: Float
     var rotorAngularSpeed: SIMD4<Float> // rad/s for FL, FR, RL, RR (unused channels ignored by non-quad)
+    var hasRotorMotion: Bool {
+        motorThrottle > 0.01 || simd_reduce_max(simd_abs(rotorAngularSpeed)) > 1
+    }
     var forwardAirspeed: Float
     var physicalState: DronePhysicalState
     var mode: DroneFlightMode

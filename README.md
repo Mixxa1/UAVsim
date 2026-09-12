@@ -212,3 +212,7 @@ cmake --build CADNext/build-gui-occt
 Флаги сборки: `CADNEXT_WITH_OCCT` — точное BRep-ядро вместо процедурного stub; `CADNEXT_WITH_COIN3D` / `CADNEXT_WITH_QT` — 3D-вьюпорт / Qt6-интерфейс (Qt требует Coin3D); `CADNEXT_BUILD_APP` — собрать исполняемый `cadnext_app` (требует оба флага выше); `CADNEXT_WITH_PYTHON` — Python-обвязка (заглушка); `CADNEXT_BUILD_TESTS` — юнит-тесты (включены по умолчанию).
 
 Пункт меню *CAD → Open CADNext* — точка входа в CAD-модуль UAVsim прямо из DroneUAVDemo: приложение ищет уже собранный бинарник по пути `CADNext/build-gui-occt/app/cadnext_app` (предпочтительно, с OCCT) или `CADNext/build-gui/app/cadnext_app` (процедурный fallback, без булева вычитания) и запускает его как отдельный процесс — код CADNext при этом никогда не линкуется в Swift-таргет.
+
+### Проверка модели повреждений
+
+Компонентная модель, контактные нагрузки, повреждения при посадке и последствия в полёте описаны в [Docs/DamageModel.md](Docs/DamageModel.md). Регрессионная проверка на геометрии всего каталога: `Tools/DamageModelProbe/run.sh`. Падения, удары и поведение обломка до полной остановки: `Tools/CrashScenarioProbe/run.sh`.

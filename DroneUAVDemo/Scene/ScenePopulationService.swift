@@ -1273,12 +1273,15 @@ final class ScenePopulationService {
     // supportsLanding so drones never try to perch on a tree collision box.
     static func treeCollisionParts(size: SIMD3<Float>) -> [EnvironmentCollisionPart] {
         let canopyBaseY = size.y * 0.40
-        // The trunk remains a narrow rigid member inside most of the crown.
-        // Ending it at 46% made every upper-tree strike pure foliage, so a
-        // wing could pass through the visual trunk without structural load.
-        let trunkTopY = size.y * 0.86
-        let trunkWidth = max(0.7, size.x * 0.22) // real trunk footprint, not the canopy span
-        let trunkDepth = max(0.7, size.z * 0.22)
+        // The rigid trunk ends where the crown begins. Inside the crown the stem is modelled
+        // as wood with its real taper and strength (`TreeCrownStructure`), together with the
+        // branches off it — a 0.7 m box standing in for the whole upper stem was a pillar
+        // where the tree is 5 cm thick.
+        let trunkTopY = canopyBaseY
+        // Stem diameter at breast height: slenderness H/DBH = 50, the open-grown conifer
+        // figure `TreeCrownStructure` builds the upper stem from, so the two meet.
+        let trunkWidth = min(1.2, max(0.12, size.y / 50))
+        let trunkDepth = trunkWidth
         let canopyHeight = size.y - canopyBaseY
         let canopyWidth = size.x * 0.86          // actual footprint, vs the old 1.18× inflated cylinder
         let canopyDepth = size.z * 0.86

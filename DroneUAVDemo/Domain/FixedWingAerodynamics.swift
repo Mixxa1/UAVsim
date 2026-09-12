@@ -90,6 +90,21 @@ struct FixedWingAerodynamics {
     /// damage (see FixedWingAeroDamage). Zero for a pristine airframe.
     var clRollDamageOffset: Float = 0.0
     var cnYawDamageOffset: Float = 0.0
+    var damagePanels: [DamagedWingPanel] = []
+    var damageLiftScale: Float = 1.0
+    var damageDragExtra: Float = 0.0
+    /// How much of the geometric inflow change a rotating wing's strips actually see.
+    ///
+    /// Strip theory takes the whole `p·y/V` at every station and so over-damps roll: for a
+    /// rectangular wing it gives `Clp = −CLα/6`, about twice what aircraft measure, because
+    /// the antisymmetric loading of a rolling wing sheds its own trailing vorticity and the
+    /// downwash it induces cancels part of the angle change (lifting-surface theory and
+    /// DATCOM put the difference at 0.5–0.7 for ordinary aspect ratios). The strips here
+    /// take that fraction, solved so their attached-flow roll damping equals this
+    /// airframe's own `clp` — the linear model and the strips then agree wherever both
+    /// hold, and past the stall the strips carry on where the derivative cannot.
+    var rotationalInflowScale: Float = 1.0
+    var damageReferencePanels: [DamagedWingPanel] = []
 
     let maxElevatorRad: Float
     let maxAileronRad: Float
@@ -147,7 +162,21 @@ struct FixedWingAerodynamics {
     /// `mach` defaults to zero, which makes every compressibility term inert — so the
     /// dozens of existing call sites that have no flow state to hand keep the exact
     /// coefficients they had before. The physics step passes the real value.
-    func liftDrag(alphaRad: Float, mach: Float = 0.0) -> (cl: Float, cd: Float) {
+    ///
+    /// Damage enters as a difference: the same strips integrated damaged and undamaged at
+    /// this instant's flow, added to the pristine coefficients. An undamaged wing's strips
+    /// cancel exactly, so the first dent changes the aircraft by what the dent does and not
+    /// by the gap between two models of it.
+    func liftDrag(alphaRad: Float, mach: Float = 0.0, pHat: Float = 0, rHat: Float = 0) -> (cl: Float, cd: Float) {
+        let pristine = undamagedLiftDrag(alphaRad: alphaRad, mach: mach)
+        guard !damagePanels.isEmpty else {
+            return (pristine.cl * damageLiftScale, pristine.cd + damageDragExtra)
+        }
+        let delta = damageStripDelta(alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat)
+        return (pristine.cl + delta.cl, max(0, pristine.cd + damageDragExtra + delta.cd))
+    }
+
+    private func undamagedLiftDrag(alphaRad: Float, mach: Float) -> (cl: Float, cd: Float) {
         // A tabulated airframe uses its table whole. Its numbers already contain
         // compressibility, wave drag and the vortex behaviour the closed form below models
         // separately, so applying those corrections on top would count each of them twice.
@@ -210,15 +239,102 @@ struct FixedWingAerodynamics {
         let controlScale = transonic.controlEffectiveness(mach: mach)
         let effectiveCmAlpha = cmAlpha * (1.0 - 0.6 * blend)
         let effectiveCmq = cmq * (1.0 - 0.5 * blend) * controlScale
+        // The elevator is on the tail whose stability contribution `cmAlpha` loses 60 % in
+        // the wake: the dynamic pressure that goes missing there multiplies the elevator's
+        // term exactly as it multiplies the stability term. With the stability weakened and
+        // the elevator left whole, full aft stick held every airframe in the fleet at 80°
+        // angle of attack — a deep stall no conventional aircraft flies, and the flat spin
+        // that followed it. Scaled together they keep the trim angle the stick commands.
+        let effectiveCmDeltaE = cmDeltaE * (1.0 - 0.6 * blend) * controlScale
         let base = cm0
             + effectiveCmAlpha * alphaRad
-            + cmDeltaE * controlScale * elevatorFraction
+            + effectiveCmDeltaE * elevatorFraction
             + effectiveCmq * qHat
 
         let shift = transonic.aeroCenterShiftFraction(mach: mach)
         guard shift > 1.0e-5 else { return base }
         let cl = clTable.sample(alphaRad) * transonic.liftFactor(mach: mach)
         return base - cl * shift
+    }
+
+    /// The wing integrated strip by strip, in body axes.
+    ///
+    /// Each strip sees the free stream plus the wing's own rotation — roll changes its
+    /// angle of attack (`2·p̂·y`, scaled by `rotationalInflowScale`), yaw its speed — and
+    /// makes the section force of the aircraft's own polar at that local angle. Lift and
+    /// drag are resolved into the strip's body-normal and body-axial force before they are
+    /// summed, because that is what gives the rolling and yawing moments: at 80° angle of
+    /// attack a wing's force is nearly all drag in the wind frame and nearly all normal
+    /// force on the wing, and it is the normal force that rolls the aircraft.
+    ///
+    /// A strip beyond its lift peak loses lift as it descends, which is autorotation: no
+    /// spin state is scripted anywhere.
+    private func stripCoefficients(_ panels: [DamagedWingPanel], alphaRad: Float, mach: Float, pHat: Float, rHat: Float)
+        -> (cl: Float, cd: Float, roll: Float, yaw: Float) {
+        var normal: Float = 0, axial: Float = 0, roll: Float = 0, yaw: Float = 0
+        let freeForward = cos(alphaRad), freeVertical = sin(alphaRad)
+        let inflow = 2 * rotationalInflowScale * pHat
+        for panel in panels where panel.isPresent {
+            let forward = freeForward + 2 * rHat * panel.spanPosition
+            let vertical = freeVertical - inflow * panel.spanPosition
+            let flow = atan2(vertical, forward)
+            let speed = min(9, forward * forward + vertical * vertical)
+            let section = undamagedLiftDrag(alphaRad: (flow + panel.incidenceRad) / max(0.4, panel.stallScale), mach: mach)
+            let lift = section.cl * panel.stallScale * panel.effectiveness
+            let drag = section.cd + (1 - panel.health) * DamagedWingPanel.damagedSectionDragIncrement
+            let cosFlow = cos(flow), sinFlow = sin(flow)
+            let n = (lift * cosFlow + drag * sinFlow) * speed * panel.areaFraction
+            let a = (drag * cosFlow - lift * sinFlow) * speed * panel.areaFraction
+            normal += n
+            axial += a
+            // Body axes: +X right, +Y up, −Z forward. A normal force on the right wing rolls
+            // it up (+); an aft force there swings the nose right (−).
+            roll += panel.spanPosition * n
+            yaw -= panel.spanPosition * a
+        }
+        return (normal * freeForward - axial * freeVertical, normal * freeVertical + axial * freeForward, roll, yaw)
+    }
+
+    private func damageStripDelta(alphaRad: Float, mach: Float, pHat: Float, rHat: Float)
+        -> (cl: Float, cd: Float, roll: Float, yaw: Float) {
+        let damaged = stripCoefficients(damagePanels, alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat)
+        let reference = stripCoefficients(damageReferencePanels, alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat)
+        return (damaged.cl - reference.cl, damaged.cd - reference.cd,
+                damaged.roll - reference.roll, damaged.yaw - reference.yaw)
+    }
+
+    /// Sixteen equal strips across the span: the pristine wing the rate model integrates
+    /// when there is no measured planform to hand. The calibration of
+    /// `rotationalInflowScale` absorbs the planform's shape in attached flow, which is the
+    /// only place the shape would otherwise show.
+    static let uniformStrips: [DamagedWingPanel] = (0..<16).map { index in
+        DamagedWingPanel(areaFraction: 1.0 / 16.0, spanPosition: (Float(index) + 0.5) / 16.0 - 0.5,
+                         effectiveness: 1, stallScale: 1, incidenceRad: 0)
+    }
+
+    /// Roll-rate damping past the stall, from the strips.
+    ///
+    /// Below the stall the airframe's own `clp` is exact and is kept, so attached flight is
+    /// unchanged to the bit. Through the stall the strips take over: the descending wing
+    /// runs further past its lift peak and loses lift, the rising one regains it, and the
+    /// damping falls through zero into autorotation. The old `clp·(1 − ½·blend)` said the
+    /// same thing in one number and could never go past zero, so an aircraft could not spin.
+    private func rollRateMoment(alphaRad: Float, mach: Float, pHat: Float) -> Float {
+        let blend = stallBlend(alphaRad: alphaRad)
+        let controlScale = transonic.controlEffectiveness(mach: mach)
+        let attached = clp * controlScale * pHat
+        guard blend > 0 else { return attached }
+        let strips = stripCoefficients(Self.uniformStrips, alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: 0).roll
+        return attached * (1 - blend) + strips * blend
+    }
+
+    /// `rotationalInflowScale` for this airframe: its `clp` over the uniform strips' own
+    /// attached-flow roll damping, `−2·CLα·Σa·y²` = `−CLα/6`.
+    func calibratedRotationalInflowScale() -> Float {
+        let step: Float = 0.035
+        let slope = (undamagedLiftDrag(alphaRad: step, mach: 0).cl - undamagedLiftDrag(alphaRad: -step, mach: 0).cl) / (2 * step)
+        guard slope > 0.5 else { return 1 }
+        return (abs(clp) / (slope / 6)).clamped(to: 0.2...2.5)
     }
 
     /// Rolling moment coefficient: sideslip (dihedral) + aileron + roll-rate
@@ -228,14 +344,20 @@ struct FixedWingAerodynamics {
         betaRad: Float,
         aileronFraction: Float,
         pHat: Float,
-        mach: Float = 0.0
+        mach: Float = 0.0,
+        rHat: Float = 0.0
     ) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
         let controlScale = transonic.controlEffectiveness(mach: mach)
-        let effectiveClp = clp * (1.0 - 0.5 * blend) * controlScale
+        // Ailerons work on the flow over the outer wing; once that has separated they have
+        // nothing to deflect. Same loss as the wing's other lateral derivatives.
+        let effectiveClDeltaA = clDeltaA * (1.0 - 0.5 * blend) * controlScale
+        let damage = damagePanels.isEmpty ? 0
+            : damageStripDelta(alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat).roll
         return clBeta * betaRad
-            + clDeltaA * controlScale * aileronFraction
-            + effectiveClp * pHat
+            + effectiveClDeltaA * aileronFraction
+            + rollRateMoment(alphaRad: alphaRad, mach: mach, pHat: pHat)
+            + damage
             + clRollDamageOffset
     }
 
@@ -246,16 +368,23 @@ struct FixedWingAerodynamics {
         betaRad: Float,
         rudderFraction: Float,
         rHat: Float,
-        mach: Float = 0.0
+        mach: Float = 0.0,
+        pHat: Float = 0.0
     ) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
         let controlScale = transonic.controlEffectiveness(mach: mach)
         let effectiveCnBeta = cnBeta * (1.0 - 0.5 * blend)
         let effectiveCnr = cnr * (1.0 - 0.5 * blend) * controlScale
+        // The rudder sits on the fin whose weathercock stiffness `cnBeta` loses half its
+        // effect in the stalled wing's wake: it is the same surface in the same wake, so it
+        // loses the same half. Leaving it whole let full rudder drive a stalled aircraft to
+        // the angular-rate clamp.
+        let effectiveCnDeltaR = cnDeltaR * (1.0 - 0.5 * blend) * controlScale
         return effectiveCnBeta * betaRad
-            + cnDeltaR * controlScale * rudderFraction
+            + effectiveCnDeltaR * rudderFraction
             + effectiveCnr * rHat
             + cnYawDamageOffset
+            + (damagePanels.isEmpty ? 0 : damageStripDelta(alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat).yaw)
     }
 
     /// Applies structural-damage deltas on top of the pristine model.
@@ -264,8 +393,12 @@ struct FixedWingAerodynamics {
     func applyingDamage(_ damage: FixedWingAeroDamage) -> FixedWingAerodynamics {
         guard !damage.isPristine else { return self }
         var damaged = self
-        damaged.wingArea = wingArea * max(0.2, damage.liftScale)
-        damaged.cd0 = cd0 + max(0.0, damage.cd0Extra)
+        // Keep reference geometry for moments, drag and wing-area telemetry.
+        // Lost lift belongs to the coefficients; no phantom 20% wing remains.
+        damaged.damageLiftScale = damage.liftScale.clampedUnit()
+        damaged.damageDragExtra = max(0, damage.cd0Extra)
+        damaged.damagePanels = damage.panels
+        damaged.damageReferencePanels = damage.panels.map(\.undamaged)
         damaged.clDeltaA = clDeltaA * damage.aileronScale.clampedUnit()
         damaged.cmDeltaE = cmDeltaE * damage.elevatorScale.clampedUnit()
         damaged.cmAlpha = cmAlpha * damage.pitchStabilityScale.clampedUnit()
@@ -443,7 +576,7 @@ struct FixedWingAerodynamics {
             heightM: height
         )
 
-        return FixedWingAerodynamics(
+        var aerodynamics = FixedWingAerodynamics(
             wingArea: area,
             wingSpan: span,
             meanChord: chord,
@@ -484,6 +617,8 @@ struct FixedWingAerodynamics {
             tailSlipstreamCoverage: preset.tailSlipstreamCoverage,
             propSpinSign: 1.0
         )
+        aerodynamics.rotationalInflowScale = aerodynamics.calibratedRotationalInflowScale()
+        return aerodynamics
     }
 
     /// Diagonal box-approximation inertia tensor from mass + overall
@@ -509,6 +644,15 @@ struct FixedWingAerodynamics {
         let pitchInertia = massKg * (fuselageLengthM * fuselageLengthM + heightM * heightM) / 12.0 * concentration
         let yawInertia = massKg * (wingSpanM * wingSpanM + fuselageLengthM * fuselageLengthM) / 12.0 * concentration
         return SIMD3<Float>(max(0.001, rollInertia), max(0.001, pitchInertia), max(0.001, yawInertia))
+    }
+}
+
+extension FixedWingAerodynamics {
+    /// Maximum lift coefficient at the family's stall angle and its lift-curve slope (per
+    /// radian) — the two numbers a structural gust case needs from the aerodynamics.
+    static func designLiftCharacteristics(for family: FixedWingFamily) -> (maximumLift: Float, liftSlope: Float) {
+        let preset = FamilyAeroPreset.preset(for: family)
+        return (max(0.3, preset.cl0 + preset.clAlpha * preset.stallAlphaRad), max(1, preset.clAlpha))
     }
 }
 

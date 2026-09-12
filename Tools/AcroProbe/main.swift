@@ -361,7 +361,13 @@ for profile in multirotors {
     let hover = hoverThrottle(hoverBaseline, atAltitude: 300.0)
     var state = makeState(profile, orientation: .zero, throttle: hover)
 
-    for _ in 0..<Int(4.0 / Double(dt)) {
+    var speedLimitActiveRecently = false
+    let angleSteps = Int(4.0 / Double(dt))
+    for step in 0..<angleSteps {
+        if step > angleSteps - Int(0.3 / Double(dt)),
+           simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z)) > profile.maxHorizontalSpeedMps * 0.85 {
+            speedLimitActiveRecently = true
+        }
         let control = DroneControlInput(
             targetPosition: state.position,
             targetOrientation: SIMD3<Float>(commandedBankDeg * .pi / 180.0, 0, 0),
@@ -379,7 +385,12 @@ for profile in multirotors {
         + padLeft(String(format: "%.0f°", commandedBankDeg), 8)
         + padLeft(String(format: "%.1f°", achieved), 10)
         + padLeft(String(format: "%.1f°", headingDrift), 15))
-    if abs(achieved - commandedBankDeg) > 3.0 {
+    // A firmware speed regulator must reduce the requested bank to hold
+    // its envelope through real thrust. Holding 25 degrees while deleting
+    // the resulting velocity was the old nonphysical speed clamp.
+    let actualSpeed = simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
+    let holdingSpeedLimit = speedLimitActiveRecently && actualSpeed <= profile.maxHorizontalSpeedMps * 1.10 && abs(achieved) < commandedBankDeg
+    if abs(achieved - commandedBankDeg) > 3.0 && !holdingSpeedLimit {
         angleFindings.append(String(
             format: "%@ holds %.1f° of bank against a %.0f° command in stabilized",
             profile.displayName, achieved, commandedBankDeg
