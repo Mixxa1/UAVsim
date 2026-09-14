@@ -407,6 +407,21 @@ struct DroneVisualGeometryPropeller: Hashable {
     let spinDirection: Float
 }
 
+/// One piece of the rendered undercarriage — a wheel, a skid, a leg — in the body frame.
+///
+/// The aircraft stood on four synthetic points at ±55 % of its bounding box, the same
+/// four-legged stool whether the model was a 0.85 m skid or a 6.8 m tricycle. A stool
+/// standing on a plane touches it at two points as soon as it tilts, and two points in a
+/// line cannot resist a moment about that line — which is exactly what braking friction
+/// applies. These are the legs as drawn, so the aircraft stands on what it is shown to
+/// stand on.
+struct DroneVisualGeometryGearPart: Hashable {
+    let center: SIMD3<Float>
+    let halfExtents: SIMD3<Float>
+
+    var bottomY: Float { center.y - halfExtents.y }
+}
+
 /// One spanwise strip of the rendered wing, body frame: where its leading and trailing
 /// edges are and how thick it is. Sampled from the wing meshes' own vertices, so a swept,
 /// tapered, cranked or dihedral wing is described as drawn — not as the rectangle around it.
@@ -438,6 +453,19 @@ struct DroneVisualGeometrySample: Hashable {
     /// Half-width of the fuselage where the wing meets it — where the exposed wing, and
     /// its root joint, begins. Zero for a flying wing with no separate body.
     var fuselageHalfWidth: Float = 0
+    /// The undercarriage as drawn: wheels, skids and legs that reach the ground. Empty for a
+    /// model with no named gear (a canister-launched munition has none in life either), and
+    /// the contact profile then falls back to the bounding-box footprint.
+    var landingGearParts: [DroneVisualGeometryGearPart] = []
+
+    /// How the visual names a part of the undercarriage. Shared with the component binding so
+    /// that what is *bound* to the gear and what the aircraft *stands* on cannot drift apart.
+    static let gearNodeWords = ["gear", "wheel", "tyre", "tire", "skid", "strut", "leg", "foot"]
+
+    static func isGearNodeName(_ name: String) -> Bool {
+        let lowered = name.lowercased()
+        return gearNodeWords.contains { lowered.contains($0) }
+    }
 
     static let empty = DroneVisualGeometrySample(
         componentBoxes: [],
@@ -521,6 +549,7 @@ struct DroneVisualGeometrySample: Hashable {
             payloadMountPosition: bodyFrameNode.simdConvertPosition(.zero, from: model.payloadMountNode)
         )
         let wingNodes = (model.componentNodes[.armFL] ?? []) + (model.componentNodes[.armFR] ?? [])
+        sample.landingGearParts = gearParts(of: bodyFrameNode, in: bodyFrameNode)
         sample.wingPlanform = planform(of: wingNodes, in: bodyFrameNode)
         sample.fuselageHalfWidth = fuselageHalfWidth(
             core: model.componentNodes[.flightControllerCore] ?? [],
@@ -528,6 +557,37 @@ struct DroneVisualGeometrySample: Hashable {
             planform: sample.wingPlanform
         )
         return sample
+    }
+
+    /// The parts of the undercarriage that actually reach the ground.
+    ///
+    /// A gear assembly is drawn as many meshes — braces, forks, doors, wheels — and most of
+    /// them hang well above the runway: the MQ-9B's braces sit 0.97 m up. Only what comes
+    /// within its own thickness of the lowest point of the undercarriage can carry the
+    /// aircraft, so that is what is kept. No fixed height is assumed: a part is judged
+    /// against its own size, which is as true of a 0.2 m skid as of a 1.2 m main leg.
+    static func gearParts(of node: SCNNode, in referenceNode: SCNNode) -> [DroneVisualGeometryGearPart] {
+        var found: [DroneVisualGeometryGearPart] = []
+        func walk(_ current: SCNNode) {
+            if isGearNodeName(current.name ?? ""), let aabb = accumulateBounds(of: current, in: referenceNode) {
+                found.append(DroneVisualGeometryGearPart(
+                    center: (aabb.min + aabb.max) * 0.5,
+                    halfExtents: simd_max((aabb.max - aabb.min) * 0.5, SIMD3<Float>(repeating: 0.002))))
+                return  // Its children are the same leg, not extra legs.
+            }
+            for child in current.childNodes { walk(child) }
+        }
+        walk(node)
+        guard let lowest = found.map(\.bottomY).min() else { return [] }
+        // ⚠️ Judged against the part's *thinnest* dimension, not its height. Measured against its
+        // height, the MQ-9B's main brace — 1.36 m tall, hanging 0.97 m up — passed for a part
+        // that reaches the runway, and put 22 cm contact spheres a metre and a half in the air.
+        // A wheel or a skid is thin in at least one direction; a brace is not near the ground at
+        // all unless its own smallest dimension says so.
+        return found.filter { part in
+            let thinnest = min(part.halfExtents.x, min(part.halfExtents.y, part.halfExtents.z)) * 2
+            return part.bottomY <= lowest + thinnest
+        }
     }
 
     /// Body-frame vertex positions of every mesh under `node`.

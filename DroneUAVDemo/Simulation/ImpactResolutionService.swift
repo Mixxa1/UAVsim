@@ -15,6 +15,11 @@ struct ImpactSurfaceMaterial: Hashable {
     let cuttingFactor: Float
     let abrasionFactor: Float
     let isFoliage: Bool
+    /// Pressure at which the ground gives way under a blunt body, Pa, and how deep it keeps
+    /// giving before what is under it is hard, m. Infinite for a surface that does not yield
+    /// (paving, a roof, a vehicle): those keep the airframe-only contact they always had.
+    var yieldPressurePa: Float = .infinity
+    var yieldingDepth: Float = 0
 
     static let hardStructure = ImpactSurfaceMaterial(restitution: 0.30, friction: 0.60, damageFactor: 1.15, hardness: 0.95, energyAbsorption: 0.12, cuttingFactor: 0.08, abrasionFactor: 0.75, isFoliage: false)
     static let metalVehicle = ImpactSurfaceMaterial(restitution: 0.30, friction: 0.50, damageFactor: 1.10, hardness: 0.90, energyAbsorption: 0.18, cuttingFactor: 0.15, abrasionFactor: 0.62, isFoliage: false)
@@ -22,9 +27,19 @@ struct ImpactSurfaceMaterial: Hashable {
     static let glass = ImpactSurfaceMaterial(restitution: 0.12, friction: 0.35, damageFactor: 0.88, hardness: 0.72, energyAbsorption: 0.42, cuttingFactor: 0.90, abrasionFactor: 0.55, isFoliage: false)
     static let woodTrunk = ImpactSurfaceMaterial(restitution: 0.25, friction: 0.50, damageFactor: 1.00, hardness: 0.68, energyAbsorption: 0.30, cuttingFactor: 0.42, abrasionFactor: 0.48, isFoliage: false)
     static let foliage = ImpactSurfaceMaterial(restitution: 0.00, friction: 0.10, damageFactor: 0.00, hardness: 0.02, energyAbsorption: 0.95, cuttingFactor: 0.00, abrasionFactor: 0.00, isFoliage: true)
-    static let soil = ImpactSurfaceMaterial(restitution: 0.18, friction: 0.70, damageFactor: 0.85, hardness: 0.45, energyAbsorption: 0.55, cuttingFactor: 0.00, abrasionFactor: 0.58, isFoliage: false)
-    static let sand = ImpactSurfaceMaterial(restitution: 0.05, friction: 0.72, damageFactor: 0.55, hardness: 0.18, energyAbsorption: 0.82, cuttingFactor: 0.00, abrasionFactor: 0.78, isFoliage: false)
-    static let snow = ImpactSurfaceMaterial(restitution: 0.03, friction: 0.34, damageFactor: 0.32, hardness: 0.08, energyAbsorption: 0.90, cuttingFactor: 0.00, abrasionFactor: 0.15, isFoliage: false)
+    // ⚠️ The ground's own give, as a pressure and a depth — not a share of energy.
+    //
+    // Soil: firm natural ground carries 100–150 kPa statically (Eurocode 7 / BS 8004 presumed
+    // bearing values); struck it resists about twice that (the strain-rate effect in soils), and
+    // a turf root mat and topsoil give for the first ten centimetres before firmer ground.
+    // Sand: loose dry sand bears 100–200 kPa, and deeper. Snow: settled snow is 20–100 kPa on the
+    // hand-hardness scale, and a drift gives far further than soil. Hard surfaces are left out.
+    static let soil = ImpactSurfaceMaterial(restitution: 0.18, friction: 0.70, damageFactor: 0.85, hardness: 0.45, energyAbsorption: 0.55, cuttingFactor: 0.00, abrasionFactor: 0.58, isFoliage: false,
+        yieldPressurePa: 300_000, yieldingDepth: 0.10)
+    static let sand = ImpactSurfaceMaterial(restitution: 0.05, friction: 0.72, damageFactor: 0.55, hardness: 0.18, energyAbsorption: 0.82, cuttingFactor: 0.00, abrasionFactor: 0.78, isFoliage: false,
+        yieldPressurePa: 150_000, yieldingDepth: 0.15)
+    static let snow = ImpactSurfaceMaterial(restitution: 0.03, friction: 0.34, damageFactor: 0.32, hardness: 0.08, energyAbsorption: 0.90, cuttingFactor: 0.00, abrasionFactor: 0.15, isFoliage: false,
+        yieldPressurePa: 50_000, yieldingDepth: 0.30)
     static let water = ImpactSurfaceMaterial(restitution: 0.02, friction: 0.08, damageFactor: 0.62, hardness: 0.12, energyAbsorption: 0.78, cuttingFactor: 0.00, abrasionFactor: 0.04, isFoliage: false)
     static let generic = ImpactSurfaceMaterial(restitution: 0.25, friction: 0.60, damageFactor: 1.00, hardness: 0.70, energyAbsorption: 0.30, cuttingFactor: 0.05, abrasionFactor: 0.55, isFoliage: false)
 }
@@ -187,6 +202,7 @@ struct VehicleGroundContactSolver {
                 supportLoadNewtons: support[slot],
                 rollingContact: hasWheels && gear && component.integrity > 0.6 && component.stiffnessScale > 0.6,
                 rotorSpeedRadPerSec: rotorSpeed,
+                groundContactRadius: patch.reduce(Float(0)) { $0 + $1.0.radius },
                 jointPreload: jointPreload, thermalWeakening: thermalWeakening)
             if report.normalClosingSpeed > 0.35 || !report.damage.isEmpty || !report.connectionDamage.isEmpty || report.tangentialSpeed > 0.1 {
                 reports.append(report)
@@ -198,9 +214,17 @@ struct VehicleGroundContactSolver {
         // and rocked for ever. The same contact is applied once more over the result: no
         // restitution, only what holds a body on a surface and rubs against its motion.
         let restingAttitude = state.attitudeQuat
+        // ⚠️ The lowest point belongs to the attitude, not to the sphere being tested. Worked out
+        // inside the predicate it was one pass over every sphere per sphere, with an array for
+        // each — quadratic in a profile of hundreds, every step the aircraft stands on anything.
+        // With the landing gear taken from the model the profile grew, and a probe that used to
+        // finish in eight minutes did not finish in an hour.
+        var lowest = Float.greatestFiniteMagnitude
+        for sphere in profile.spheres {
+            lowest = min(lowest, simd_act(restingAttitude, sphere.offset).y - sphere.radius)
+        }
         let onGear = profile.spheres.contains { sphere in
             let bottom = simd_act(restingAttitude, sphere.offset).y - sphere.radius
-            let lowest = profile.spheres.map { simd_act(restingAttitude, $0.offset).y - $0.radius }.min() ?? bottom
             return bottom <= lowest + 0.025 && (sphere.isGroundSupport || sphere.componentID.hasPrefix("gear."))
         }
         if !onGear {
@@ -285,11 +309,42 @@ final class ImpactResolutionService {
                  contactPoint: contact.contactPoint).isFoliage
     }
 
-    static func contactDuration(component: VehicleComponent?, material: ImpactSurfaceMaterial, closingSpeed: Float) -> Float {
+    /// How long a contact lasts: the stroke it is stopped over, at the speed it closes.
+    ///
+    /// The airframe side is what it always was — a gear leg's travel, or a sliver of a struck
+    /// part. The ground side is where the aircraft actually is:
+    ///
+    /// ⚠️ On ground that yields it is a plastic indentation. A body of radius R pressed into
+    /// ground that gives way at pressure q meets `F = 2π·q·R·d` — stiffer the further it sinks,
+    /// so the ground stops a mass m in `√(m/k)` over `v·√(m/k)`, with `k = 2π·q·R`. A light
+    /// aircraft on a broad foot barely marks a field; a heavy one on a narrow wheel sinks until
+    /// the firm ground under the topsoil stops it. The old stroke was a fixed six centimetres
+    /// times the surface's absorption, whatever landed on it — so a 5.7-tonne MQ-9B broke its
+    /// structure at 12.6 m/s on grass and at 11.8 m/s on concrete, seven percent apart.
+    ///
+    /// Without a mass and a contact radius, or on a surface that does not yield, the contact is
+    /// timed exactly as before.
+    static func contactDuration(component: VehicleComponent?, material: ImpactSurfaceMaterial, closingSpeed: Float,
+                                effectiveMass: Float? = nil, contactRadius: Float? = nil) -> Float {
         let dimension = component.map { min($0.boundingHalfExtents.x, $0.boundingHalfExtents.y, $0.boundingHalfExtents.z) * 2 } ?? 0.02
         let gearTravel: Float = component.map { if case .landingGear = $0.kind { return max(0.025, dimension * 0.65) }; return dimension * 0.12 } ?? 0.003
+        let speed = max(0.5, closingSpeed)
+        // The surface's own give — turf and thatch, a loose top layer — compressed under anything
+        // at all, however light. Timed together with the airframe exactly as it always was.
         let stroke = gearTravel + material.energyAbsorption * 0.06
-        return min(0.12, max(0.004, 2 * stroke / max(0.5, closingSpeed)))
+        let cushioned = min(0.12, max(0.004, 2 * stroke / speed))
+        guard material.yieldPressurePa.isFinite, let mass = effectiveMass, mass > 0,
+              let radius = contactRadius, radius > 0 else { return cushioned }
+        // The ground under that layer yields only as far as the load on it makes it. Replacing the
+        // layer with this alone made grass harsher than concrete for anything light: a 1.7 kg eBee
+        // broke at 1.7 m/s on a field and 2.3 m/s on a runway, because it barely dents soil but
+        // still lands on the turf.
+        let stiffness = 2 * Float.pi * material.yieldPressurePa * max(0.005, radius)
+        let sinkTime = (mass / stiffness).squareRoot()
+        // Past its yielding depth the ground stops giving: that part of the blow is taken over
+        // the depth alone, the rest by the airframe as on anything hard.
+        let ground = speed * sinkTime <= material.yieldingDepth ? 2 * sinkTime : 2 * material.yieldingDepth / speed
+        return min(0.4, cushioned + ground)
     }
 
     // MARK: Material lookup
@@ -435,6 +490,9 @@ final class ImpactResolutionService {
         supportLoadNewtons: Float = 0.0,
         rollingContact: Bool = false,
         rotorSpeedRadPerSec: Float = 0.0,
+        /// Summed radius of every sphere in this contact patch, when a patch is several feet at
+        /// once: the ground under N feet is N times as stiff as under one.
+        groundContactRadius: Float? = nil,
         /// Loads already on each joint before this contact (flight or resting), by child id.
         /// Nil means the aircraft is taken as resting under its own weight.
         jointPreload: [String: VehicleJointLoad]? = nil,
@@ -646,7 +704,8 @@ final class ImpactResolutionService {
             damageFactor *= 1.6 + material.cuttingFactor * 0.25
         }
         let isImpact = normalClosingSpeed > restingSpeedThreshold
-        var contactDuration = Self.contactDuration(component: primary, material: material, closingSpeed: closing)
+        var contactDuration = Self.contactDuration(component: primary, material: material, closingSpeed: closing,
+                                                   effectiveMass: effectiveMass, contactRadius: groundContactRadius ?? contact.sphereRadius)
         if let obstacleYield, obstacleYield.stiffness.isFinite, obstacleYield.mass < effectiveMass {
             // Against something lighter than the blow that bends, the contact lasts as long as
             // half a swing of the aircraft on the obstacle's spring — a twig is not a wall. A
@@ -818,6 +877,9 @@ final class ImpactResolutionService {
                         obstacleImpulseWorld: normal * result.normalImpulse,
                         transmittedJointImpulseWorld: .zero))
                 }
+                Self.recordBladeLossSpread(damage: damage, componentID: resolvedComponentID, graph: &graph,
+                                           rotorsSpinning: rotorsSpinning, shaftSpeed: shaftSpeed,
+                                           contactDuration: max(result.contactDuration, deltaTime))
                 let ratio = damageEnergy * damageFactor / max(0.5, Self.tierStrength(for: resolvedComponentID, graph: graph))
                 var report = ImpactReport(
                     componentID: resolvedComponentID,
@@ -1068,6 +1130,10 @@ final class ImpactResolutionService {
                 airframeClass: airframeClass
             )
         }
+
+        Self.recordBladeLossSpread(damage: damage, componentID: resolvedComponentID, graph: &graph,
+                                   rotorsSpinning: rotorsSpinning, shaftSpeed: shaftSpeed,
+                                   contactDuration: max(contactDuration, deltaTime))
 
         var report = ImpactReport(
             componentID: resolvedComponentID,
@@ -1424,7 +1490,38 @@ final class ImpactResolutionService {
     /// landing folds wings down here; a gear strike tears the gear leg off here.
     /// Natural period of an equipment mount or small attachment (motor, gimbal, gear leg):
     /// such mounts sit at 50–200 Hz, so they follow any impact pulse almost exactly.
+    /// ⚠️ How much of what a turning propeller just lost is out of balance.
+    ///
+    /// Struck while it turns, a propeller does not lose one chip off one blade: every blade comes
+    /// round to the contact in turn, `N = blades · ω · t / 2π` times in the time it lasts. What
+    /// they lose adds up as N chips, but what is left unbalanced is their vector sum, which grows
+    /// only as √N — the rest has gone off evenly all the way round. Counted all on one side, a
+    /// Matrice 350 whose propellers had chewed the ground shook each of them off its shaft within
+    /// a second of lying there with its motors running.
+    static func recordBladeLossSpread(
+        damage: [VehicleComponentGraph.ImpactDamageEntry],
+        componentID: String,
+        graph: inout VehicleComponentGraph,
+        rotorsSpinning: Bool,
+        shaftSpeed: Float,
+        contactDuration: Float
+    ) {
+        guard rotorsSpinning, shaftSpeed > 1,
+              let blade = graph.component(id: componentID), case .propeller = blade.kind,
+              let entry = damage.first(where: { $0.componentID == componentID }) else { return }
+        let lost = max(0, entry.integrityBefore - entry.integrityAfter)
+        guard lost > 0 else { return }
+        let strikes = max(1, assumedBladeCount * shaftSpeed * contactDuration / (2 * Float.pi))
+        let unevenBefore = max(0, (1 - entry.integrityBefore) - blade.evenBladeLoss)
+        let unevenAfter = (unevenBefore * unevenBefore + lost * lost / strikes).squareRoot()
+        graph.setEvenBladeLoss((1 - entry.integrityAfter) - unevenAfter, id: componentID)
+    }
+
     static let attachmentPeriod: Float = 0.01
+
+    /// Blades per propeller where the model does not say. Two is the fewest any propeller has, so
+    /// it counts the fewest strikes per revolution and leaves the most out-of-balance behind.
+    static let assumedBladeCount: Float = 2
 
     static func applyInertialShock(
         graph: inout VehicleComponentGraph,
@@ -1515,7 +1612,8 @@ final class ImpactResolutionService {
                 plasticRotationSpent: outcome.plasticRotationSpent,
                 residualStrength: outcome.residualStrength,
                 stiffnessScale: outcome.stiffnessScale,
-                fracture: outcome.fracture) {
+                fracture: outcome.fracture,
+                loadUtilisation: outcome.utilisation) {
                 entries.append(entry)
             }
         }

@@ -368,7 +368,10 @@ extension VehicleJointSection {
     /// This section with every capacity raised to at least the envelope times `factor`.
     /// Stiffness follows strength (the failure strain is a property of the material), so
     /// each spring is raised by the same ratio as the capacity it belongs to.
-    func raised(to envelope: VehicleJointEnvelope, factor: Float) -> VehicleJointSection {
+    /// `scalesStiffness: false` raises what the section can carry without making it stiffer: a
+    /// local reinforcement — a thicker fitting, a doubler at a root — not a heavier section all
+    /// the way along.
+    func raised(to envelope: VehicleJointEnvelope, factor: Float, scalesStiffness: Bool = true) -> VehicleJointSection {
         var section = self
         func raise(_ current: Float, _ demand: Float) -> (value: Float, ratio: Float) {
             let target = max(current, demand * factor)
@@ -386,11 +389,13 @@ extension VehicleJointSection {
         section.torsionUltimateNm = torsion.value
         section.shearUltimateN = shear.value
         section.axialUltimateN = axial.value
-        section.flapStiffness *= max(flap.ratio, flapNeg.ratio)
-        section.lagStiffness *= lag.ratio
-        section.torsionStiffness *= torsion.ratio
-        section.shearStiffness *= shear.ratio
-        section.axialStiffness *= axial.ratio
+        if scalesStiffness {
+            section.flapStiffness *= max(flap.ratio, flapNeg.ratio)
+            section.lagStiffness *= lag.ratio
+            section.torsionStiffness *= torsion.ratio
+            section.shearStiffness *= shear.ratio
+            section.axialStiffness *= axial.ratio
+        }
         // Then the combined check, case by case: wherever a design case still exceeds the
         // section under the interaction the airframe is judged by, the whole section grows
         // by that ratio. Uniformly, because which of spar cap and skin a designer thickens is
@@ -403,11 +408,13 @@ extension VehicleJointSection {
             section.torsionUltimateNm *= worst
             section.shearUltimateN *= worst
             section.axialUltimateN *= worst
-            section.flapStiffness *= worst
-            section.lagStiffness *= worst
-            section.torsionStiffness *= worst
-            section.shearStiffness *= worst
-            section.axialStiffness *= worst
+            if scalesStiffness {
+                section.flapStiffness *= worst
+                section.lagStiffness *= worst
+                section.torsionStiffness *= worst
+                section.shearStiffness *= worst
+                section.axialStiffness *= worst
+            }
         }
         return section
     }

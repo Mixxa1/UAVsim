@@ -270,7 +270,18 @@ struct VehicleContactProfile: Hashable {
     func applyingDeformations(from graph: VehicleComponentGraph) -> VehicleContactProfile {
         guard !spheres.isEmpty else { return self }
         let transforms = graph.deformationTransforms()
-        let deformed = spheres.map { sphere -> VehicleContactSphere in
+        // ⚠️ A propeller whose blades have broken off has no disc left to touch anything with.
+        // Its contact spheres span the whole disc, and keeping them after the blades had gone
+        // left a tumbling aircraft striking the ground through a propeller that was no longer
+        // there — tick after tick, each strike loading the bare hub harder, until at four times
+        // its mount's capacity it tore the hub off the shaft. What remains is the hub, and the
+        // motor under it has contacts of its own.
+        let intact = spheres.filter { sphere in
+            guard let component = graph.component(id: sphere.componentID),
+                  case .propeller = component.kind else { return true }
+            return component.integrity > 0.001
+        }
+        let deformed = intact.map { sphere -> VehicleContactSphere in
             guard let component = graph.component(id: sphere.componentID), component.isAttached else {
                 return sphere
             }
@@ -309,6 +320,10 @@ struct VehicleComponent: Hashable {
     /// residual threshold through `residualStrength`.
     let strengthJ: Float
     var integrity: Float
+    /// For a propeller: the part of its lost integrity that went evenly off every blade, so is no
+    /// out-of-balance at all. Zero means all of it is one-sided — a chip off one blade, the
+    /// conservative reading of damage whose cause was not recorded.
+    var evenBladeLoss: Float = 0
     var residualStrength: Float = 1.0
     var stiffnessScale: Float = 1.0
     var deformation: VehicleComponentDeformation = .none
@@ -388,6 +403,12 @@ struct VehicleComponentGraph: Hashable {
     /// Largest permanent hinge rotation a joint can hold, radians. A panel folded past this
     /// has torn free; the fracture solver separates it before it gets here.
     static let maximumHingeRotation: Float = 170 * .pi / 180
+
+    /// How far past its mount's capacity a propeller has to be loaded before the hub itself
+    /// lets go, rather than the blades simply breaking off it. Sized from the ratio of the
+    /// hub's bolt circle to the blade root as section moduli, which is comfortably more than
+    /// this for any propeller; four is the conservative end. See `applyJointOutcome`.
+    static let propellerHubSeparationRatio: Float = 4
 
     /// The joint about which a component's permanent rotation pivots: its connection's
     /// section anchor, or — for a graph restored without sections — its parent's centre.
@@ -535,10 +556,16 @@ struct VehicleComponentGraph: Hashable {
         components[index].integrity = value.clamped(to: 0.0...1.0)
     }
 
+    mutating func setEvenBladeLoss(_ value: Float, id: String) {
+        guard let index = indexByID[id] else { return }
+        components[index].evenBladeLoss = min(max(0, value), 1 - components[index].integrity)
+    }
+
     mutating func applyRuntimeState(from previous: VehicleComponentGraph) {
         for index in components.indices {
             guard let old = previous.component(id: components[index].id) else { continue }
             components[index].integrity = old.integrity
+            components[index].evenBladeLoss = old.evenBladeLoss
             components[index].residualStrength = old.residualStrength
             components[index].stiffnessScale = old.stiffnessScale
             components[index].deformation = old.deformation
@@ -822,6 +849,19 @@ struct VehicleComponentGraph: Hashable {
     /// carry — and then it yields or breaks in that event — or it does not, and then it does
     /// nothing. The only slow mechanism is `fatigueDamage`, which the solvers accumulate
     /// from real load cycles.
+    ///
+    /// ⚠️ The weak element in a propeller's load path is the blade, not the clamp. A hub is
+    /// held by a nut whose preload is measured in kilonewtons; the blade root of the same
+    /// propeller fails in bending at a few newton-metres. So an overloaded propeller loses its
+    /// blades and leaves a stub turning on the shaft — which is what a prop strike looks like
+    /// on every real aircraft — and only a load several times past that tears the hub off the
+    /// shaft (`propellerHubSeparationRatio`). A quadcopter tipping over on the ground with its
+    /// motors running used to throw two intact propellers across the field.
+    ///
+    /// That holds for a load *on* the propeller — a strike. It does not hold for the out-of-balance
+    /// force of a damaged propeller turning: that force is made by the blades but carried by the
+    /// hub, the shaft and the mount, and those are what it wears through. Such a caller passes
+    /// `loadCarriedByBlades: false`.
     @discardableResult
     mutating func applyJointOutcome(
         childComponentID: String,
@@ -830,7 +870,9 @@ struct VehicleComponentGraph: Hashable {
         residualStrength: Float,
         stiffnessScale: Float,
         fracture: VehicleJointFracture,
-        fatigueDamage: Float? = nil
+        fatigueDamage: Float? = nil,
+        loadUtilisation: Float? = nil,
+        loadCarriedByBlades: Bool = true
     ) -> ConnectionDamageEntry? {
         guard let index = connectionIndexByChildID[childComponentID],
               structuralConnections[index].state != .detached else { return nil }
@@ -838,6 +880,17 @@ struct VehicleComponentGraph: Hashable {
         var rotation = plasticRotationBody
         let angle = simd_length(rotation)
         if angle > Self.maximumHingeRotation { rotation *= Self.maximumHingeRotation / angle }
+
+        // A propeller loses its blades before its hub. Anything short of the ratio above leaves
+        // the stub on the shaft: no thrust, heavy vibration, nothing thrown across the field.
+        // The mount itself is untouched — it was never the element that failed.
+        if fracture != .intact, loadCarriedByBlades, let componentIndex = indexByID[childComponentID],
+           case .propeller = components[componentIndex].kind,
+           (loadUtilisation ?? 1) < Self.propellerHubSeparationRatio {
+            guard components[componentIndex].integrity > 0.0001 else { return nil }
+            components[componentIndex].integrity = 0
+            return nil
+        }
 
         var updated = before
         updated.fracture = fracture
@@ -880,11 +933,12 @@ struct VehicleComponentGraph: Hashable {
 
     /// Raises every joint to carry at least `envelope × factor` — the design floor that makes
     /// a pristine airframe survive its own design cases however its sections were first sized.
-    mutating func raiseSectionCapacities(to envelopes: [String: VehicleJointEnvelope], factor: Float) {
+    mutating func raiseSectionCapacities(to envelopes: [String: VehicleJointEnvelope], factor: Float,
+                                         scalesStiffness: Bool = true) {
         for index in structuralConnections.indices {
             let connection = structuralConnections[index]
             guard let section = connection.section, let envelope = envelopes[connection.childComponentID] else { continue }
-            let raised = section.raised(to: envelope, factor: factor)
+            let raised = section.raised(to: envelope, factor: factor, scalesStiffness: scalesStiffness)
             guard raised != section else { continue }
             var updated = VehicleStructuralConnection(
                 id: connection.id,

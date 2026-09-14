@@ -115,8 +115,14 @@ enum VehicleComponentGraphBuilder {
             (drafts, rotorSlots, stations) = fixedWingDrafts(geometry: geometry, includeLiftRotors: true, profile: profile)
         }
 
-        // Shared internals every airframe carries.
-        let bodyCenter = geometry.boundsCenter
+        // Shared internals every airframe carries. A multirotor carries them in its frame, which is
+        // centred on its rotors (see `multirotorDrafts`); the bounding box of the blades is not
+        // where its battery is. A fixed wing keeps them where they were: along the fuselage their
+        // position is the aircraft's balance, which the flight model is built around.
+        var bodyCenter = geometry.boundsCenter
+        if profile.airframeClass == .multirotor, let frame = drafts.first {
+            bodyCenter = SIMD3<Float>(frame.position.x, bodyCenter.y, frame.position.z)
+        }
         drafts.append(ComponentDraft(
             kind: .battery,
             position: bodyCenter + SIMD3<Float>(0.0, -geometry.boundsSize.y * 0.10, 0.0),
@@ -240,7 +246,9 @@ enum VehicleComponentGraphBuilder {
                 return total + station.chord * station.length
             } / 2
         )
-        graph.raiseSectionCapacities(to: envelopes, factor: max(1, profile.structuralQualityFactor))
+        graph.raiseSectionCapacities(to: envelopes.design, factor: max(1, profile.structuralQualityFactor))
+        graph.raiseSectionCapacities(to: envelopes.reinforcement, factor: max(1, profile.structuralQualityFactor),
+                                     scalesStiffness: false)
         return Output(
             graph: graph,
             contactProfile: contactProfile,
@@ -405,6 +413,12 @@ enum VehicleComponentGraphBuilder {
     /// - landing at 2.67 g limit on the undercarriage with no lift, which is what bends a
     ///   wing down at touchdown (the landing load factor of CS-23.473);
     /// - emergency-landing inertia of every item of mass (already ultimate).
+    /// The mass below which an aircraft is a small unmanned aircraft for its structure's sake —
+    /// the line EASA's C3 class and the FAA's Part 107 both draw — and the fall onto grass it is
+    /// built to survive. See the drop case in `designEnvelopes`.
+    static let smallAircraftMassKg: Float = 25
+    static let smallAircraftDropHeight: Float = 2
+
     private static func designEnvelopes(
         graph: VehicleComponentGraph,
         profile: DroneModelProfile,
@@ -414,7 +428,7 @@ enum VehicleComponentGraphBuilder {
         ultimateOverLimit: Float,
         contactProfile: VehicleContactProfile,
         wingAreaM2: Float
-    ) -> [String: VehicleJointEnvelope] {
+    ) -> (design: [String: VehicleJointEnvelope], reinforcement: [String: VehicleJointEnvelope]) {
         let g: Float = 9.81
         let weight = designMassKg * g
         let properties = graph.massProperties
@@ -495,6 +509,7 @@ enum VehicleComponentGraphBuilder {
             add(inertia, [])
         }
         var envelopes: [String: VehicleJointEnvelope] = [:]
+        var reinforcement: [String: VehicleJointEnvelope] = [:]
         for loadCase in cases {
             let loads = StructuralLoadField.jointLoads(graph: graph, loadCase: loadCase, transforms: transforms)
             for (id, load) in loads { envelopes[id, default: VehicleJointEnvelope()].include(load) }
@@ -551,10 +566,88 @@ enum VehicleComponentGraphBuilder {
                                                                                       forceBody: force)])
                 loadCase.angularAccelerationBody = simd_cross(lever, force) / inertia
                 let loads = StructuralLoadField.jointLoads(graph: graph, loadCase: loadCase, transforms: transforms)
-                if let load = loads[gearID] { envelopes[gearID, default: VehicleJointEnvelope()].include(load) }
+                // ⚠️ Every joint the touchdown passes through, not only the gear's own. The blow
+                // enters at the leg and is carried up through the frame and out along every arm to
+                // the motor and propeller it decelerates. Only the leg was ever sized for it, so the
+                // arms of a quadcopter met their first landing with nothing but flight loads behind
+                // them — and a Mavic dropped from 66 cm onto grass broke four arm roots.
+                for (id, load) in loads { envelopes[id, default: VehicleJointEnvelope()].include(load) }
+            }
+
+            // ⚠️ The level landing, on every leg at once (CS-23.479) — the case above is only the
+            // one-leg landing of CS-23.483.
+            //
+            // On one leg the aircraft pivots about the contact and most of its mass never stops:
+            // a Mavic's design case came to 35–52 N, 3–5 g on the body. Landing flat, all of it
+            // stops, and the contact solver — which is what the airframe actually meets — handed
+            // the same aircraft 14 g at 2.2 m/s, and each arm, ringing at its own period, 16–20 g.
+            // Arms sized for 3–5 g broke four roots in a landing below the design sink speed.
+            // So this case is loaded the way the impact path loads it: the body's half-sine pulse,
+            // and every member's shock response to it at that member's own bending period.
+            // What the aircraft actually comes down on, level: whatever reaches lowest in its resting
+            // attitude — legs, a belly, the tail of a tailsitter, the frame of a whoop — and never a
+            // propeller, which is not a support whatever the model's disc reaches. Taken from the gear
+            // alone, the 13 aircraft that do not stand on it were never given a level landing at all.
+            let rest = VehicleContactProfile.restOrientation(for: profile.airframeStyle)
+            let restingUp = simd_act(rest.conjugate, SIMD3<Float>(0, 1, 0))
+            let standing = contactProfile.spheres.filter { sphere in
+                guard let component = graph.component(id: sphere.componentID) else { return false }
+                if case .propeller = component.kind { return false }
+                return true
+            }.map { ($0, simd_act(rest, $0.offset).y - $0.radius) }
+            let floor = standing.map(\.1).min() ?? 0
+            let supports = standing.filter { $0.1 <= floor + 0.01 }.map(\.0)
+            func levelLanding(sink: Float, surface: ImpactSurfaceMaterial, duration: Float,
+                              into target: inout [String: VehicleJointEnvelope]) {
+                let impulse = (1 + surface.restitution) * sink * designMassKg
+                let peak = impulse * Float.pi / (2 * max(0.001, duration)) / designMassKg * ultimateOverLimit
+                let pulse = StructuralAccelerationHistory.halfSine(peakLinear: restingUp * peak, peakAngular: .zero,
+                                                                   duration: duration)
+                var impulsive: [String: (linear: SIMD3<Float>, angular: SIMD3<Float>)] = [
+                    "*": pulse.shockResponse(period: ImpactResolutionService.attachmentPeriod, damping: 0.05)
+                ]
+                for (memberID, stations) in graph.memberChains {
+                    let period = ImpactResolutionService.firstBendingPeriod(stations: stations, graph: graph)
+                    let damping = graph.connection(childComponentID: stations.first ?? "")?.section?.material.dampingRatio ?? 0.02
+                    impulsive[memberID] = pulse.shockResponse(period: period, damping: damping)
+                }
+                let reaction = restingUp * (peak * designMassKg / Float(supports.count))
+                var loadCase = StructuralLoadCase(
+                    specificForceBody: restingUp * g,
+                    centerOfMass: properties.centerOfMassOffset,
+                    pointForces: supports.map { sphere in
+                        StructuralPointForce(componentID: sphere.componentID, pointBody: sphere.offset - restingUp * sphere.radius,
+                                             forceBody: reaction)
+                    })
+                loadCase.impulsive = impulsive
+                let loads = StructuralLoadField.jointLoads(graph: graph, loadCase: loadCase, transforms: transforms)
+                for (id, load) in loads { target[id, default: VehicleJointEnvelope()].include(load) }
+            }
+            if !supports.isEmpty {
+                levelLanding(sink: sink, surface: .asphalt, duration: duration, into: &envelopes)
+
+                // ⚠️ A small aircraft is built to survive being dropped, not only to land.
+                //
+                // CS-23 sizes an undercarriage for a pilot flaring onto a runway: 7–10 ft/s. What
+                // governs a quadcopter's arms or a hand-launched wing is a fall — a battery cut at
+                // a low hover, a fumbled catch, a gust at the landing spot. Below the 25 kg that
+                // separates small unmanned aircraft from the rest (EASA's C3 class, the FAA's
+                // 55 lb of Part 107) the airframe also carries a two-metre drop onto grass, level,
+                // on the ground model the contact solver uses. Sized to CS-23 alone, a Mavic broke
+                // an arm root falling 1.1 m onto a field.
+                if designMassKg <= Self.smallAircraftMassKg {
+                    let dropSink = (2 * g * Self.smallAircraftDropHeight).squareRoot()
+                    let dropDuration = ImpactResolutionService.contactDuration(
+                        component: gear, material: .soil, closingSpeed: dropSink,
+                        effectiveMass: designMassKg, contactRadius: supports.reduce(Float(0)) { $0 + $1.radius })
+                    // Carried as reinforcement: strength where the drop loads it, not a stiffer
+                    // airframe. Scaled as a whole section, a drop-proof quadcopter came out so stiff
+                    // that its wreck rocked on the tarmac for seventeen seconds without settling.
+                    levelLanding(sink: dropSink, surface: .soil, duration: dropDuration, into: &reinforcement)
+                }
             }
         }
-        return envelopes
+        return (envelopes, reinforcement)
     }
 
     /// Stable −1...1 from a string (FNV-1a), so build scatter belongs to the airframe and a
@@ -808,7 +901,23 @@ enum VehicleComponentGraphBuilder {
     private static func multirotorDrafts(
         geometry: DroneVisualGeometrySample
     ) -> (drafts: [ComponentDraft], rotorSlots: [RotorSlotPair], stations: [StationDraft]) {
-        let center = geometry.boundsCenter
+        // ⚠️ The airframe's centre in plan is the centre of its rotors, not of its bounding box.
+        //
+        // The visual bounds include the blades, and the blades are frozen at whatever azimuth the
+        // model was authored at — so the box reaches further out on one side than the other. The
+        // frame, the battery, every arm root and the landing gear were all placed at the centre of
+        // that box: on 18 of the catalogue's multirotors it sat off the rotors' plane of symmetry,
+        // by 3.2 cm on a Mavic 4 Pro, 7.4 cm on a Matrice 350 and 13.6 cm on a Griff 30. The
+        // centre of mass followed, so a symmetric aircraft hovered with a built-in roll moment,
+        // and a flat landing threw it onto one side hard enough to break the arms on that side.
+        // An aircraft that hovers has its centre of mass under its centre of thrust; the rotor
+        // hubs are symmetric however the blades were left. Height still comes from the body.
+        let boundsCenter = geometry.boundsCenter
+        var center = boundsCenter
+        if !geometry.propellers.isEmpty {
+            let hubs = geometry.propellers.reduce(SIMD3<Float>.zero) { $0 + $1.center } / Float(geometry.propellers.count)
+            center = SIMD3<Float>(hubs.x, boundsCenter.y, hubs.z)
+        }
         let size = geometry.boundsSize
         var drafts: [ComponentDraft] = []
         var stations: [StationDraft] = []
@@ -1449,35 +1558,64 @@ enum VehicleComponentGraphBuilder {
         let bodyRadius = max(0.04, min(halfSize.x, halfSize.y, halfSize.z) * 0.9)
         addSphere(at: center, radius: bodyRadius)
 
-        // Ground rest points: bottoms of the visual at the footprint corners
-        // (the visual is ground-lifted, so the bottom sits at y == 0 at rest).
+        // Ground rest points.
         let restRadius = max(0.02, size.y * 0.10)
-        let footprintX = halfSize.x * 0.55
-        let footprintZ = halfSize.z * 0.55
         let gearID = drafts.first(where: {
             if case .landingGear = $0.kind { return true }
             return false
         })?.id
-        addSphere(
-            at: SIMD3<Float>(center.x - footprintX, restRadius, center.z - footprintZ),
-            radius: restRadius,
-            componentID: gearID
-        )
-        addSphere(
-            at: SIMD3<Float>(center.x + footprintX, restRadius, center.z - footprintZ),
-            radius: restRadius,
-            componentID: gearID
-        )
-        addSphere(
-            at: SIMD3<Float>(center.x - footprintX, restRadius, center.z + footprintZ),
-            radius: restRadius,
-            componentID: gearID
-        )
-        addSphere(
-            at: SIMD3<Float>(center.x + footprintX, restRadius, center.z + footprintZ),
-            radius: restRadius,
-            componentID: gearID
-        )
+        let spheresBeforeGround = spheres.count
+        if geometry.landingGearParts.isEmpty {
+            // No undercarriage is drawn (a canister-launched munition has none in life
+            // either): the bounding-box footprint is all there is to stand on.
+            let footprintX = halfSize.x * 0.55
+            let footprintZ = halfSize.z * 0.55
+            for x in [center.x - footprintX, center.x + footprintX] {
+                for z in [center.z - footprintZ, center.z + footprintZ] {
+                    addSphere(at: SIMD3<Float>(x, restRadius, z), radius: restRadius, componentID: gearID)
+                }
+            }
+        } else {
+            // ⚠️ The aircraft stands on its legs as drawn. Four synthetic corners at ±55 % of
+            // the bounding box gave every aircraft the same four-legged stool, and a stool on
+            // a plane keeps two feet down the moment it tilts — two points in a line, which
+            // cannot resist the moment braking friction applies about that line. Measured:
+            // every aircraft with the placeholder went from four contacts to two at 2° of
+            // tilt, whether its real base was 0.85 m or 6.8 m, and tipped onto its back.
+            //
+            // A skid is a bar, so it is laid out as a row of spheres of its own thickness
+            // along its length — the natural discretisation, with no length invented for it.
+            // The undercarriage defines the plane the aircraft rests on. The visual is
+            // ground-lifted so its lowest geometry sits at y == 0, and where that lowest thing
+            // is a gimbal or an antenna rather than a foot, the legs measure a few millimetres
+            // above it. Left there, the aircraft floats: no sphere reaches the ground, so a
+            // hard landing reports no contact at all (measured: 5 mm on a Mavic 3T, 15 mm on a
+            // Matrice 30T, and every multirotor stopped registering its own touchdown).
+            let gearFloor = geometry.landingGearParts.map(\.bottomY).min() ?? 0
+            let seat = min(0, -gearFloor)
+            for part in geometry.landingGearParts {
+                let alongX = part.halfExtents.x >= part.halfExtents.z
+                let length = (alongX ? part.halfExtents.x : part.halfExtents.z) * 2
+                let thickness = min(alongX ? part.halfExtents.z : part.halfExtents.x,
+                                    part.halfExtents.y) * 2
+                let radius = max(0.02, min(thickness, restRadius) * 0.5)
+                let count = max(1, min(6, Int((length / max(0.001, radius * 2)).rounded(.down))))
+                let interval = length / Float(count)
+                for index in 0..<count {
+                    let offset = -length * 0.5 + interval * (Float(index) + 0.5)
+                    addSphere(
+                        at: SIMD3<Float>(
+                            part.center.x + (alongX ? offset : 0),
+                            part.bottomY + radius + seat,
+                            part.center.z + (alongX ? 0 : offset)),
+                        radius: radius,
+                        componentID: gearID,
+                        preserveComponentMapping: true)
+                }
+            }
+        }
+
+        let groundSupportSphereCount = spheres.count - spheresBeforeGround
 
         // Airframe extremities.
         if profile.airframeClass == .fixedWing || profile.airframeClass == .hybridVTOL {
@@ -1496,7 +1634,11 @@ enum VehicleComponentGraphBuilder {
         // Bound only the optional body/gear/extremity budget. The total cap is
         // dynamic so every real propulsion contact remains represented while
         // narrow-phase work stays linear in a small constant beyond it.
-        let maximumContactSpheres = criticalSphereCount + 12
+        //
+        // Measured undercarriage is not optional padding: it is what the aircraft stands on,
+        // and trimming it is what leaves a tricycle balancing on one leg. It is allowed for
+        // on top of the budget, which stays a small constant per leg.
+        let maximumContactSpheres = criticalSphereCount + 12 + groundSupportSphereCount
         if spheres.count > maximumContactSpheres {
             spheres = Array(spheres.prefix(maximumContactSpheres))
         }

@@ -285,7 +285,8 @@ struct UAVStructuralLoadSolver {
                 plasticRotationSpent: outcome.plasticRotationSpent,
                 residualStrength: outcome.residualStrength,
                 stiffnessScale: outcome.stiffnessScale,
-                fracture: outcome.fracture) {
+                fracture: outcome.fracture,
+                loadUtilisation: outcome.utilisation) {
                 changes.append(entry)
             }
         }
@@ -329,7 +330,15 @@ struct UAVStructuralLoadSolver {
             }()
             guard speed > 5 else { continue }
             let radius = max(propeller.boundingHalfExtents.x, propeller.boundingHalfExtents.z)
-            let missing = propeller.massKg * (1 - propeller.integrity) * 0.4
+            // ⚠️ Out of balance is what is missing on one side against what is still there on
+            // the other, so it is bounded by both. It used to grow with the loss alone, which made
+            // a propeller whose blades had broken away entirely the most violently unbalanced of
+            // all — a bare hub, which is symmetric. On a Matrice 350 that was 540 N turning at
+            // 472 rad/s, four times the mount's shear capacity, and it shook every propeller that
+            // touched the ground in a tumble off its shaft within half a second.
+            let bladeLoss = 1 - propeller.integrity
+            let uneven = max(0, bladeLoss - propeller.evenBladeLoss)
+            let missing = propeller.massKg * min(uneven, propeller.integrity) * 0.4
             let amplitude = missing * 0.8 * radius * speed * speed
             guard amplitude > 1e-4 else { continue }
             let hubTransform = transforms[propeller.id] ?? matrix_identity_float4x4
@@ -377,7 +386,9 @@ struct UAVStructuralLoadSolver {
                         residualStrength: skinHolds ? section.material.retainedSkinFraction : 0,
                         stiffnessScale: 0.02,
                         fracture: skinHolds ? .hinged : .separated,
-                        fatigueDamage: 1) {
+                        fatigueDamage: 1,
+                        loadUtilisation: effective,
+                        loadCarriedByBlades: false) {
                         entries.append(entry)
                     }
                     break
