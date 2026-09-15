@@ -441,7 +441,13 @@ struct FixedWingAerodynamics {
         /// Mass the airframe's published stall speed refers to — its maximum takeoff weight, where
         /// the catalogue gives one. Only the wing geometry uses it; everything mass-dependent
         /// downstream keeps using the live mass.
-        designMassKg: Float? = nil
+        designMassKg: Float? = nil,
+        /// The airframe's catalogue identifier, so a table measured or computed for this aircraft
+        /// (`<id>.aerotable.csv`) wins over its family's.
+        ///
+        /// ⚠️ Until this parameter existed the lookup always passed `nil`: per-airframe tables
+        /// were loaded at launch and registered, and then never flown — only family tables were.
+        profileID: String? = nil
     ) -> FixedWingAerodynamics {
         let preset = FamilyAeroPreset.preset(for: family)
         let span = max(0.3, wingSpanM)
@@ -452,7 +458,7 @@ struct FixedWingAerodynamics {
         // span using a typical small-UAV prop-to-span ratio.
         let propRadius = (span * 0.035).clamped(to: 0.03...1.2)
 
-        let coefficientTable = MachCoefficientDatabase.table(profileID: nil, family: family)
+        let coefficientTable = MachCoefficientDatabase.table(profileID: profileID, family: family)
         // Calibrate the area against whichever lift curve this airframe will actually fly
         // on. Solving the area from the closed form and then flying a table is how an
         // aircraft ends up stalling nowhere near its published speed — the area and the

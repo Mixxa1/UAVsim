@@ -94,3 +94,6 @@ env/
 # Raw CC0 audio downloads (~440 MB). The runtime pack is built from these by
 # Tools/audio-pack.sh into DroneUAVDemo/Resources/Audio, which IS tracked.
 .audio-sources/
+
+# Third-party libraries built locally by CADNext/tools (e.g. Netgen)
+CADNext/third_party/

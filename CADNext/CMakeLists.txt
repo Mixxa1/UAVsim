@@ -10,6 +10,7 @@ option(CADNEXT_WITH_OCCT "Build CADNext with Open CASCADE Technology" OFF)
 option(CADNEXT_WITH_QT "Build CADNext Qt GUI" OFF)
 option(CADNEXT_WITH_COIN3D "Build CADNext Coin3D viewer" OFF)
 option(CADNEXT_WITH_PYTHON "Build CADNext Python bindings" OFF)
+option(CADNEXT_WITH_NETGEN "Build the CAD solid mesher for structural analysis (needs OCCT; see tools/build_netgen.sh)" OFF)
 option(CADNEXT_BUILD_TESTS "Build CADNext tests" ON)
 option(CADNEXT_BUILD_APP "Build CADNext standalone application" OFF)
 
@@ -18,6 +19,10 @@ if(CADNEXT_BUILD_APP AND NOT (CADNEXT_WITH_QT AND CADNEXT_WITH_COIN3D))
         "CADNEXT_BUILD_APP=ON requires both CADNEXT_WITH_QT=ON and "
         "CADNEXT_WITH_COIN3D=ON (the standalone app is a Qt window around "
         "the Coin3D viewport).")
+endif()
+
+if(CADNEXT_WITH_NETGEN AND NOT CADNEXT_WITH_OCCT)
+    message(FATAL_ERROR "CADNEXT_WITH_NETGEN=ON requires CADNEXT_WITH_OCCT=ON: Netgen meshes OCCT solids.")
 endif()
 
 if(CADNEXT_WITH_QT AND NOT CADNEXT_WITH_COIN3D)
@@ -29,6 +34,8 @@ endif()
 add_subdirectory(core)
 add_subdirectory(kernel)
 add_subdirectory(assembly)
+add_subdirectory(fea)
+add_subdirectory(cfd)
 add_subdirectory(bridge)
 
 if(CADNEXT_WITH_COIN3D)

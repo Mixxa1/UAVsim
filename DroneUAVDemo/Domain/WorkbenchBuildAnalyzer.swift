@@ -187,11 +187,15 @@ enum WorkbenchBuildAnalyzer {
                 : "Расчётное время висения меньше 2,5 минут.")
         }
 
-        let horizontalLimit = max(frame.sizeMeters.x, frame.sizeMeters.z) * 0.6 + 0.04
-        if simd_length(SIMD2(stats.centerOfMass.x, stats.centerOfMass.z)) > horizontalLimit {
+        if isCenterOfMassOutsideSafeArea(stats.centerOfMass, frame: frame) {
             stats.warnings.append("Центр масс смещён за безопасную область рамы.")
         }
         return stats
+    }
+
+    static func isCenterOfMassOutsideSafeArea(_ centerOfMass: SIMD3<Double>, frame: WorkbenchResolvedFrame) -> Bool {
+        let horizontalLimit = max(frame.sizeMeters.x, frame.sizeMeters.z) * 0.6 + 0.04
+        return simd_length(SIMD2(centerOfMass.x, centerOfMass.z)) > horizontalLimit
     }
 
     static func slotPosition(

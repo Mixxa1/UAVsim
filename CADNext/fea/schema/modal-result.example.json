@@ -1,0 +1,243 @@
+{
+  "schema": "cadnext-modal-result/1",
+  "testType": "modalVibration",
+  "outcome": "warning",
+  "solverID": "cadnext.fea.modal-tet10",
+  "solverVersion": "fea 1 / netgen 6.2.2607 / materials 1",
+  "metrics": {
+    "firstFrequencyHz": {
+      "value": 16.53007860140255,
+      "unit": "Hz",
+      "numericalUncertainty": 0.009646188039579853
+    },
+    "minimumBandSeparation": {
+      "value": -0.0889240416843952,
+      "unit": "1"
+    }
+  },
+  "warnings": [
+    "резонанс: мода 1 (16.5 Гц) в полосе «rotor 1P»",
+    "полоса «high» доходит до 400.0 Гц, выше последней рассчитанной моды (154.6 Гц) — моды выше не проверены, увеличьте число мод"
+  ],
+  "failureReasons": [],
+  "settings": {
+    "material": "steel_4130",
+    "materialDatabaseVersion": 1,
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.6,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "cantilever",
+      "supports": [
+        {
+          "face": "face-4",
+          "fix": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      ],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    },
+    "modal": {
+      "modeCount": 4,
+      "rotors": [
+        {
+          "name": "rotor",
+          "minimumRpm": 900,
+          "maximumRpm": 1080,
+          "bladeCount": 2
+        }
+      ],
+      "bands": [
+        {
+          "name": "high",
+          "minimumHz": 300,
+          "maximumHz": 400
+        }
+      ],
+      "separationMargin": 0,
+      "attachedMasses": []
+    }
+  },
+  "boundary": "supported",
+  "totalMassKg": 4.710000000000158,
+  "attachedMassKg": 0,
+  "modes": [
+    {
+      "mode": 1,
+      "frequencyHz": 16.53007860140255,
+      "numericalUncertaintyHz": 0.009646188039579853,
+      "resonanceUncertaintyHz": 0.009646188039579853,
+      "effectiveMassFraction": [
+        3.0995261945576884e-17,
+        2.523216610169411e-12,
+        0.6134853045193631
+      ],
+      "convergence": {
+        "behaviour": "monotonic",
+        "observedOrder": 1.822009948417966,
+        "orderLimitedToFormal": false,
+        "extrapolated": 16.522361650970886,
+        "gciFineRelative": 0.0005835536703837203,
+        "asymptoticRatio": 0.9993533339206138
+      }
+    },
+    {
+      "mode": 2,
+      "frequencyHz": 24.77721195209144,
+      "numericalUncertaintyHz": 0.009849025188615435,
+      "resonanceUncertaintyHz": 0.009849025188615435,
+      "effectiveMassFraction": [
+        8.182728503500942e-16,
+        0.6135900176035561,
+        1.4557790349798567e-12
+      ],
+      "convergence": {
+        "behaviour": "monotonic",
+        "observedOrder": 2.24016955545307,
+        "orderLimitedToFormal": false,
+        "extrapolated": 24.76933273194055,
+        "gciFineRelative": 0.0003975033675160566,
+        "asymptoticRatio": 0.9993919746145057
+      }
+    },
+    {
+      "mode": 3,
+      "frequencyHz": 103.40160998470796,
+      "numericalUncertaintyHz": 0.06773575944312651,
+      "resonanceUncertaintyHz": 0.06773575944312651,
+      "effectiveMassFraction": [
+        1.6548506098327612e-15,
+        8.250156454417988e-13,
+        0.1886222529108485
+      ],
+      "convergence": {
+        "behaviour": "monotonic",
+        "observedOrder": 1.8195734730322968,
+        "orderLimitedToFormal": false,
+        "extrapolated": 103.34742137715347,
+        "gciFineRelative": 0.0006550745143440605,
+        "asymptoticRatio": 0.9992755867441282
+      }
+    },
+    {
+      "mode": 4,
+      "frequencyHz": 154.63258602133158,
+      "numericalUncertaintyHz": 0.03954780873675222,
+      "resonanceUncertaintyHz": 0.03954780873675222,
+      "effectiveMassFraction": [
+        3.357030828618683e-14,
+        0.18887804848678108,
+        2.81501969876768e-13
+      ],
+      "convergence": {
+        "behaviour": "monotonic",
+        "observedOrder": 2.8999704302209723,
+        "orderLimitedToFormal": false,
+        "extrapolated": 154.6009477743422,
+        "gciFineRelative": 0.0002557533942509155,
+        "asymptoticRatio": 0.999388302734847
+      }
+    }
+  ],
+  "excitationBands": [
+    {
+      "name": "rotor 1P",
+      "minimumHz": 15,
+      "maximumHz": 18
+    },
+    {
+      "name": "rotor 2P",
+      "minimumHz": 30,
+      "maximumHz": 36
+    },
+    {
+      "name": "high",
+      "minimumHz": 300,
+      "maximumHz": 400
+    }
+  ],
+  "separationMargin": 0,
+  "resonance": [
+    {
+      "mode": 1,
+      "frequencyHz": 16.53007860140255,
+      "nearestBand": "rotor 1P",
+      "separation": -0.0889240416843952,
+      "overlaps": true
+    },
+    {
+      "mode": 2,
+      "frequencyHz": 24.77721195209144,
+      "nearestBand": "rotor 2P",
+      "separation": 0.21078998145583136,
+      "overlaps": false
+    },
+    {
+      "mode": 3,
+      "frequencyHz": 103.40160998470796,
+      "nearestBand": "rotor 2P",
+      "separation": 0.6518429451405637,
+      "overlaps": false
+    },
+    {
+      "mode": 4,
+      "frequencyHz": 154.63258602133158,
+      "nearestBand": "rotor 2P",
+      "separation": 0.7671900798772531,
+      "overlaps": false
+    }
+  ],
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.02,
+      "elements": 568,
+      "frequenciesHz": [
+        16.56064998684781,
+        24.825794199545307,
+        103.61570771402678,
+        155.00588259433582
+      ]
+    },
+    {
+      "maximumElementSizeM": 0.012499999999999999,
+      "elements": 1896,
+      "frequenciesHz": [
+        16.54077495949596,
+        24.792286291522124,
+        103.47656978353346,
+        154.727232246143
+      ]
+    },
+    {
+      "maximumElementSizeM": 0.007812499999999998,
+      "elements": 7938,
+      "frequenciesHz": [
+        16.53007860140255,
+        24.77721195209144,
+        103.40160998470796,
+        154.63258602133158
+      ]
+    }
+  ],
+  "material": {
+    "id": "steel_4130",
+    "youngsModulusPa": 205000000000,
+    "poissonRatio": 0.29,
+    "densityKgPerM3": 7850,
+    "yieldStrengthPa": 435000000,
+    "ultimateStrengthPa": 670000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "cantilever.field.json"
+}

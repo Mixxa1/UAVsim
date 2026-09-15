@@ -64,6 +64,8 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
         private var lastRevision = -1
         private var lastCameraResetToken = -1
         private var lastCategory: WorkbenchCategory?
+        private var lastHighlightToken = -1
+        private static let overlayNodeName = "workbench.structuralOverlay"
         private var cameraOrbitTarget = SIMD3<Float>.zero
         private var minimumCameraDistance: Float = 0.34
         private var maximumCameraDistance: Float = 1.05
@@ -98,6 +100,7 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
                 workspace.center.z - localBounds.center.z)
             scene.rootNode.addChildNode(node)
             aircraft = node
+            updateStructuralOverlay()
             lastRevision = viewModel.build.revision
             lastCategory = viewModel.selectedCategory
             lastCameraResetToken = viewModel.cameraResetToken
@@ -110,10 +113,40 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
             let resetCamera = viewModel.cameraResetToken != lastCameraResetToken
             if changedBuild || changedCategory {
                 rebuild(in: scene, fitsCamera: changedBuild || resetCamera)
+            } else if viewModel.structuralHighlightToken != lastHighlightToken {
+                updateStructuralOverlay()
             } else if resetCamera, let aircraft {
                 fitCamera(to: aircraft, in: scene)
                 lastCameraResetToken = viewModel.cameraResetToken
             }
+        }
+
+        /// Faces of the selected strength case, coloured by what acts on them, on the exact frame.
+        private func updateStructuralOverlay() {
+            lastHighlightToken = viewModel.structuralHighlightToken
+            guard let frameRoot = aircraft?.childNode(withName: WorkbenchModelBuilder.frameNodeName, recursively: true) else { return }
+            frameRoot.childNode(withName: Self.overlayNodeName, recursively: false)?.removeFromParentNode()
+            guard viewModel.selectedCategory == .validation,
+                  case let .imported(construction) = viewModel.build.frame,
+                  let bodies = construction.bodies,
+                  let caseID = viewModel.selectedStructuralCaseID,
+                  let loadCase = viewModel.build.structuralCases.first(where: { $0.id == caseID }),
+                  let body = bodies.first(where: { $0.id == loadCase.bodyID }) else { return }
+            func range(_ faceID: String) -> Range<Int>? {
+                body.faces.first { $0.id == faceID }.map { $0.firstTriangle..<($0.firstTriangle + $0.triangleCount) }
+            }
+            var groups: [(triangles: Range<Int>, color: NSColor)] = []
+            groups += loadCase.supports.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.23, green: 0.56, blue: 0.94, alpha: 1)) }
+            groups += loadCase.forces.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+            groups += loadCase.pressures.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.85, green: 0.76, blue: 0.29, alpha: 1)) }
+            groups += loadCase.exclusions.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedWhite: 0.7, alpha: 1)) }
+            if case let .modal(modal) = loadCase.analysis {
+                groups += modal.equipment.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+            }
+            guard !groups.isEmpty else { return }
+            let overlay = WorkbenchModelBuilder.triangleOverlayNode(mesh: construction.mesh, groups: groups)
+            overlay.name = Self.overlayNodeName
+            frameRoot.addChildNode(overlay)
         }
 
         func handleClick(at point: CGPoint) {
@@ -122,6 +155,22 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
                 .searchMode: SCNHitTestSearchMode.all.rawValue,
                 .ignoreHiddenNodes: true,
             ])
+            if viewModel.facePick != nil {
+                // Picking a face for a load case: the frame's own triangles only, never the overlay.
+                if case let .imported(construction) = viewModel.build.frame {
+                    let sources = WorkbenchModelBuilder.renderableTriangles(of: construction.mesh, convertsCADCoordinates: true).sourceTriangles
+                    // The imported frame mesh is the one geometry under the frame whose element draws
+                    // exactly these triangles; selection rings and hotspots have their own.
+                    for hit in hits where isFrameSurface(hit.node) && hit.node.geometry?.elements.first?.primitiveCount == sources.count {
+                        if hit.faceIndex >= 0, hit.faceIndex < sources.count {
+                            viewModel.pickFace(triangle: sources[hit.faceIndex])
+                            return
+                        }
+                    }
+                }
+                viewModel.pickFace(triangle: -1)
+                return
+            }
             for hit in hits {
                 if let category = category(of: hit.node) {
                     viewModel.selectedCategory = category
@@ -155,6 +204,17 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
             guard abs(clampedDistance - distance) > 0.0001 else { return }
             offset *= clampedDistance / distance
             camera.simdPosition = cameraOrbitTarget + offset
+        }
+
+        private func isFrameSurface(_ node: SCNNode) -> Bool {
+            guard node.geometry != nil else { return false }
+            var current: SCNNode? = node
+            while let candidate = current {
+                if candidate.name == Self.overlayNodeName { return false }
+                if candidate.name == WorkbenchModelBuilder.frameNodeName { return true }
+                current = candidate.parent
+            }
+            return false
         }
 
         private func category(of node: SCNNode) -> WorkbenchCategory? {

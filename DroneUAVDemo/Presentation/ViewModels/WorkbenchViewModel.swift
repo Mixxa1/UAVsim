@@ -1,8 +1,10 @@
 import Foundation
+import simd
 import SwiftUI
 
 enum WorkbenchCategory: Hashable, Identifiable {
     case overview
+    case validation
     case blueprints
     case frame
     case radio
@@ -11,6 +13,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
     var id: String {
         switch self {
         case .overview: return "overview"
+        case .validation: return "validation"
         case .blueprints: return "blueprints"
         case .frame: return "frame"
         case .radio: return "radio"
@@ -21,6 +24,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
     var displayName: String {
         switch self {
         case .overview: return "Сборка"
+        case .validation: return "Испытания"
         case .blueprints: return "Пользовательские"
         case .frame: return "Рама"
         case .radio: return "RF-система"
@@ -31,6 +35,7 @@ enum WorkbenchCategory: Hashable, Identifiable {
     var symbolName: String {
         switch self {
         case .overview: return "list.bullet.rectangle"
+        case .validation: return "checkmark.seal"
         case .blueprints: return "square.stack.3d.up.fill"
         case .frame: return "square.on.square.intersection.dashed"
         case .radio: return "antenna.radiowaves.left.and.right"
@@ -68,10 +73,53 @@ enum WorkbenchAssemblyRole: Hashable, Identifiable {
         + WorkbenchComponentKind.allCases.map { .component($0) }
 }
 
+/// Lets the solver's progress callback (called off the main actor) reach the view model without
+/// keeping it alive.
+private final class WeakViewModelRelay: @unchecked Sendable {
+    weak var value: WorkbenchViewModel?
+    init(_ value: WorkbenchViewModel) { self.value = value }
+}
+
+/// What a click on the model should turn into while a face is being picked for a load case.
+enum WorkbenchFacePick: Hashable {
+    case support(Set<WorkbenchModelAxis>)
+    case force(WorkbenchStructuralCase.ForceSource)
+    case pressure(Double)
+    case exclusion(Double)
+    case equipment(kind: WorkbenchComponentKind, count: Double)
+
+    var displayName: String {
+        switch self {
+        case .equipment: return "массу оборудования"
+        case let .support(axes): return axes.count == 3 ? "заделку" : "опору"
+        case .force: return "силу"
+        case .pressure: return "давление"
+        case .exclusion: return "зону исключения"
+        }
+    }
+}
+
 @MainActor
 final class WorkbenchViewModel: ObservableObject {
     @Published private(set) var build: WorkbenchBuild
     @Published private(set) var stats: WorkbenchBuildStats
+    /// Engineering validation of the build as it is now (spec §4 ValidationState): recomputed
+    /// with the stats, from the blueprint's built-in checks and the stored solver results.
+    @Published private(set) var validation: EngineeringValidationState
+    /// Stored strength runs of this vehicle (all cases), oldest first.
+    @Published private(set) var structuralRuns: [WorkbenchStructuralRun] = []
+    @Published var selectedStructuralCaseID: UUID? { didSet { structuralHighlightToken += 1 } }
+    /// Set while the next click on the model picks a face for the selected case.
+    @Published private(set) var facePick: WorkbenchFacePick?
+    @Published private(set) var runningStructuralCaseID: UUID?
+    @Published private(set) var structuralProgress: String?
+    /// Bumped when the faces to highlight change without the build's geometry changing, so the scene
+    /// redraws the overlay instead of rebuilding the aircraft and refitting the camera.
+    @Published private(set) var structuralHighlightToken = 0
+    private var structuralRunTask: Task<Void, Never>?
+    /// Vehicle whose runs `structuralRuns` holds: a new or opened blueprint reloads them.
+    private var runsVehicleID: UUID?
+    private let structuralStore = try? WorkbenchStructuralRunStore.standard()
     @Published var selectedCategory: WorkbenchCategory = .overview
     @Published var statusMessage = "Выберите категорию или нажмите на деталь в 3D-сцене."
     @Published private(set) var blueprints: [WorkbenchBlueprintSummary] = []
@@ -85,6 +133,10 @@ final class WorkbenchViewModel: ObservableObject {
     init(build: WorkbenchBuild = .defaultQuad()) {
         self.build = build
         stats = Self.resolvedStats(for: build)
+        let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+        validation = EngineeringValidationEngine.evaluate(
+            snapshot: snapshot, records: WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot))
+        reloadStructuralRuns()
         refreshBlueprints()
     }
 
@@ -460,6 +512,203 @@ final class WorkbenchViewModel: ObservableObject {
 
     private func recompute() {
         stats = Self.resolvedStats(for: build)
+        if runsVehicleID != build.id {
+            reloadStructuralRuns()
+        } else {
+            recomputeValidation()
+        }
+    }
+
+    /// Built-in checks plus the strength record derived from this vehicle's current runs.
+    private func recomputeValidation() {
+        let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+        var records = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
+        let upstream = records
+        for test in [EngineeringTestType.structuralStatic, .modalVibration] {
+            if let derived = WorkbenchStructuralAggregate.record(
+                test, build: build, snapshot: snapshot, upstreamRecords: upstream, runs: structuralRuns) {
+                records.append(derived)
+            }
+        }
+        let running = runningStructuralCaseID.flatMap { id in build.structuralCases.first { $0.id == id }?.testType }
+        validation = EngineeringValidationEngine.evaluate(
+            snapshot: snapshot, records: records, running: running.map { [$0] } ?? [])
+    }
+
+    private func reloadStructuralRuns() {
+        runsVehicleID = build.id
+        structuralRuns = structuralStore?.runs(vehicleID: build.id.uuidString.lowercased()) ?? []
+        recomputeValidation()
+    }
+
+    // MARK: Strength cases
+
+    var exactBodies: [WorkbenchConstruction.Body] {
+        if case let .imported(construction) = build.frame { return construction.bodies ?? [] }
+        return []
+    }
+
+    var structuralTool: URL? { WorkbenchStructuralToolLocator.locate() }
+
+    func structuralCaseStatuses() -> [WorkbenchStructuralAggregate.CaseStatus] {
+        let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+        return WorkbenchStructuralAggregate.caseStatuses(
+            build: build, snapshot: snapshot,
+            upstreamRecords: WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot),
+            runs: structuralRuns)
+    }
+
+    /// Why the case cannot run yet, or nil.
+    func structuralPrepareProblem(_ id: UUID) -> String? {
+        guard let loadCase = build.structuralCases.first(where: { $0.id == id }) else { return "Вариант не найден." }
+        let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+        let state = EngineeringValidationEngine.evaluate(
+            snapshot: snapshot, records: WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot))
+        if case let .failure(error) = WorkbenchStructuralJob.prepare(loadCase, build: build, state: state) {
+            return error.description
+        }
+        return nil
+    }
+
+    /// 1/10 of the solid's extent — only a starting point: whether it is fine enough is what the
+    /// three-mesh study answers (the same suggestion as CADNext's panel).
+    func suggestedElementSize(bodyID: String) -> Double? {
+        guard case let .imported(construction) = build.frame,
+              let body = construction.bodies?.first(where: { $0.id == bodyID }) else { return nil }
+        var low = SIMD3<Float>(repeating: .greatestFiniteMagnitude)
+        var high = SIMD3<Float>(repeating: -.greatestFiniteMagnitude)
+        for t in body.firstTriangle..<(body.firstTriangle + body.triangleCount) {
+            for k in 0..<3 {
+                let i = Int(construction.mesh.indices[3 * t + k])
+                let p = SIMD3<Float>(construction.mesh.vertices[3 * i], construction.mesh.vertices[3 * i + 1], construction.mesh.vertices[3 * i + 2])
+                low = simd_min(low, p)
+                high = simd_max(high, p)
+            }
+        }
+        let diagonal = Double(simd_length(high - low))
+        return diagonal > 0 ? diagonal / 10 : nil
+    }
+
+    func addStructuralCase(bodyID: String) {
+        guard let body = exactBodies.first(where: { $0.id == bodyID }) else { return }
+        pushUndo()
+        let number = build.structuralCases.filter { $0.bodyID == bodyID }.count + 1
+        let loadCase = WorkbenchStructuralCase(name: "\(body.name) — вариант \(number)", bodyID: bodyID)
+        build.structuralCases.append(loadCase)
+        selectedStructuralCaseID = loadCase.id
+        recomputeValidation()
+        statusMessage = "Новый вариант нагрузок для «\(body.name)». Назначьте опоры и нагрузки кликом по граням."
+    }
+
+    /// `undoable: false` for edits made keystroke by keystroke (a name), which like the build's own
+    /// name stay out of the undo stack — each entry there is a full snapshot, BRep included.
+    func updateStructuralCase(_ id: UUID, undoable: Bool = true, _ mutation: (inout WorkbenchStructuralCase) -> Void) {
+        guard let index = build.structuralCases.firstIndex(where: { $0.id == id }) else { return }
+        var updated = build.structuralCases[index]
+        mutation(&updated)
+        guard updated != build.structuralCases[index] else { return }
+        if undoable { pushUndo() }
+        build.structuralCases[index] = updated
+        structuralHighlightToken += 1
+        recomputeValidation()
+    }
+
+    func removeStructuralCase(_ id: UUID) {
+        guard build.structuralCases.contains(where: { $0.id == id }) else { return }
+        pushUndo()
+        build.structuralCases.removeAll { $0.id == id }
+        if selectedStructuralCaseID == id { selectedStructuralCaseID = nil }
+        recomputeValidation()
+    }
+
+    func beginFacePick(_ pick: WorkbenchFacePick, for caseID: UUID) {
+        selectedStructuralCaseID = caseID
+        facePick = pick
+        let body = build.structuralCases.first { $0.id == caseID }.flatMap { c in exactBodies.first { $0.id == c.bodyID } }
+        statusMessage = "Кликните грань тела «\(body?.name ?? "?")», чтобы назначить \(pick.displayName)."
+    }
+
+    func cancelFacePick() {
+        facePick = nil
+        statusMessage = "Выбор грани отменён."
+    }
+
+    /// A click on the frame's triangle `triangle` (index into the construction mesh).
+    func pickFace(triangle: Int) {
+        guard let pick = facePick, let caseID = selectedStructuralCaseID,
+              let loadCase = build.structuralCases.first(where: { $0.id == caseID }) else { return }
+        guard let body = exactBodies.first(where: { triangle >= $0.firstTriangle && triangle < $0.firstTriangle + $0.triangleCount }),
+              let face = body.faces.first(where: { triangle >= $0.firstTriangle && triangle < $0.firstTriangle + $0.triangleCount }) else {
+            statusMessage = "Под курсором нет грани точной геометрии."
+            return
+        }
+        guard body.id == loadCase.bodyID else {
+            let caseBody = exactBodies.first { $0.id == loadCase.bodyID }?.name ?? "?"
+            statusMessage = "Это грань «\(body.name)», а вариант относится к «\(caseBody)»: один вариант — одно тело."
+            return
+        }
+        updateStructuralCase(caseID) { edited in
+            switch pick {
+            case let .support(axes): edited.supports.append(.init(faceID: face.id, fixed: axes))
+            case let .force(source): edited.forces.append(.init(faceID: face.id, source: source))
+            case let .pressure(pascals): edited.pressures.append(.init(faceID: face.id, pressurePa: pascals))
+            case let .exclusion(distance): edited.exclusions.append(.init(faceID: face.id, distanceM: distance))
+            case let .equipment(kind, count):
+                if case var .modal(settings) = edited.analysis {
+                    settings.equipment.append(.init(faceID: face.id, kind: kind, count: count))
+                    edited.analysis = .modal(settings)
+                }
+            }
+        }
+        facePick = nil
+        statusMessage = "«\(body.name)», грань \(face.id): назначена \(pick.displayName)."
+    }
+
+    func runStructuralCase(_ id: UUID) {
+        guard runningStructuralCaseID == nil, let loadCase = build.structuralCases.first(where: { $0.id == id }) else { return }
+        guard let tool = structuralTool else {
+            statusMessage = WorkbenchStructuralError.toolNotFound.description
+            return
+        }
+        guard let store = structuralStore else {
+            statusMessage = "Нет папки для результатов расчётов."
+            return
+        }
+        let build = self.build
+        let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+        let state = EngineeringValidationEngine.evaluate(
+            snapshot: snapshot, records: WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot))
+        runningStructuralCaseID = id
+        structuralProgress = "Подготовка…"
+        recomputeValidation()
+        let relay = WeakViewModelRelay(self)
+        structuralRunTask = Task { [weak self] in
+            let result = await WorkbenchStructuralRunner.run(
+                loadCase, build: build, snapshot: snapshot, state: state, store: store, tool: tool,
+                progress: { level, stage in
+                    Task { @MainActor in
+                        relay.value?.structuralProgress = "Сетка \(level + 1) из 3: " + (stage == "mesh" ? "строится…" : "решение…")
+                    }
+                })
+            guard let self else { return }
+            self.runningStructuralCaseID = nil
+            self.structuralProgress = nil
+            switch result {
+            case let .success(run):
+                self.statusMessage = "«\(loadCase.name)»: \(run.record.outcome.rawValue.uppercased())."
+            case let .failure(error):
+                self.statusMessage = Task.isCancelled ? "Расчёт отменён." : error.description
+            }
+            self.reloadStructuralRuns()
+        }
+    }
+
+    func cancelStructuralRun() {
+        structuralRunTask?.cancel()
+    }
+
+    func structuralReportURL(for run: WorkbenchStructuralRun) -> URL? {
+        structuralStore?.root.appendingPathComponent(run.directory).appendingPathComponent(WorkbenchStructuralJob.reportFileName)
     }
 
     /// Analyzer totals retain every propulsion unit for electrical sizing.

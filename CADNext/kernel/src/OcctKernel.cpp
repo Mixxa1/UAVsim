@@ -26,6 +26,7 @@
 #include <BRepGProp.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
 #include <BRepTools.hxx>
+#include <TopTools_FormatVersion.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -650,6 +651,26 @@ cadnext::Result<std::vector<std::uint8_t>> OcctKernel::exportBRep(const ShapeHan
     }
 }
 
+cadnext::Result<std::vector<std::uint8_t>> OcctKernel::exportBRepGeometry(const ShapeHandle& handle) {
+    const TopoDS_Shape* shape = findShape(handle);
+    if (!shape || shape->IsNull()) {
+        return cadnext::Result<std::vector<std::uint8_t>>::fail(
+            {cadnext::ErrorCode::ShapeInvalid, "Shape not found for BRep export"});
+    }
+    try {
+        std::ostringstream oss;
+        // The one-argument Write also writes any triangulation the viewer attached.
+        BRepTools::Write(*shape, oss, Standard_False, Standard_False, TopTools_FormatVersion_CURRENT);
+        const std::string text = oss.str();
+        return cadnext::Result<std::vector<std::uint8_t>>::ok(
+            std::vector<std::uint8_t>(text.begin(), text.end()));
+    } catch (const Standard_Failure& e) {
+        return cadnext::Result<std::vector<std::uint8_t>>::fail(
+            {cadnext::ErrorCode::SerializationFailed,
+             std::string("BRep export failed: ") + e.GetMessageString()});
+    }
+}
+
 cadnext::Result<ShapeHandle> OcctKernel::importBRep(const std::vector<std::uint8_t>& brepData) {
     if (brepData.empty()) {
         return cadnext::Result<ShapeHandle>::fail(
@@ -679,6 +700,10 @@ const TopoDS_Shape* OcctKernel::findShape(const ShapeHandle& handle) const {
     }
     const auto it = impl_->shapes.find(handle.id());
     return it == impl_->shapes.end() ? nullptr : &it->second;
+}
+
+ShapeHandle OcctKernel::adoptShape(const TopoDS_Shape& shape, const char* prefix) {
+    return impl_->store(shape, prefix);
 }
 
 #else // !CADNEXT_WITH_OCCT
@@ -750,6 +775,10 @@ cadnext::Result<std::vector<std::uint8_t>> OcctKernel::exportBRep(const ShapeHan
         cadnext::ErrorCode::KernelUnavailable,
         "BRep export requires an OCCT-enabled build (CADNEXT_WITH_OCCT=ON)"
     });
+}
+
+cadnext::Result<std::vector<std::uint8_t>> OcctKernel::exportBRepGeometry(const ShapeHandle& handle) {
+    return exportBRep(handle);
 }
 
 cadnext::Result<ShapeHandle> OcctKernel::importBRep(const std::vector<std::uint8_t>&) {

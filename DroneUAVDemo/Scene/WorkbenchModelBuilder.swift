@@ -2387,39 +2387,19 @@ enum WorkbenchModelBuilder {
         if let cached = importedGeometryCache.object(forKey: cacheKey) {
             return cached.copy() as? SCNGeometry
         }
-        var positions: [SIMD3<Float>] = []
-        positions.reserveCapacity(count)
-        for index in 0..<count {
-            let x = mesh.vertices[index * 3]
-            let y = mesh.vertices[index * 3 + 1]
-            let z = mesh.vertices[index * 3 + 2]
-            let position = convertsCADCoordinates
-                ? SIMD3<Float>(x, z, -y)
-                : SIMD3<Float>(x, y, z)
-            positions.append(position)
-        }
+        let renderable = renderableTriangles(of: mesh, convertsCADCoordinates: convertsCADCoordinates)
+        let positions = renderable.positions
+        let faces = renderable.faces
+        let weightedFaceNormals = renderable.weightedNormals
 
         // CADNext stores positions and indices only. Build crease-aware normals:
         // neighbouring faces blend across shallow tessellation seams, while the
         // 42-degree threshold preserves machined plate and enclosure edges.
-        var faces: [(Int, Int, Int)] = []
-        var weightedFaceNormals: [SIMD3<Float>] = []
         var adjacentFaces = Array(repeating: [Int](), count: count)
-        for corner in stride(from: 0, to: mesh.indices.count - 2, by: 3) {
-            let i0 = Int(mesh.indices[corner])
-            let i1 = Int(mesh.indices[corner + 1])
-            let i2 = Int(mesh.indices[corner + 2])
-            guard positions.indices.contains(i0),
-                  positions.indices.contains(i1),
-                  positions.indices.contains(i2) else { continue }
-            let normal = simd_cross(positions[i1] - positions[i0], positions[i2] - positions[i0])
-            guard simd_length_squared(normal) > 1e-12 else { continue }
-            let faceIndex = faces.count
-            faces.append((i0, i1, i2))
-            weightedFaceNormals.append(normal)
-            adjacentFaces[i0].append(faceIndex)
-            adjacentFaces[i1].append(faceIndex)
-            adjacentFaces[i2].append(faceIndex)
+        for (faceIndex, face) in faces.enumerated() {
+            adjacentFaces[face.0].append(faceIndex)
+            adjacentFaces[face.1].append(faceIndex)
+            adjacentFaces[face.2].append(faceIndex)
         }
         guard !faces.isEmpty else { return nil }
 
@@ -2464,6 +2444,74 @@ enum WorkbenchModelBuilder {
                 cost: renderVertices.count)
         }
         return geometry
+    }
+
+    /// The triangles `geometry(from:)` draws, in element order, with where each came from in `mesh`:
+    /// degenerate and out-of-range triangles are dropped, so a hit test's `faceIndex` is an index into
+    /// `sourceTriangles`, not into the mesh.
+    static func renderableTriangles(
+        of mesh: WorkbenchConstruction.Mesh,
+        convertsCADCoordinates: Bool
+    ) -> (positions: [SIMD3<Float>], faces: [(Int, Int, Int)], weightedNormals: [SIMD3<Float>], sourceTriangles: [Int]) {
+        let count = mesh.vertices.count / 3
+        var positions: [SIMD3<Float>] = []
+        positions.reserveCapacity(count)
+        for index in 0..<count {
+            let x = mesh.vertices[index * 3]
+            let y = mesh.vertices[index * 3 + 1]
+            let z = mesh.vertices[index * 3 + 2]
+            positions.append(convertsCADCoordinates ? SIMD3<Float>(x, z, -y) : SIMD3<Float>(x, y, z))
+        }
+        var faces: [(Int, Int, Int)] = []
+        var normals: [SIMD3<Float>] = []
+        var sources: [Int] = []
+        guard mesh.indices.count >= 3 else { return (positions, faces, normals, sources) }
+        for corner in stride(from: 0, to: mesh.indices.count - 2, by: 3) {
+            let i0 = Int(mesh.indices[corner])
+            let i1 = Int(mesh.indices[corner + 1])
+            let i2 = Int(mesh.indices[corner + 2])
+            guard positions.indices.contains(i0),
+                  positions.indices.contains(i1),
+                  positions.indices.contains(i2) else { continue }
+            let normal = simd_cross(positions[i1] - positions[i0], positions[i2] - positions[i0])
+            guard simd_length_squared(normal) > 1e-12 else { continue }
+            faces.append((i0, i1, i2))
+            normals.append(normal)
+            sources.append(corner / 3)
+        }
+        return (positions, faces, normals, sources)
+    }
+
+    /// Coloured copies of chosen mesh triangles, lifted a fraction of a millimetre along their normals
+    /// so they sit on the part instead of fighting its surface for depth.
+    static func triangleOverlayNode(
+        mesh: WorkbenchConstruction.Mesh,
+        groups: [(triangles: Range<Int>, color: NSColor)]
+    ) -> SCNNode {
+        let node = SCNNode()
+        let renderable = renderableTriangles(of: mesh, convertsCADCoordinates: true)
+        for group in groups {
+            var vertices: [SCNVector3] = []
+            for (face, source) in zip(renderable.faces, renderable.sourceTriangles) where group.triangles.contains(source) {
+                let a = renderable.positions[face.0], b = renderable.positions[face.1], c = renderable.positions[face.2]
+                let normal = simd_normalize(simd_cross(b - a, c - a)) * 0.0004
+                for p in [a + normal, b + normal, c + normal] { vertices.append(SCNVector3(p.x, p.y, p.z)) }
+            }
+            guard !vertices.isEmpty else { continue }
+            let indices = (0..<vertices.count).map(UInt32.init)
+            let element = SCNGeometryElement(
+                data: indices.withUnsafeBufferPointer { Data(buffer: $0) }, primitiveType: .triangles,
+                primitiveCount: vertices.count / 3, bytesPerIndex: MemoryLayout<UInt32>.stride)
+            let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: vertices)], elements: [element])
+            let material = SCNMaterial()
+            material.diffuse.contents = group.color.withAlphaComponent(0.72)
+            material.emission.contents = group.color.withAlphaComponent(0.35)
+            material.lightingModel = .constant
+            material.isDoubleSided = true
+            geometry.materials = [material]
+            node.addChildNode(SCNNode(geometry: geometry))
+        }
+        return node
     }
 
     static func material(

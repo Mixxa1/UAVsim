@@ -45,6 +45,7 @@ public:
     cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) override;
     cadnext::Result<ShapeMassProperties> volumeProperties(const ShapeHandle& shape) override;
     cadnext::Result<std::vector<std::uint8_t>> exportBRep(const ShapeHandle& shape) override;
+    cadnext::Result<std::vector<std::uint8_t>> exportBRepGeometry(const ShapeHandle& shape) override;
     cadnext::Result<ShapeHandle> importBRep(const std::vector<std::uint8_t>& brepData) override;
     bool isShapeValid(const ShapeHandle& shape) const override;
 
@@ -54,6 +55,9 @@ public:
     // Internal accessor for the OCCT mesh extractor. Returns nullptr for
     // unknown handles. Never exposed beyond OCCT-enabled kernel code.
     const TopoDS_Shape* findShape(const ShapeHandle& handle) const;
+    // Registers a shape built by OCCT-enabled code outside the kernel (the flow domain's boolean with
+    // face history). The prefix names the handle, like the kernel's own "occt-cut-<n>".
+    ShapeHandle adoptShape(const TopoDS_Shape& shape, const char* prefix);
 #endif
 
 private:

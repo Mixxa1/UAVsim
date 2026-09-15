@@ -1774,7 +1774,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             heightM: realHeightMm / 1000.0,
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
-            designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass }
+            designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass },
+            profileID: profile.id
         ).applyingDamage(context.aeroDamage)
 
         // --- Airflow state.
@@ -2622,7 +2623,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             heightM: realHeightMm / 1000.0,
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
-            designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass }
+            designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass },
+            profileID: profile.id
         ).applyingDamage(context.aeroDamage)
 
         // --- 2. Airflow state, ahead of the surfaces for the same reason as

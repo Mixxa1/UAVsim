@@ -39,6 +39,7 @@ class CutExtrudeDialog;
 class EdgeOperationDialog;
 class ExtrudeDialog;
 class AssemblyWindow;
+class StructuralStudyPanel;
 class ProjectTree;
 class PropertyPanel;
 class SketchToolBar;
@@ -283,6 +284,12 @@ private:
     // shows the .cadasm file dialog immediately.
     void openAssemblyWindow(bool openDialog);
 
+    // Structural study of a body (Анализ → Прочность детали): a dock whose loads are placed on
+    // faces picked in this viewport; results open in their own windows.
+    void showStructuralStudy();
+    // Файл → «Экспорт в Мастерскую»: every body with exact geometry, as a version-2 .uavframe.
+    void exportToWorkbench();
+
     // Dirty-state.
     void markDirty();
     void setClean();
@@ -299,6 +306,8 @@ private:
     Document document_;
     CommandStack commandStack_;
     std::unique_ptr<AssemblyWindow> assemblyWindow_;
+    StructuralStudyPanel* structuralPanel_ = nullptr;
+    QDockWidget* structuralDock_ = nullptr;
     std::unique_ptr<kernel::Kernel> kernel_;
     std::unique_ptr<kernel::GeometryEvaluator> evaluator_;
     std::unique_ptr<viewer::CoinViewer> viewer_;

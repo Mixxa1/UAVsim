@@ -1,0 +1,145 @@
+{
+  "schema": "cadnext-structural-result/1",
+  "testType": "structuralStatic",
+  "outcome": "pass",
+  "solverID": "cadnext.fea.linear-static-tet10",
+  "solverVersion": "fea 1 / netgen 6.2.2607 / materials 1",
+  "metrics": {
+    "maxVonMisesPa": {
+      "value": 23174409.052343167,
+      "unit": "Pa",
+      "numericalUncertainty": 68493.35944129182
+    },
+    "maxDisplacementM": {
+      "value": 9.27222611352364e-06,
+      "unit": "m"
+    },
+    "reserveFactor": {
+      "value": 18.770705178176577,
+      "unit": "1",
+      "numericalUncertainty": 0.055314462624235006
+    },
+    "ultimateMargin": {
+      "value": 18.274134052687057,
+      "unit": "1"
+    },
+    "yieldMargin": {
+      "value": 17.770705178176577,
+      "unit": "1"
+    }
+  },
+  "warnings": [
+    "наблюдаемый порядок сходимости выше теоретического — погрешность оценена по теоретическому"
+  ],
+  "failureReasons": [],
+  "settings": {
+    "material": "steel_4130",
+    "materialDatabaseVersion": 1,
+    "coarseElementSizeM": 0.03,
+    "refinementFactor": 1.6,
+    "factorOfSafety": 1.5,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "internal pressure 10 MPa",
+      "supports": [
+        {
+          "face": "face-2",
+          "fix": [
+            "x"
+          ]
+        },
+        {
+          "face": "face-4",
+          "fix": [
+            "y"
+          ]
+        },
+        {
+          "face": "face-1",
+          "fix": [
+            "z"
+          ]
+        },
+        {
+          "face": "face-3",
+          "fix": [
+            "z"
+          ]
+        }
+      ],
+      "forces": [],
+      "pressures": [
+        {
+          "face": "face-5",
+          "pressurePa": 10000000
+        }
+      ],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    }
+  },
+  "criticalRegion": {
+    "point": [
+      6.12323399573677e-18,
+      0.1,
+      0.02
+    ],
+    "face": "face-2"
+  },
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.03,
+      "elements": 169,
+      "dofs": 1236,
+      "maxVonMisesPa": 23598080.94664053,
+      "maxDisplacementM": 9.274649558994911e-06
+    },
+    {
+      "maximumElementSizeM": 0.01875,
+      "elements": 429,
+      "dofs": 2874,
+      "maxVonMisesPa": 23229300.342816733,
+      "maxDisplacementM": 9.275772015457616e-06
+    },
+    {
+      "maximumElementSizeM": 0.011718749999999997,
+      "elements": 1215,
+      "dofs": 7845,
+      "maxVonMisesPa": 23174409.052343167,
+      "maxDisplacementM": 9.27222611352364e-06
+    }
+  ],
+  "convergence": {
+    "stress": {
+      "behaviour": "monotonic",
+      "observedOrder": 6.242845367634276,
+      "orderLimitedToFormal": true,
+      "extrapolated": 23119614.364790134,
+      "gciFineRelative": 0.002955560130426128,
+      "asymptoticRatio": 3.8963406260003315
+    },
+    "displacement": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 9.27222611352364e-06,
+      "gciFineRelative": 0.00019121092877601926,
+      "asymptoticRatio": 0
+    }
+  },
+  "material": {
+    "id": "steel_4130",
+    "youngsModulusPa": 205000000000,
+    "poissonRatio": 0.29,
+    "densityKgPerM3": 7850,
+    "yieldStrengthPa": 435000000,
+    "ultimateStrengthPa": 670000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "wing_spar.field.json"
+}

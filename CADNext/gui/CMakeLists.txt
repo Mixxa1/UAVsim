@@ -29,6 +29,11 @@ add_library(cadnext_gui
     include/cadnext/gui/UAVPayloadCompatibilityChecker.hpp
     include/cadnext/gui/UAVPayloadMountFlow.hpp
     include/cadnext/gui/UAVSelectionDialog.hpp
+    include/cadnext/gui/AnalysisResultWindow.hpp
+    include/cadnext/gui/ModalResultWindow.hpp
+    include/cadnext/gui/StructuralResultWindow.hpp
+    include/cadnext/gui/StructuralStudyPanel.hpp
+    include/cadnext/gui/WorkbenchExportDialog.hpp
     src/AssemblyJointDialog.cpp
     src/AssemblyPartLoader.cpp
     src/AssemblyWindow.cpp
@@ -50,6 +55,13 @@ add_library(cadnext_gui
     src/UAVPartPreviewPanel.cpp
     src/UAVPayloadCompatibilityChecker.cpp
     src/UAVSelectionDialog.cpp
+    src/AnalysisResultWindow.cpp
+    src/ModalResultWindow.cpp
+    src/StructuralResultWindow.cpp
+    src/ViewerSnapshot.cpp
+    src/ViewerSnapshot.hpp
+    src/StructuralStudyPanel.cpp
+    src/WorkbenchExportDialog.cpp
     src/WorkbenchHost.cpp
 )
 
@@ -63,7 +75,9 @@ target_link_libraries(cadnext_gui
         cadnext_core
         cadnext_assembly
         cadnext_bridge
+        cadnext_construction
         cadnext_viewer
+        cadnext_fea_job
         Qt6::Core
         Qt6::Gui
         Qt6::Widgets

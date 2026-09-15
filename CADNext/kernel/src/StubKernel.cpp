@@ -107,6 +107,10 @@ cadnext::Result<std::vector<std::uint8_t>> StubKernel::exportBRep(const ShapeHan
     });
 }
 
+cadnext::Result<std::vector<std::uint8_t>> StubKernel::exportBRepGeometry(const ShapeHandle& handle) {
+    return exportBRep(handle);
+}
+
 cadnext::Result<ShapeHandle> StubKernel::importBRep(const std::vector<std::uint8_t>&) {
     return cadnext::Result<ShapeHandle>::fail({
         cadnext::ErrorCode::KernelUnavailable,

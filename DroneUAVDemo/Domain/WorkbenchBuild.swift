@@ -79,6 +79,9 @@ struct WorkbenchBuild: Codable, Hashable, Identifiable {
     var rfSystem: RFSystemConfiguration
     var tuning: WorkbenchTuning
     var revision: Int
+    /// Strength load cases on the frame's exact solids (`WorkbenchStructuralStudy`). How the aircraft
+    /// is to be checked is part of the blueprint; the results are not.
+    var structuralCases: [WorkbenchStructuralCase] = []
 
     init(
         id: UUID = UUID(),
@@ -282,6 +285,7 @@ struct WorkbenchBuild: Codable, Hashable, Identifiable {
         case flightControllerSpecID, receiverSpecID, cameraSpecID, gpsSpecID
         case sensorSpecID, payloadSpecID, landingGearSpecID
         case customComponents, componentPlacements, rfSystem, tuning, revision
+        case structuralCases
     }
 
     init(from decoder: Decoder) throws {
@@ -335,6 +339,7 @@ struct WorkbenchBuild: Codable, Hashable, Identifiable {
         }
         tuning = try c.decodeIfPresent(WorkbenchTuning.self, forKey: .tuning) ?? .default
         revision = try c.decodeIfPresent(Int.self, forKey: .revision) ?? 0
+        structuralCases = try c.decodeIfPresent([WorkbenchStructuralCase].self, forKey: .structuralCases) ?? []
     }
 
     private static func inferredArchitecture(

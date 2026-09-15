@@ -1,0 +1,19 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "modal",
+  "geometry": {"format": "uavpart", "path": "motor_arm.uavpart"},
+  "material": "cfrp_quasi_isotropic",
+  "mesh": {"coarseElementSizeM": 0.004, "refinementFactor": 1.6},
+  "loadCase": {
+    "name": "arm clamped at the hub",
+    "supports": [{"face": "face-0", "fix": ["x", "y", "z"]}]
+  },
+  "modal": {
+    "modeCount": 6,
+    "rotors": [{"name": "front-left rotor", "minimumRpm": 3000, "maximumRpm": 9000, "bladeCount": 2}],
+    "bands": [{"name": "motor 12-pole electrical", "minimumHz": 300, "maximumHz": 900}],
+    "separationMargin": 0.0,
+    "attachedMasses": [{"face": "face-5", "massKg": 0.061}]
+  },
+  "output": {"result": "motor_arm.modal-result.json", "field": "motor_arm.modal-field.json"}
+}

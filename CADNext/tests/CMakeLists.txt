@@ -1,3 +1,11 @@
+# Tests check with assert(). Release-type builds define NDEBUG, which compiles every check away —
+# a green run then proves nothing, and tests that do work inside an assert (writing the file the
+# next check reads) crash instead (cadnext_test_uavpart_format did). Checks stay on in this
+# directory whatever the build type.
+foreach(configuration_flags CMAKE_CXX_FLAGS_RELEASE CMAKE_CXX_FLAGS_RELWITHDEBINFO CMAKE_CXX_FLAGS_MINSIZEREL)
+    string(REPLACE "-DNDEBUG" "" ${configuration_flags} "${${configuration_flags}}")
+endforeach()
+
 add_executable(cadnext_test_assembly_math
     test_assembly_math.cpp
 )
@@ -96,6 +104,81 @@ target_link_libraries(cadnext_test_bridge_export
     PRIVATE
         cadnext_bridge
 )
+
+# Fluid domain around a .uavframe airframe: boolean with face history, per-body wall markers.
+if(TARGET cadnext_cfd_occt AND TARGET cadnext_construction)
+    add_executable(cadnext_test_cfd_flow_domain
+        test_cfd_flow_domain.cpp
+    )
+
+    target_link_libraries(cadnext_test_cfd_flow_domain
+        PRIVATE
+            cadnext_cfd_occt
+            cadnext_construction
+            cadnext_fea
+    )
+
+    add_test(NAME cadnext_test_cfd_flow_domain
+             COMMAND cadnext_test_cfd_flow_domain ${CMAKE_SOURCE_DIR}/bridge/schema)
+endif()
+
+# Flow solver verification against exact solutions; needs SU2 (tools/build_su2.sh).
+if(EXISTS "${CADNEXT_SU2_CFD}")
+    add_executable(cadnext_test_cfd_joukowski_euler
+        test_cfd_joukowski_euler.cpp
+    )
+
+    target_link_libraries(cadnext_test_cfd_joukowski_euler
+        PRIVATE
+            cadnext_cfd
+            cadnext_fea
+    )
+
+    add_test(NAME cadnext_test_cfd_joukowski_euler
+             COMMAND cadnext_test_cfd_joukowski_euler ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-joukowski)
+    set_tests_properties(cadnext_test_cfd_joukowski_euler PROPERTIES LABELS "cfd" TIMEOUT 900)
+
+    add_executable(cadnext_test_cfd_blasius
+        test_cfd_blasius.cpp
+    )
+
+    target_link_libraries(cadnext_test_cfd_blasius
+        PRIVATE
+            cadnext_cfd
+            cadnext_fea
+    )
+
+    add_test(NAME cadnext_test_cfd_blasius
+             COMMAND cadnext_test_cfd_blasius ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-blasius)
+    set_tests_properties(cadnext_test_cfd_blasius PROPERTIES LABELS "cfd" TIMEOUT 1800)
+
+    if(TARGET cadnext_cfd_occt)
+        add_executable(cadnext_test_cfd_sphere_euler
+            test_cfd_sphere_euler.cpp
+        )
+
+        target_link_libraries(cadnext_test_cfd_sphere_euler
+            PRIVATE
+                cadnext_cfd_occt
+                cadnext_fea
+        )
+
+        add_test(NAME cadnext_test_cfd_sphere_euler
+                 COMMAND cadnext_test_cfd_sphere_euler ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-sphere)
+        set_tests_properties(cadnext_test_cfd_sphere_euler PROPERTIES LABELS "cfd" TIMEOUT 1800)
+    endif()
+endif()
+
+add_executable(cadnext_test_construction_export
+    test_construction_export.cpp
+)
+
+target_link_libraries(cadnext_test_construction_export
+    PRIVATE
+        cadnext_bridge
+)
+
+add_test(NAME cadnext_test_construction_export COMMAND cadnext_test_construction_export)
 
 add_executable(cadnext_test_uavpart_format
     test_uavpart_format.cpp
@@ -536,7 +619,123 @@ add_test(NAME cadnext_test_command_stack COMMAND cadnext_test_command_stack)
 add_test(NAME cadnext_test_geometry_evaluator_fallback
          COMMAND cadnext_test_geometry_evaluator_fallback)
 
+# Structural solver verification (cadnext_fea). Element identities and the patch test,
+# exact elasticity solutions, NAFEMS LE1 — see each file's header for the reference and
+# why its tolerance is what it is.
+add_executable(cadnext_test_fea_element
+    test_fea_element.cpp
+)
+
+target_link_libraries(cadnext_test_fea_element
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_element COMMAND cadnext_test_fea_element)
+
+add_executable(cadnext_test_fea_body_load_and_solvers
+    test_fea_body_load_and_solvers.cpp
+)
+
+target_link_libraries(cadnext_test_fea_body_load_and_solvers
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_body_load_and_solvers COMMAND cadnext_test_fea_body_load_and_solvers)
+
+add_executable(cadnext_test_fea_convergence_and_strength
+    test_fea_convergence_and_strength.cpp
+)
+
+target_link_libraries(cadnext_test_fea_convergence_and_strength
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_convergence_and_strength COMMAND cadnext_test_fea_convergence_and_strength)
+
+add_executable(cadnext_test_fea_presentation
+    test_fea_presentation.cpp
+)
+
+target_link_libraries(cadnext_test_fea_presentation
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_presentation COMMAND cadnext_test_fea_presentation)
+
+add_executable(cadnext_test_fea_modal
+    test_fea_modal.cpp
+)
+
+target_link_libraries(cadnext_test_fea_modal
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_modal COMMAND cadnext_test_fea_modal)
+
+add_executable(cadnext_test_fea_benchmark_cantilever
+    test_fea_benchmark_cantilever.cpp
+)
+
+target_link_libraries(cadnext_test_fea_benchmark_cantilever
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_benchmark_cantilever COMMAND cadnext_test_fea_benchmark_cantilever)
+
+add_executable(cadnext_test_fea_benchmark_lame_cylinder
+    test_fea_benchmark_lame_cylinder.cpp
+)
+
+target_link_libraries(cadnext_test_fea_benchmark_lame_cylinder
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_benchmark_lame_cylinder COMMAND cadnext_test_fea_benchmark_lame_cylinder)
+
+add_executable(cadnext_test_fea_benchmark_plate_with_hole
+    test_fea_benchmark_plate_with_hole.cpp
+)
+
+target_link_libraries(cadnext_test_fea_benchmark_plate_with_hole
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_benchmark_plate_with_hole COMMAND cadnext_test_fea_benchmark_plate_with_hole)
+
+add_executable(cadnext_test_fea_benchmark_nafems_le1
+    test_fea_benchmark_nafems_le1.cpp
+)
+
+target_link_libraries(cadnext_test_fea_benchmark_nafems_le1
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_benchmark_nafems_le1 COMMAND cadnext_test_fea_benchmark_nafems_le1)
+
 if(CADNEXT_WITH_OCCT)
+    # The Workbench's structural geometry: exact BRep per body, faces, mass, axes.
+    add_executable(cadnext_test_construction_builder
+        test_construction_builder.cpp
+    )
+
+    target_link_libraries(cadnext_test_construction_builder
+        PRIVATE
+            cadnext_construction
+            cadnext_fea
+    )
+
+    add_test(NAME cadnext_test_construction_builder
+             COMMAND cadnext_test_construction_builder ${CMAKE_SOURCE_DIR}/bridge/schema)
+
     add_executable(cadnext_test_occt_kernel_primitives
         test_occt_kernel_primitives.cpp
     )
@@ -724,4 +923,78 @@ if(CADNEXT_WITH_OCCT)
              COMMAND cadnext_test_occt_mass_properties)
     add_test(NAME cadnext_test_occt_assembly_topology
              COMMAND cadnext_test_occt_assembly_topology)
+endif()
+
+# CAD solid → Netgen mesh → structural solve. Needs OCCT and the Netgen build from
+# tools/build_netgen.sh.
+if(CADNEXT_WITH_OCCT AND CADNEXT_WITH_NETGEN)
+    add_executable(cadnext_test_fea_netgen_solids
+        test_fea_netgen_solids.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_netgen_solids
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_test(NAME cadnext_test_fea_netgen_solids COMMAND cadnext_test_fea_netgen_solids)
+
+    add_executable(cadnext_test_fea_structural_study
+        test_fea_structural_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_structural_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_structural_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_structural_study
+             COMMAND cadnext_test_fea_structural_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+
+    add_executable(cadnext_test_fea_modal_study
+        test_fea_modal_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_modal_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_modal_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_modal_study
+             COMMAND cadnext_test_fea_modal_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+endif()
+
+# The CADNext «Прочность детали» panel driving the real solver process. Needs the GUI and the
+# Netgen-enabled command line tool.
+if(CADNEXT_WITH_QT AND CADNEXT_WITH_COIN3D AND CADNEXT_WITH_OCCT AND CADNEXT_WITH_NETGEN)
+    add_executable(cadnext_test_gui_workbench_export_dialog
+        test_gui_workbench_export_dialog.cpp
+    )
+
+    target_link_libraries(cadnext_test_gui_workbench_export_dialog
+        PRIVATE
+            cadnext_gui
+    )
+
+    add_test(NAME cadnext_test_gui_workbench_export_dialog COMMAND cadnext_test_gui_workbench_export_dialog)
+
+    add_executable(cadnext_test_gui_structural_study_panel
+        test_gui_structural_study_panel.cpp
+    )
+
+    target_link_libraries(cadnext_test_gui_structural_study_panel
+        PRIVATE
+            cadnext_gui
+    )
+
+    add_dependencies(cadnext_test_gui_structural_study_panel cadnext_structural)
+
+    add_test(NAME cadnext_test_gui_structural_study_panel
+             COMMAND cadnext_test_gui_structural_study_panel $<TARGET_FILE:cadnext_structural>)
 endif()

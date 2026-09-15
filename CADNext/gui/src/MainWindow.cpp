@@ -31,6 +31,10 @@
 #include "cadnext/bridge/UAVPartReader.hpp"
 #include "cadnext/bridge/UAVPartWriter.hpp"
 #include "cadnext/gui/AssemblyWindow.hpp"
+#include "cadnext/gui/AnalysisResultWindow.hpp"
+#include "cadnext/gui/WorkbenchExportDialog.hpp"
+#include "cadnext/bridge/ConstructionExport.hpp"
+#include "cadnext/gui/StructuralStudyPanel.hpp"
 #include "cadnext/gui/AttachmentPointDialog.hpp"
 #include "cadnext/gui/UAVPartPreviewPanel.hpp"
 #include "cadnext/gui/CutExtrudeDialog.hpp"
@@ -1008,6 +1012,9 @@ void MainWindow::syncTreeSelection() {
 }
 
 void MainWindow::syncViewportSelection() {
+    if (structuralPanel_ != nullptr) {
+        structuralPanel_->selectionChanged();
+    }
     if (!selection_) {
         return;
     }
@@ -4477,6 +4484,91 @@ void MainWindow::openDocument() {
     updateUndoRedoActions();
 }
 
+void MainWindow::exportToWorkbench() {
+    std::vector<WorkbenchExportBody> bodies;
+    for (const auto& object : document_.objects()) {
+        const auto shape = bodyShapes_.find(object.id);
+        if (object.type != ObjectType::Body || shape == bodyShapes_.end()) continue;
+        bodies.push_back({object.id, QString::fromStdString(object.name), shape->second, std::nullopt});
+    }
+    if (bodies.empty()) {
+        QMessageBox::information(this, tr("Экспорт в Мастерскую"),
+                                 tr("В документе нет тел с точной геометрией: Мастерской нечего считать."));
+        return;
+    }
+    WorkbenchExportDialog dialog(std::move(bodies), windowTitle().section(QStringLiteral(" — "), 0, 0), this);
+    if (dialog.exec() != QDialog::Accepted) return;
+    const auto request = dialog.request();
+    if (!request.isOk()) {
+        QMessageBox::warning(this, tr("Экспорт в Мастерскую"), QString::fromStdString(request.error().message));
+        return;
+    }
+    const auto construction = bridge::buildConstruction(*kernel_, request.value());
+    if (!construction.isOk()) {
+        QMessageBox::warning(this, tr("Экспорт в Мастерскую"), QString::fromStdString(construction.error().message));
+        return;
+    }
+    const QString path = QFileDialog::getSaveFileName(this, tr("Экспорт в Мастерскую"),
+                                                      QString::fromStdString(request.value().name) + ".uavframe",
+                                                      tr("Рама для Мастерской (*.uavframe)"));
+    if (path.isEmpty()) return;
+    const auto saved = bridge::ConstructionExport::saveToFile(construction.value(), path.toStdString());
+    if (!saved.isOk()) {
+        QMessageBox::warning(this, tr("Экспорт в Мастерскую"), QString::fromStdString(saved.error().message));
+        return;
+    }
+    statusBar()->showMessage(tr("Экспортировано в Мастерскую: %1 тел, масса %2 кг.")
+                                 .arg(construction.value().bodies.size())
+                                 .arg(construction.value().massKg, 0, 'f', 3),
+                             8000);
+}
+
+void MainWindow::showStructuralStudy() {
+    if (structuralPanel_ == nullptr) {
+        StructuralPartContext context;
+        context.selectedFace = [this]() -> std::optional<std::pair<std::string, std::string>> {
+            if (selectionKind_ != SelectionKind::BodyFace) return std::nullopt;
+            return std::make_pair(selectedFace_.bodyId, selectedFace_.faceId);
+        };
+        context.bodyFaces = [this](const std::string& bodyId) {
+            const auto found = bodyFaces_.find(bodyId);
+            return found == bodyFaces_.end() ? std::vector<kernel::FaceReference>{} : found->second;
+        };
+        context.bodyName = [this](const std::string& bodyId) {
+            const auto object = document_.objectById(bodyId);
+            return object.isOk() ? QString::fromStdString(object.value().name) : QString::fromStdString(bodyId);
+        };
+        context.bodyMaterialId = [](const std::string&) { return std::optional<std::string>(); };
+        context.exportBody = [this](const std::string& bodyId) -> Result<std::vector<std::uint8_t>> {
+            const auto shape = bodyShapes_.find(bodyId);
+            if (shape == bodyShapes_.end()) {
+                return Result<std::vector<std::uint8_t>>::fail({ErrorCode::NotFound, "у тела нет BRep-геометрии"});
+            }
+            return kernel_->exportBRep(shape->second);
+        };
+        context.selectFace = [this](const std::string& bodyId, const std::string& faceId) { selectBodyFace(bodyId, faceId); };
+
+        structuralPanel_ = new StructuralStudyPanel(std::move(context), this);
+        connect(structuralPanel_, &StructuralStudyPanel::finished, this,
+                [this](const QString& resultPath, const QString& message) {
+                    if (resultPath.isEmpty()) {
+                        statusBar()->showMessage(message, 8000);
+                        return;
+                    }
+                    AnalysisResultWindow::showResult(resultPath, this);
+                });
+        structuralDock_ = new QDockWidget(tr("Прочность и частоты детали"), this);
+        structuralDock_->setWidget(structuralPanel_);
+        structuralDock_->setFeatures(QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetClosable);
+        structuralDock_->setMinimumWidth(340);
+        addDockWidget(Qt::RightDockWidgetArea, structuralDock_);
+        if (propertyDock_ != nullptr) tabifyDockWidget(propertyDock_, structuralDock_);
+    }
+    structuralDock_->show();
+    structuralDock_->raise();
+    structuralPanel_->selectionChanged();
+}
+
 void MainWindow::openAssemblyWindow(bool openDialog) {
     if (!assemblyWindow_) {
         assemblyWindow_ = std::make_unique<AssemblyWindow>();
@@ -4893,6 +4985,8 @@ void MainWindow::createMenus() {
                         [this]() { saveDocument(); });
     fileMenu->addAction(tr("Сохранить CAD-документ как…"), QKeySequence::SaveAs, this,
                         [this]() { saveDocumentAs(); });
+    fileMenu->addSeparator();
+    fileMenu->addAction(tr("Экспорт в Мастерскую (.uavframe)…"), this, [this]() { exportToWorkbench(); });
 
     QMenu* editMenu = menuBar()->addMenu(tr("&Правка"));
     undoAction_ = editMenu->addAction(tr("&Отменить"), QKeySequence::Undo, this,
@@ -4915,6 +5009,21 @@ void MainWindow::createMenus() {
     partMenu->addAction(tr("Сохранить деталь"), this, [this]() { savePart(); });
     partMenu->addAction(tr("Сохранить деталь как .uavpart…"), this,
                         [this]() { savePartAs(); });
+
+    // Results open in their own window (one per result, closed with the window): several load
+    // cases or support variants of the same part are compared side by side. The window is chosen
+    // by the file's schema — strength or natural modes.
+    QMenu* analysisMenu = menuBar()->addMenu(tr("&Анализ"));
+    analysisMenu->addAction(tr("Прочность и частоты детали…"), this, [this]() { showStructuralStudy(); });
+    analysisMenu->addAction(tr("Открыть результат расчёта…"), this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Результат расчёта"), QString(),
+            tr("Результат расчёта (*.result.json);;JSON (*.json)"));
+        if (path.isEmpty()) {
+            return;
+        }
+        AnalysisResultWindow::showResult(path, this);
+    });
 
     QMenu* viewMenu = menuBar()->addMenu(tr("&Вид"));
     viewMenu->addAction(toolBar_->fitSelectionAction());

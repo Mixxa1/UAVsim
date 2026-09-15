@@ -124,6 +124,11 @@ public:
     // OCCT builds use BRepTools::Write ASCII format.
     virtual cadnext::Result<std::vector<std::uint8_t>> exportBRep(const ShapeHandle& shape) = 0;
 
+    // The same, without the triangulation a display pass may have attached to the shape: the bytes
+    // depend on the geometry alone. For fingerprints and for handing a part to a solver — whether a
+    // body was drawn before it was exported must not change what it is.
+    virtual cadnext::Result<std::vector<std::uint8_t>> exportBRepGeometry(const ShapeHandle& shape) = 0;
+
     // Deserialize a BRep byte array and register it as a new shape.
     // OCCT builds parse BRepTools::Write ASCII via BRepTools::Read.
     virtual cadnext::Result<ShapeHandle> importBRep(const std::vector<std::uint8_t>& brepData) = 0;

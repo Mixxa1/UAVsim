@@ -7,6 +7,17 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EE0A00000000000000000206 /* EngineeringSolverResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000106 /* EngineeringSolverResult.swift */; };
+		EE0A00000000000000000207 /* WorkbenchBuiltInChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000107 /* WorkbenchBuiltInChecks.swift */; };
+		EE0A00000000000000000208 /* WorkbenchValidationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000108 /* WorkbenchValidationViews.swift */; };
+		EE0A00000000000000000209 /* WorkbenchStructuralStudy.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000109 /* WorkbenchStructuralStudy.swift */; };
+		EE0A0000000000000000020A /* WorkbenchStructuralRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A0000000000000000010A /* WorkbenchStructuralRunner.swift */; };
+		EE0A0000000000000000020B /* WorkbenchStructuralViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A0000000000000000010B /* WorkbenchStructuralViews.swift */; };
+		EE0A00000000000000000201 /* EngineeringCanonicalValue.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000101 /* EngineeringCanonicalValue.swift */; };
+		EE0A00000000000000000202 /* EngineeringValidationModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000102 /* EngineeringValidationModel.swift */; };
+		EE0A00000000000000000203 /* EngineeringTestCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000103 /* EngineeringTestCatalog.swift */; };
+		EE0A00000000000000000204 /* EngineeringValidationEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000104 /* EngineeringValidationEngine.swift */; };
+		EE0A00000000000000000205 /* WorkbenchEngineeringSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000105 /* WorkbenchEngineeringSnapshot.swift */; };
 		A9A000000000000000000101 /* FPVOSDModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000002 /* FPVOSDModels.swift */; };
 		A9A000000000000000000102 /* MCMFontLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000003 /* MCMFontLoader.swift */; };
 		A9A000000000000000000103 /* FPVOSDRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9A000000000000000000004 /* FPVOSDRenderer.swift */; };
@@ -555,6 +566,17 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		EE0A00000000000000000106 /* EngineeringSolverResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringSolverResult.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000107 /* WorkbenchBuiltInChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchBuiltInChecks.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000108 /* WorkbenchValidationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchValidationViews.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000109 /* WorkbenchStructuralStudy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchStructuralStudy.swift; sourceTree = "<group>"; };
+		EE0A0000000000000000010A /* WorkbenchStructuralRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchStructuralRunner.swift; sourceTree = "<group>"; };
+		EE0A0000000000000000010B /* WorkbenchStructuralViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchStructuralViews.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000101 /* EngineeringCanonicalValue.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringCanonicalValue.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000102 /* EngineeringValidationModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringValidationModel.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000103 /* EngineeringTestCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringTestCatalog.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000104 /* EngineeringValidationEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringValidationEngine.swift; sourceTree = "<group>"; };
+		EE0A00000000000000000105 /* WorkbenchEngineeringSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchEngineeringSnapshot.swift; sourceTree = "<group>"; };
 		A9A000000000000000000002 /* FPVOSDModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDModels.swift; sourceTree = "<group>"; };
 		A9A000000000000000000003 /* MCMFontLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MCMFontLoader.swift; sourceTree = "<group>"; };
 		A9A000000000000000000004 /* FPVOSDRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FPVOSDRenderer.swift; sourceTree = "<group>"; };
@@ -1183,6 +1205,7 @@
 				F10000000000000000000007 /* WorkbenchFrame.swift */,
 				F10000000000000000000008 /* UAVBuildProfileSynthesizer.swift */,
 				10000000000000000000035E /* CADBridge */,
+				EE0A00000000000000000000 /* EngineeringValidation */,
 				10000000000000000000037E /* Networking */,
 				100000000000000000000380 /* OnlineTrials */,
 				100000000000000000000121 /* AppLanguage.swift */,
@@ -1536,6 +1559,8 @@
 				F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */,
 				F1000000000000000000000D /* WorkbenchPartPreview.swift */,
 				F1000000000000000000000B /* WorkbenchView.swift */,
+				EE0A00000000000000000108 /* WorkbenchValidationViews.swift */,
+				EE0A0000000000000000010B /* WorkbenchStructuralViews.swift */,
 				100000000000000000000123 /* AbstractModelEditorView.swift */,
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
 				100000000000000000000C74 /* WorldClockChipView.swift */,
@@ -1760,6 +1785,22 @@
 				A9A00000000000000000000C /* mainframe.mcm */,
 			);
 			path = FPVFonts;
+			sourceTree = "<group>";
+		};
+		EE0A00000000000000000000 /* EngineeringValidation */ = {
+			isa = PBXGroup;
+			children = (
+				EE0A00000000000000000101 /* EngineeringCanonicalValue.swift */,
+				EE0A00000000000000000102 /* EngineeringValidationModel.swift */,
+				EE0A00000000000000000103 /* EngineeringTestCatalog.swift */,
+				EE0A00000000000000000104 /* EngineeringValidationEngine.swift */,
+				EE0A00000000000000000105 /* WorkbenchEngineeringSnapshot.swift */,
+				EE0A00000000000000000106 /* EngineeringSolverResult.swift */,
+				EE0A00000000000000000107 /* WorkbenchBuiltInChecks.swift */,
+				EE0A00000000000000000109 /* WorkbenchStructuralStudy.swift */,
+				EE0A0000000000000000010A /* WorkbenchStructuralRunner.swift */,
+			);
+			path = EngineeringValidation;
 			sourceTree = "<group>";
 		};
 		10000000000000000000035E /* CADBridge */ = {
@@ -2118,6 +2159,17 @@
 				F20000000000000000000001 /* WorkbenchBuild.swift in Sources */,
 				F20000000000000000000002 /* WorkbenchBuildAnalyzer.swift in Sources */,
 				F20000000000000000000003 /* WorkbenchBuildStore.swift in Sources */,
+				EE0A00000000000000000201 /* EngineeringCanonicalValue.swift in Sources */,
+				EE0A00000000000000000202 /* EngineeringValidationModel.swift in Sources */,
+				EE0A00000000000000000203 /* EngineeringTestCatalog.swift in Sources */,
+				EE0A00000000000000000204 /* EngineeringValidationEngine.swift in Sources */,
+				EE0A00000000000000000205 /* WorkbenchEngineeringSnapshot.swift in Sources */,
+				EE0A00000000000000000206 /* EngineeringSolverResult.swift in Sources */,
+				EE0A00000000000000000207 /* WorkbenchBuiltInChecks.swift in Sources */,
+				EE0A00000000000000000208 /* WorkbenchValidationViews.swift in Sources */,
+				EE0A00000000000000000209 /* WorkbenchStructuralStudy.swift in Sources */,
+				EE0A0000000000000000020A /* WorkbenchStructuralRunner.swift in Sources */,
+				EE0A0000000000000000020B /* WorkbenchStructuralViews.swift in Sources */,
 				F20000000000000000000004 /* WorkbenchCompatibility.swift in Sources */,
 				F20000000000000000000005 /* WorkbenchComponentLibrary.swift in Sources */,
 				F20000000000000000000006 /* WorkbenchConstruction.swift in Sources */,

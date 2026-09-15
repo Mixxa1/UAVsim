@@ -52,7 +52,7 @@ struct WorkbenchView: View {
     // MARK: Top rail
 
     private var categories: [WorkbenchCategory] {
-        [.overview, .blueprints, .frame, .radio]
+        [.overview, .validation, .blueprints, .frame, .radio]
             + WorkbenchBuild.slotKinds.map { .slot($0) }
     }
 
@@ -104,6 +104,14 @@ struct WorkbenchView: View {
                     viewModel.undo()
                 }
                 .disabled(!viewModel.canUndo)
+
+                Button {
+                    viewModel.selectedCategory = .validation
+                } label: {
+                    WorkbenchReadinessChip(state: viewModel.validation)
+                }
+                .buttonStyle(.plain)
+                .help("Инженерные испытания: \(viewModel.validation.readiness.displayName)")
 
                 Button {
                     onBuildAndTest(viewModel.build)
@@ -211,6 +219,8 @@ struct WorkbenchView: View {
                 switch viewModel.selectedCategory {
                 case .overview:
                     overviewShelf
+                case .validation:
+                    WorkbenchValidationShelf(state: viewModel.validation)
                 case .blueprints:
                     blueprintsShelf
                 case .frame:
@@ -235,6 +245,7 @@ struct WorkbenchView: View {
     private var shelfSubtitle: String {
         switch viewModel.selectedCategory {
         case .overview: return "Полная комплектация и быстрые действия"
+        case .validation: return "Что проверено для этой конфигурации, чем и насколько это верно сейчас"
         case .blueprints: return "Сохранённые удачные сборки"
         case .frame: return "Выберите базовую геометрию аппарата"
         case .radio: return "Физические CONTROL / VIDEO / TELEMETRY и QoS"
@@ -559,6 +570,9 @@ struct WorkbenchView: View {
                 switch viewModel.selectedCategory {
                 case .overview, .blueprints:
                     buildInspector
+                case .validation:
+                    WorkbenchStructuralPanel(viewModel: viewModel)
+                    WorkbenchValidationInspector(state: viewModel.validation)
                 case .frame:
                     frameInspector
                 case .radio:

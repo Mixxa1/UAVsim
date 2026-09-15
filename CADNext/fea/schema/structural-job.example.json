@@ -1,0 +1,16 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "geometry": {"format": "uavpart", "path": "wing_spar.uavpart"},
+  "material": "al_7075_t6",
+  "factorOfSafety": 1.5,
+  "mesh": {"coarseElementSizeM": 0.004, "refinementFactor": 1.6},
+  "loadCase": {
+    "name": "+3.5 g pull-up, limit load",
+    "supports": [{"face": "face-0", "fix": ["x", "y", "z"]}],
+    "forces": [{"face": "face-5", "totalForceN": [0.0, 0.0, 180.0]}],
+    "pressures": [],
+    "bodyAccelerationMps2": [0.0, 0.0, -34.32],
+    "stressExclusions": [{"face": "face-0", "distanceM": 0.006}]
+  },
+  "output": {"result": "wing_spar.result.json", "field": "wing_spar.field.json", "report": "wing_spar.report.html"}
+}

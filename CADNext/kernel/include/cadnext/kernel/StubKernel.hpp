@@ -32,6 +32,7 @@ public:
     cadnext::Result<ShapeBounds> boundingBox(const ShapeHandle& shape) override;
     cadnext::Result<ShapeMassProperties> volumeProperties(const ShapeHandle& shape) override;
     cadnext::Result<std::vector<std::uint8_t>> exportBRep(const ShapeHandle& shape) override;
+    cadnext::Result<std::vector<std::uint8_t>> exportBRepGeometry(const ShapeHandle& shape) override;
     cadnext::Result<ShapeHandle> importBRep(const std::vector<std::uint8_t>& brepData) override;
     bool isShapeValid(const ShapeHandle& shape) const override;
 

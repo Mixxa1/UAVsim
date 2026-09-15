@@ -75,6 +75,43 @@ std::string ConstructionExport::toJson(const ConstructionDescriptor& descriptor)
     }
     root.set("attachmentPoints", std::move(attachments));
 
+    if (!descriptor.bodies.empty()) {
+        JsonValue axes = JsonValue::makeObject();
+        axes.set("forward", JsonValue::makeString(descriptor.cadAxes.forward));
+        axes.set("up", JsonValue::makeString(descriptor.cadAxes.up));
+        axes.set("lengthUnit", JsonValue::makeString("m"));
+        root.set("cadAxes", std::move(axes));
+        JsonValue bodies = JsonValue::makeArray();
+        for (const ConstructionBody& body : descriptor.bodies) {
+            JsonValue entry = JsonValue::makeObject();
+            entry.set("id", JsonValue::makeString(body.id));
+            entry.set("name", JsonValue::makeString(body.name));
+            entry.set("materialId", JsonValue::makeString(body.materialId));
+            entry.set("densityKgPerM3", JsonValue::makeNumber(body.densityKgPerM3));
+            entry.set("volumeM3", JsonValue::makeNumber(body.volumeM3));
+            entry.set("massKg", JsonValue::makeNumber(body.massKg));
+            entry.set("centerOfMass", vectorToJson(body.centerOfMass));
+            JsonValue geometry = JsonValue::makeObject();
+            geometry.set("format", JsonValue::makeString("brep-ascii"));
+            geometry.set("sha256", JsonValue::makeString(body.brepSha256));
+            geometry.set("text", JsonValue::makeString(body.brep));
+            entry.set("geometry", std::move(geometry));
+            entry.set("firstTriangle", JsonValue::makeNumber(body.firstTriangle));
+            entry.set("triangleCount", JsonValue::makeNumber(body.triangleCount));
+            JsonValue faces = JsonValue::makeArray();
+            for (const ConstructionFaceRange& face : body.faces) {
+                JsonValue range = JsonValue::makeObject();
+                range.set("id", JsonValue::makeString(face.faceId));
+                range.set("firstTriangle", JsonValue::makeNumber(face.firstTriangle));
+                range.set("triangleCount", JsonValue::makeNumber(face.triangleCount));
+                faces.arrayItems.push_back(std::move(range));
+            }
+            entry.set("faces", std::move(faces));
+            bodies.arrayItems.push_back(std::move(entry));
+        }
+        root.set("bodies", std::move(bodies));
+    }
+
     return root.serialize();
 }
 
@@ -136,6 +173,38 @@ Result<ConstructionDescriptor> ConstructionExport::fromJson(const std::string& j
             point.position = vectorFromJson(entry.member("position"));
             point.rotation = vectorFromJson(entry.member("rotation"));
             descriptor.attachmentPoints.push_back(std::move(point));
+        }
+    }
+
+    if (const JsonValue* axes = root.member("cadAxes"); axes && axes->isObject()) {
+        descriptor.cadAxes.forward = axes->stringOr("forward", "");
+        descriptor.cadAxes.up = axes->stringOr("up", "");
+    }
+    if (const JsonValue* bodies = root.member("bodies"); bodies && bodies->isArray()) {
+        for (const JsonValue& entry : bodies->arrayItems) {
+            if (!entry.isObject()) continue;
+            ConstructionBody body;
+            body.id = entry.stringOr("id", "");
+            body.name = entry.stringOr("name", "");
+            body.materialId = entry.stringOr("materialId", "");
+            body.densityKgPerM3 = entry.numberOr("densityKgPerM3", 0.0);
+            body.volumeM3 = entry.numberOr("volumeM3", 0.0);
+            body.massKg = entry.numberOr("massKg", 0.0);
+            body.centerOfMass = vectorFromJson(entry.member("centerOfMass"));
+            if (const JsonValue* geometry = entry.member("geometry"); geometry && geometry->isObject()) {
+                body.brep = geometry->stringOr("text", "");
+                body.brepSha256 = geometry->stringOr("sha256", "");
+            }
+            body.firstTriangle = static_cast<std::uint32_t>(entry.numberOr("firstTriangle", 0.0));
+            body.triangleCount = static_cast<std::uint32_t>(entry.numberOr("triangleCount", 0.0));
+            if (const JsonValue* faces = entry.member("faces"); faces && faces->isArray()) {
+                for (const JsonValue& range : faces->arrayItems) {
+                    body.faces.push_back({range.stringOr("id", ""),
+                                          static_cast<std::uint32_t>(range.numberOr("firstTriangle", 0.0)),
+                                          static_cast<std::uint32_t>(range.numberOr("triangleCount", 0.0))});
+                }
+            }
+            descriptor.bodies.push_back(std::move(body));
         }
     }
 

@@ -33,7 +33,8 @@ struct AeroDiagnosticsPanelView: View {
             fuselageLengthM: Float(dimensions.y) / 1000.0,
             heightM: Float(dimensions.z) / 1000.0,
             turnAuthority: wing.turnAuthority,
-            minSustainableSpeedMps: wing.minSustainableSpeedMps
+            minSustainableSpeedMps: wing.minSustainableSpeedMps,
+            profileID: profile.id
         )
     }
 
