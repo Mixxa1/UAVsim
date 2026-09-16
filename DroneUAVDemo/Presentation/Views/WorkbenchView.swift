@@ -571,6 +571,7 @@ struct WorkbenchView: View {
                 case .overview, .blueprints:
                     buildInspector
                 case .validation:
+                    WorkbenchAerodynamicsPanel(viewModel: viewModel)
                     WorkbenchStructuralPanel(viewModel: viewModel)
                     WorkbenchValidationInspector(state: viewModel.validation)
                 case .frame:

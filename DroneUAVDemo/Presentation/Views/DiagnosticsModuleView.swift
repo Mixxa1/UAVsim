@@ -48,7 +48,8 @@ struct DiagnosticsModuleView: View {
             AeroDiagnosticsPanelView(
                 profile: viewModel.selectedDroneProfile,
                 liveMach: Float(viewModel.telemetry.machNumber),
-                liveAlphaRad: Float(viewModel.telemetry.angleOfAttackRad)
+                liveAlphaRad: Float(viewModel.telemetry.angleOfAttackRad),
+                liveBetaRad: Float(viewModel.telemetry.sideslipRad)
             )
         case .fleet:
             fleetPanel

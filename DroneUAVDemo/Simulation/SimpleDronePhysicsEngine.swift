@@ -1775,7 +1775,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
             designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass },
-            profileID: profile.id
+            profileID: profile.id,
+            engineering: profile.engineeringAerodynamics
         ).applyingDamage(context.aeroDamage)
 
         // --- Airflow state.
@@ -1993,16 +1994,21 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         let (cl, cd) = aero.liftDrag(alphaRad: alpha, mach: mach,
             pHat: state.bodyAngularVelocity.x * aero.wingSpan / (2 * airspeed),
-            rHat: state.bodyAngularVelocity.z * aero.wingSpan / (2 * airspeed))
-        let cy = aero.cyBeta * beta
+            rHat: state.bodyAngularVelocity.z * aero.wingSpan / (2 * airspeed), betaRad: beta)
+        let cy = aero.sideForce(alphaRad: alpha, betaRad: beta, mach: mach)
 
         let normalizedWindDir = simd_length(bodyAirflow) > 0.0001 ? simd_normalize(bodyAirflow) : SIMD3<Float>(0, 0, -1)
         let bodyUp = SIMD3<Float>(0, 1, 0)
         let bodyRight = SIMD3<Float>(1, 0, 0)
         let liftDirRaw = bodyUp - normalizedWindDir * simd_dot(bodyUp, normalizedWindDir)
-        let liftDir = simd_length(liftDirRaw) > 0.0001 ? simd_normalize(liftDirRaw) : SIMD3<Float>(0, 1, 0)
+        var liftDir = simd_length(liftDirRaw) > 0.0001 ? simd_normalize(liftDirRaw) : SIMD3<Float>(0, 1, 0)
         let sideDirRaw = bodyRight - normalizedWindDir * simd_dot(bodyRight, normalizedWindDir)
-        let sideDir = simd_length(sideDirRaw) > 0.0001 ? simd_normalize(sideDirRaw) : SIMD3<Float>(1, 0, 0)
+        var sideDir = simd_length(sideDirRaw) > 0.0001 ? simd_normalize(sideDirRaw) : SIMD3<Float>(1, 0, 0)
+
+        if aero.usesEngineeringTable(alphaRad: alpha, betaRad: beta, mach: mach) {
+            liftDir = SIMD3<Float>(0, cos(alpha), -sin(alpha))
+            sideDir = SIMD3<Float>(cos(beta), sin(alpha) * sin(beta), cos(alpha) * sin(beta))
+        }
 
         let liftForce = liftDir * (cl * dynamicPressure * aero.wingArea)
         let dragForce = -normalizedWindDir * (cd * dynamicPressure * aero.wingArea)
@@ -2021,7 +2027,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             alphaRad: alpha,
             elevatorFraction: elevatorFraction,
             qHat: qHat,
-            mach: mach
+            mach: mach,
+            betaRad: beta
         )
         let clRoll = aero.rollMoment(
             alphaRad: alpha,
@@ -2624,7 +2631,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
             designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass },
-            profileID: profile.id
+            profileID: profile.id,
+            engineering: profile.engineeringAerodynamics
         ).applyingDamage(context.aeroDamage)
 
         // --- 2. Airflow state, ahead of the surfaces for the same reason as
@@ -2712,21 +2720,28 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // moment) is naturally ~900x smaller at hover than at cruise.
         // `alpha`, `beta`, `airspeed` and `bodyAirflow` are computed in step 2.
 
-        let airDensity = context.atmosphere.state(worldY: state.position.y).airDensity
+        let atmosphere = context.atmosphere.state(worldY: state.position.y)
+        let airDensity = atmosphere.airDensity
+        let mach = atmosphere.machNumber(trueAirspeedMps: airspeed)
         let dynamicPressure = 0.5 * airDensity * airspeed * airspeed
 
-        let (cl, cd) = aero.liftDrag(alphaRad: alpha,
+        let (cl, cd) = aero.liftDrag(alphaRad: alpha, mach: mach,
             pHat: state.bodyAngularVelocity.x * aero.wingSpan / (2 * airspeed),
-            rHat: state.bodyAngularVelocity.z * aero.wingSpan / (2 * airspeed))
-        let cy = aero.cyBeta * beta
+            rHat: state.bodyAngularVelocity.z * aero.wingSpan / (2 * airspeed), betaRad: beta)
+        let cy = aero.sideForce(alphaRad: alpha, betaRad: beta, mach: mach)
 
         let normalizedWindDir = simd_length(bodyAirflow) > 0.0001 ? simd_normalize(bodyAirflow) : SIMD3<Float>(0, 0, -1)
         let bodyUp = SIMD3<Float>(0, 1, 0)
         let bodyRight = SIMD3<Float>(1, 0, 0)
         let liftDirRaw = bodyUp - normalizedWindDir * simd_dot(bodyUp, normalizedWindDir)
-        let liftDir = simd_length(liftDirRaw) > 0.0001 ? simd_normalize(liftDirRaw) : SIMD3<Float>(0, 1, 0)
+        var liftDir = simd_length(liftDirRaw) > 0.0001 ? simd_normalize(liftDirRaw) : SIMD3<Float>(0, 1, 0)
         let sideDirRaw = bodyRight - normalizedWindDir * simd_dot(bodyRight, normalizedWindDir)
-        let sideDir = simd_length(sideDirRaw) > 0.0001 ? simd_normalize(sideDirRaw) : SIMD3<Float>(1, 0, 0)
+        var sideDir = simd_length(sideDirRaw) > 0.0001 ? simd_normalize(sideDirRaw) : SIMD3<Float>(1, 0, 0)
+
+        if aero.usesEngineeringTable(alphaRad: alpha, betaRad: beta, mach: mach) {
+            liftDir = SIMD3<Float>(0, cos(alpha), -sin(alpha))
+            sideDir = SIMD3<Float>(cos(beta), sin(alpha) * sin(beta), cos(alpha) * sin(beta))
+        }
 
         let liftForce = liftDir * (cl * dynamicPressure * aero.wingArea)
         let dragForce = -normalizedWindDir * (cd * dynamicPressure * aero.wingArea)
@@ -2740,9 +2755,9 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let qHat = pitchRate * aero.meanChord / (2.0 * airspeed)
         let rHat = yawRate * aero.wingSpan / (2.0 * airspeed)
 
-        let cmPitch = aero.pitchMoment(alphaRad: alpha, elevatorFraction: elevatorFraction, qHat: qHat)
-        let clRoll = aero.rollMoment(alphaRad: alpha, betaRad: beta, aileronFraction: aileronFraction, pHat: pHat, rHat: rHat)
-        let cnYaw = aero.yawMoment(alphaRad: alpha, betaRad: beta, rudderFraction: rudderFraction, rHat: rHat, pHat: pHat)
+        let cmPitch = aero.pitchMoment(alphaRad: alpha, elevatorFraction: elevatorFraction, qHat: qHat, mach: mach, betaRad: beta)
+        let clRoll = aero.rollMoment(alphaRad: alpha, betaRad: beta, aileronFraction: aileronFraction, pHat: pHat, mach: mach, rHat: rHat)
+        let cnYaw = aero.yawMoment(alphaRad: alpha, betaRad: beta, rudderFraction: rudderFraction, rHat: rHat, mach: mach, pHat: pHat)
 
         let aeroMomentBody = SIMD3<Float>(
             clRoll * dynamicPressure * aero.wingArea * aero.wingSpan,

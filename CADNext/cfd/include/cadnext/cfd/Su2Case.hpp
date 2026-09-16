@@ -3,6 +3,7 @@
 #include "cadnext/Result.hpp"
 
 #include <map>
+#include <functional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,10 +42,19 @@ struct Su2RunResult {
     int exitStatus = -1;
     Su2History history;
     std::string log;
+    bool cancelled = false;
+    bool timedOut = false;
+};
+
+struct Su2RunControl {
+    std::function<bool()> cancel;
+    std::function<void(const Su2History&)> progress;
+    double timeoutSeconds = 3600.0;
 };
 
 // Writes `config` (with MESH_FILENAME pointing at a mesh already in `directory`) and runs
 // `solver` on `threads` OpenMP threads there.
-Result<Su2RunResult> runSu2(const std::string& solver, const std::string& directory, const Su2Config& config, int threads);
+Result<Su2RunResult> runSu2(const std::string& solver, const std::string& directory, const Su2Config& config, int threads,
+                          const Su2RunControl& control = {});
 
 } // namespace cadnext::cfd

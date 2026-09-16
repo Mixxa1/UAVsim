@@ -63,6 +63,10 @@ enum WorkbenchEngineeringSnapshot {
             "inlet": .string(frame.inletType?.rawValue ?? "none"),
         ]
         put(.outerGeometry, "frame", .object(shape))
+        if case let .imported(construction) = build.frame, let axes = construction.cadAxes {
+            let values: EngineeringCanonicalValue = .object(["forward": .string(axes.forward), "up": .string(axes.up), "lengthUnit": .string(axes.lengthUnit)])
+            put(.outerGeometry, "cadAxes", values)
+        }
         put(.structuralGeometry, "frame", .object(shape))
         put(.materials, "frame.skin", .string(frame.skinMaterial?.rawValue ?? "unspecified"))
         // Per solid, so a changed material names the part it changed on.

@@ -1,6 +1,7 @@
 # Flow solver integration: meshes and configurations for SU2 (LGPL-2.1, run as a separate process,
 # built by tools/build_su2.sh), verification geometries, convergence history. No Qt, no OCCT.
 add_library(cadnext_cfd
+    src/AerodynamicStudy.cpp
     src/FlatPlate.cpp
     src/Joukowski.cpp
     src/Su2Case.cpp
@@ -15,6 +16,7 @@ target_include_directories(cadnext_cfd
 target_link_libraries(cadnext_cfd
     PUBLIC
         cadnext_core
+        cadnext_fea
 )
 
 # SU2_CFD used by the flow verification tests; empty when SU2 has not been built.

@@ -21119,6 +21119,7 @@ final class DroneSimulationViewModel: ObservableObject {
             loadFactor: Double(state.loadFactor),
             waveDragCoefficient: Double(state.waveDragCoefficient),
             angleOfAttackRad: Double(state.angleOfAttack),
+            sideslipRad: Double(state.sideslipAngle),
             propulsionThrustN: Double(state.propulsionThrustNewtons),
             inletPressureRecovery: Double(state.inletPressureRecovery),
             skinTemperatureK: Double(state.aeroThermal.skinK),

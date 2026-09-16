@@ -738,6 +738,7 @@ struct DroneModelProfile: Identifiable, Hashable {
     /// Exact self-contained Workbench assembly used for user-authored models.
     /// Nil for the built-in and legacy abstract catalog profiles.
     let workbenchBuild: WorkbenchBuild?
+    var engineeringAerodynamics: EngineeringAeroRuntime? = nil
 
     init(
         id: String,

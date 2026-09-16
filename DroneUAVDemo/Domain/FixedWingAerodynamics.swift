@@ -77,6 +77,7 @@ struct FixedWingAerodynamics {
     /// `nil` here means every code path below behaves exactly as it did before the table
     /// existed. See `MachCoefficientDatabase`.
     let coefficientTable: AeroCoefficientTable?
+    var engineering: EngineeringAeroRuntime? = nil
 
     /// Compressibility corrections for this airframe's planform.
     ///
@@ -167,8 +168,8 @@ struct FixedWingAerodynamics {
     /// this instant's flow, added to the pristine coefficients. An undamaged wing's strips
     /// cancel exactly, so the first dent changes the aircraft by what the dent does and not
     /// by the gap between two models of it.
-    func liftDrag(alphaRad: Float, mach: Float = 0.0, pHat: Float = 0, rHat: Float = 0) -> (cl: Float, cd: Float) {
-        let pristine = undamagedLiftDrag(alphaRad: alphaRad, mach: mach)
+    func liftDrag(alphaRad: Float, mach: Float = 0.0, pHat: Float = 0, rHat: Float = 0, betaRad: Float = 0) -> (cl: Float, cd: Float) {
+        let pristine = undamagedLiftDrag(alphaRad: alphaRad, mach: mach, betaRad: betaRad)
         guard !damagePanels.isEmpty else {
             return (pristine.cl * damageLiftScale, pristine.cd + damageDragExtra)
         }
@@ -176,7 +177,10 @@ struct FixedWingAerodynamics {
         return (pristine.cl + delta.cl, max(0, pristine.cd + damageDragExtra + delta.cd))
     }
 
-    private func undamagedLiftDrag(alphaRad: Float, mach: Float) -> (cl: Float, cd: Float) {
+    private func undamagedLiftDrag(alphaRad: Float, mach: Float, betaRad: Float = 0) -> (cl: Float, cd: Float) {
+        if let point = engineering?.sample(alphaRad: alphaRad, betaRad: betaRad, mach: mach) {
+            return (Float(point.cl), Float(point.cd))
+        }
         // A tabulated airframe uses its table whole. Its numbers already contain
         // compressibility, wave drag and the vortex behaviour the closed form below models
         // separately, so applying those corrections on top would count each of them twice.
@@ -204,6 +208,7 @@ struct FixedWingAerodynamics {
     /// returning it from `liftDrag` keeps that call's return shape unchanged for the
     /// solver, which runs it every substep for every aircraft.
     func waveDragCoefficient(alphaRad: Float, mach: Float) -> Float {
+        if engineering?.sample(alphaRad: alphaRad, mach: mach) != nil { return 0 }
         if let table = coefficientTable {
             // A table carries total drag, not a breakdown, so the wave part is recovered as
             // the rise over the same aircraft's incompressible drag at the same alpha.
@@ -233,7 +238,8 @@ struct FixedWingAerodynamics {
         alphaRad: Float,
         elevatorFraction: Float,
         qHat: Float,
-        mach: Float = 0.0
+        mach: Float = 0.0,
+        betaRad: Float = 0
     ) -> Float {
         let blend = stallBlend(alphaRad: alphaRad)
         let controlScale = transonic.controlEffectiveness(mach: mach)
@@ -246,6 +252,9 @@ struct FixedWingAerodynamics {
         // angle of attack — a deep stall no conventional aircraft flies, and the flat spin
         // that followed it. Scaled together they keep the trim angle the stick commands.
         let effectiveCmDeltaE = cmDeltaE * (1.0 - 0.6 * blend) * controlScale
+        if let point = engineering?.sample(alphaRad: alphaRad, betaRad: betaRad, mach: mach) {
+            return Float(point.cm) + effectiveCmDeltaE * elevatorFraction + effectiveCmq * qHat
+        }
         let base = cm0
             + effectiveCmAlpha * alphaRad
             + effectiveCmDeltaE * elevatorFraction
@@ -354,7 +363,9 @@ struct FixedWingAerodynamics {
         let effectiveClDeltaA = clDeltaA * (1.0 - 0.5 * blend) * controlScale
         let damage = damagePanels.isEmpty ? 0
             : damageStripDelta(alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat).roll
-        return clBeta * betaRad
+        let measured = engineering?.sample(alphaRad: alphaRad, betaRad: betaRad, mach: mach)
+        let lateral = measured.map { Float($0.cRoll) + (engineering!.table.hasBetaSweep ? 0 : clBeta * betaRad) } ?? clBeta * betaRad
+        return lateral
             + effectiveClDeltaA * aileronFraction
             + rollRateMoment(alphaRad: alphaRad, mach: mach, pHat: pHat)
             + damage
@@ -380,11 +391,22 @@ struct FixedWingAerodynamics {
         // loses the same half. Leaving it whole let full rudder drive a stalled aircraft to
         // the angular-rate clamp.
         let effectiveCnDeltaR = cnDeltaR * (1.0 - 0.5 * blend) * controlScale
-        return effectiveCnBeta * betaRad
+        let measured = engineering?.sample(alphaRad: alphaRad, betaRad: betaRad, mach: mach)
+        let lateral = measured.map { Float($0.cYaw) + (engineering!.table.hasBetaSweep ? 0 : effectiveCnBeta * betaRad) } ?? effectiveCnBeta * betaRad
+        return lateral
             + effectiveCnDeltaR * rudderFraction
             + effectiveCnr * rHat
             + cnYawDamageOffset
             + (damagePanels.isEmpty ? 0 : damageStripDelta(alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat).yaw)
+    }
+
+    func sideForce(alphaRad: Float, betaRad: Float, mach: Float = 0) -> Float {
+        guard let point = engineering?.sample(alphaRad: alphaRad, betaRad: betaRad, mach: mach) else { return cyBeta * betaRad }
+        return Float(point.cy) + (engineering!.table.hasBetaSweep ? 0 : cyBeta * betaRad)
+    }
+
+    func usesEngineeringTable(alphaRad: Float, betaRad: Float = 0, mach: Float = 0) -> Bool {
+        engineering?.sample(alphaRad: alphaRad, betaRad: betaRad, mach: mach) != nil
     }
 
     /// Applies structural-damage deltas on top of the pristine model.
@@ -393,6 +415,8 @@ struct FixedWingAerodynamics {
     func applyingDamage(_ damage: FixedWingAeroDamage) -> FixedWingAerodynamics {
         guard !damage.isPristine else { return self }
         var damaged = self
+        // Changed geometry invalidates the clean-airframe CFD map; use the existing damage model.
+        damaged.engineering = nil
         // Keep reference geometry for moments, drag and wing-area telemetry.
         // Lost lift belongs to the coefficients; no phantom 20% wing remains.
         damaged.damageLiftScale = damage.liftScale.clampedUnit()
@@ -447,10 +471,11 @@ struct FixedWingAerodynamics {
         ///
         /// ⚠️ Until this parameter existed the lookup always passed `nil`: per-airframe tables
         /// were loaded at launch and registered, and then never flown — only family tables were.
-        profileID: String? = nil
+        profileID: String? = nil,
+        engineering: EngineeringAeroRuntime? = nil
     ) -> FixedWingAerodynamics {
         let preset = FamilyAeroPreset.preset(for: family)
-        let span = max(0.3, wingSpanM)
+        let span = engineering.map { Float($0.table.reference.spanM) } ?? max(0.3, wingSpanM)
         let fuselageLength = max(0.2, fuselageLengthM)
         let height = max(0.08, heightM)
         let mass = max(0.1, massKg)
@@ -514,8 +539,8 @@ struct FixedWingAerodynamics {
         // at 340 m/s against a catalogued 250. Inertia below still uses the live mass, because
         // that genuinely does change as fuel burns.
         let geometryMass = max(mass, designMassKg ?? mass)
-        let area = ((2.0 * geometryMass * 9.81) / (AtmosphereModel.seaLevelDensity * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
-        let chord = area / span
+        let area = engineering.map { Float($0.table.reference.areaM2) } ?? ((2.0 * geometryMass * 9.81) / (AtmosphereModel.seaLevelDensity * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
+        let chord = engineering.map { Float($0.table.reference.chordM) } ?? area / span
         // Effective aspect ratio, back-derived from the calibrated area, used
         // only for induced drag — clamped to a believable range so a
         // pathological mass/speed/span combination can't blow up drag.
@@ -623,6 +648,7 @@ struct FixedWingAerodynamics {
             tailSlipstreamCoverage: preset.tailSlipstreamCoverage,
             propSpinSign: 1.0
         )
+        aerodynamics.engineering = engineering
         aerodynamics.rotationalInflowScale = aerodynamics.calibratedRotationalInflowScale()
         return aerodynamics
     }

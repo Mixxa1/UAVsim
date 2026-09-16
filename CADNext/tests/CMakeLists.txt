@@ -165,7 +165,10 @@ if(EXISTS "${CADNEXT_SU2_CFD}")
 
         add_test(NAME cadnext_test_cfd_sphere_euler
                  COMMAND cadnext_test_cfd_sphere_euler ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-sphere)
-        set_tests_properties(cadnext_test_cfd_sphere_euler PROPERTIES LABELS "cfd" TIMEOUT 1800)
+        # Three-level refinement plus a far-field check reaches ~3M cells. Reserve the
+        # solver's ten threads and allow an hour on developer laptops; all numerical
+        # assertions remain unchanged.
+        set_tests_properties(cadnext_test_cfd_sphere_euler PROPERTIES LABELS "cfd" TIMEOUT 3600 RUN_SERIAL TRUE PROCESSORS 10)
     endif()
 endif()
 
@@ -997,4 +1000,24 @@ if(CADNEXT_WITH_QT AND CADNEXT_WITH_COIN3D AND CADNEXT_WITH_OCCT AND CADNEXT_WIT
 
     add_test(NAME cadnext_test_gui_structural_study_panel
              COMMAND cadnext_test_gui_structural_study_panel $<TARGET_FILE:cadnext_structural>)
+endif()
+
+add_executable(cadnext_test_cfd_study test_cfd_study.cpp)
+target_link_libraries(cadnext_test_cfd_study PRIVATE cadnext_cfd)
+add_test(NAME cadnext_test_cfd_study COMMAND cadnext_test_cfd_study)
+set_tests_properties(cadnext_test_cfd_study PROPERTIES LABELS "cfd-contract" TIMEOUT 20)
+if(TARGET cadnext_cfd_cli AND EXISTS "${CADNEXT_SU2_CFD}")
+    add_executable(cadnext_test_cfd_cli test_cfd_cli.cpp)
+    target_link_libraries(cadnext_test_cfd_cli PRIVATE cadnext_cfd_occt cadnext_construction)
+    add_test(NAME cadnext_test_cfd_cli COMMAND cadnext_test_cfd_cli $<TARGET_FILE:cadnext_cfd_cli> ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-cli)
+    add_test(NAME cadnext_test_cfd_cli_laminar COMMAND cadnext_test_cfd_cli $<TARGET_FILE:cadnext_cfd_cli> ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-cli-laminar laminar)
+    add_test(NAME cadnext_test_cfd_cli_sst COMMAND cadnext_test_cfd_cli $<TARGET_FILE:cadnext_cfd_cli> ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-cli-sst sst)
+    set_tests_properties(cadnext_test_cfd_cli_laminar cadnext_test_cfd_cli_sst PROPERTIES LABELS "cfd" TIMEOUT 600)
+    set_tests_properties(cadnext_test_cfd_cli PROPERTIES LABELS "cfd" TIMEOUT 600)
+endif()
+if(TARGET cadnext_cfd_occt)
+    add_executable(cadnext_test_cfd_boundary_layers test_cfd_boundary_layers.cpp)
+    target_link_libraries(cadnext_test_cfd_boundary_layers PRIVATE cadnext_cfd_occt)
+    add_test(NAME cadnext_test_cfd_boundary_layers COMMAND cadnext_test_cfd_boundary_layers)
+    set_tests_properties(cadnext_test_cfd_boundary_layers PROPERTIES LABELS "cfd-contract" TIMEOUT 120)
 endif()

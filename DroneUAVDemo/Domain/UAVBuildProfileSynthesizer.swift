@@ -102,6 +102,7 @@ enum UAVBuildProfileSynthesizer {
         // now. Applied after construction because it is a property of the airframe rather
         // than a flight parameter, and the initialiser above takes flight parameters.
         profile.skinMaterial = frame.skinMaterial ?? .aluminium
+        profile.engineeringAerodynamics = EngineeringAeroRuntime.resolve(build: build)
         return profile
     }
 

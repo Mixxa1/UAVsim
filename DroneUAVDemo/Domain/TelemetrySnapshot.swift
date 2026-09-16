@@ -70,6 +70,7 @@ struct TelemetrySnapshot {
     /// Angle of attack, radians. Recorded alongside Mach because the two together are what
     /// a coefficient is a function of — either on its own indexes nothing.
     var angleOfAttackRad: Double
+    var sideslipRad: Double = 0
     var propulsionThrustN: Double
     var inletPressureRecovery: Double
     var skinTemperatureK: Double

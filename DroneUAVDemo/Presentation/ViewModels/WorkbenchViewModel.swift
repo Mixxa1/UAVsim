@@ -117,6 +117,14 @@ final class WorkbenchViewModel: ObservableObject {
     /// redraws the overlay instead of rebuilding the aircraft and refitting the camera.
     @Published private(set) var structuralHighlightToken = 0
     private var structuralRunTask: Task<Void, Never>?
+    @Published private(set) var aerodynamicProgress: String?
+    private var aerodynamicRunTask: Task<Void, Never>?
+    private var aerodynamicRunVehicleID: UUID?
+    private var aerodynamicRunToken: UUID?
+    private var aerodynamicRoot: URL? {
+        try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            .appendingPathComponent("UAVSim/CFD Runs", isDirectory: true)
+    }
     /// Vehicle whose runs `structuralRuns` holds: a new or opened blueprint reloads them.
     private var runsVehicleID: UUID?
     private let structuralStore = try? WorkbenchStructuralRunStore.standard()
@@ -523,6 +531,7 @@ final class WorkbenchViewModel: ObservableObject {
     private func recomputeValidation() {
         let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
         var records = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
+        records += build.aerodynamicRuns.map(\.record)
         let upstream = records
         for test in [EngineeringTestType.structuralStatic, .modalVibration] {
             if let derived = WorkbenchStructuralAggregate.record(
@@ -532,13 +541,99 @@ final class WorkbenchViewModel: ObservableObject {
         }
         let running = runningStructuralCaseID.flatMap { id in build.structuralCases.first { $0.id == id }?.testType }
         validation = EngineeringValidationEngine.evaluate(
-            snapshot: snapshot, records: records, running: running.map { [$0] } ?? [])
+            snapshot: snapshot, records: records, running: Set(running.map { [$0] } ?? []).union(aerodynamicRunVehicleID == build.id ? [.aerodynamics] : []))
     }
 
     private func reloadStructuralRuns() {
         runsVehicleID = build.id
+        reloadAerodynamicRuns()
         structuralRuns = structuralStore?.runs(vehicleID: build.id.uuidString.lowercased()) ?? []
         recomputeValidation()
+    }
+
+    // MARK: Aerodynamics
+
+    var aerodynamicSettings: WorkbenchAeroSettings { build.aerodynamicSettings ?? .initial(for: build) }
+    var aerodynamicRunning: Bool { aerodynamicRunTask != nil }
+    var aerodynamicTool: URL? { WorkbenchAeroToolLocator.adapter }
+    var aerodynamicSolver: URL? { WorkbenchAeroToolLocator.solver }
+
+    func updateAerodynamicSettings(_ mutation: (inout WorkbenchAeroSettings) -> Void) {
+        var settings = aerodynamicSettings
+        mutation(&settings)
+        guard settings != build.aerodynamicSettings else { return }
+        pushUndo()
+        build.aerodynamicSettings = settings
+        // Setup edits describe the next run. They do not change the immutable result's flow state.
+        build.revision += 1
+        recomputeValidation()
+    }
+
+    private func reloadAerodynamicRuns() {
+        guard let root = aerodynamicRoot?.appendingPathComponent(build.id.uuidString.lowercased()),
+              let iterator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil) else { return }
+        var known = Set(build.aerodynamicRuns.map(\.id))
+        for case let url as URL in iterator where url.lastPathComponent == "aero-run.json" {
+            if let data = try? Data(contentsOf: url), let run = try? JSONDecoder().decode(WorkbenchAeroRun.self, from: data),
+               run.record.vehicleID == build.id.uuidString.lowercased(), known.insert(run.id).inserted {
+                build.aerodynamicRuns.append(run)
+            }
+        }
+        build.aerodynamicRuns.sort { $0.record.createdAt < $1.record.createdAt }
+    }
+
+    func runAerodynamics() {
+        guard aerodynamicRunTask == nil else { return }
+        guard let tool = aerodynamicTool, let solver = aerodynamicSolver, let root = aerodynamicRoot else {
+            statusMessage = "Не найден cadnext_cfd или SU2_CFD. Укажите пути в панели CFD."; return
+        }
+        let preparedBuild = build, settings = aerodynamicSettings
+        if let problem = settings.problem { statusMessage = problem; return }
+        aerodynamicRunVehicleID = build.id
+        let runToken = UUID()
+        aerodynamicRunToken = runToken
+        aerodynamicProgress = "Подготовка CFD…"
+        recomputeValidation()
+        let relay = WeakViewModelRelay(self)
+        aerodynamicRunTask = Task { [weak self] in
+            let run = await WorkbenchAeroRunner.run(build: preparedBuild, settings: settings, tool: tool, solver: solver, root: root) { text in
+                let parts = text.split(separator: " ")
+                let description: String
+                if parts.count == 4, let point = Int(parts[1]) {
+                    let stage = String(parts[2])
+                    let label = ["domain": "Воздушная область", "mesh": "Построение сетки", "solve": "Решение", "collected": "Точка готова"][stage] ?? stage
+                    description = "\(label) · точка \(point + 1)/\(settings.alphaDeg.count * settings.betaDeg.count) · итерация \(parts[3])"
+                } else { description = text }
+                Task { @MainActor in
+                    guard let viewModel = relay.value, viewModel.aerodynamicRunToken == runToken else { return }
+                    viewModel.aerodynamicProgress = description
+                }
+            }
+            guard let self else { return }
+            self.aerodynamicRunTask = nil
+            self.aerodynamicRunVehicleID = nil
+            self.aerodynamicRunToken = nil
+            self.aerodynamicProgress = nil
+            if self.build.id == preparedBuild.id {
+                self.build.aerodynamicRuns.append(run)
+                self.build.revision += 1
+            }
+            self.recomputeValidation()
+            self.statusMessage = "CFD: \(run.record.outcome.rawValue.uppercased()). " + (run.record.failureReasons.first ?? "Результат добавлен в историю.")
+        }
+    }
+
+    func cancelAerodynamics() { aerodynamicRunTask?.cancel() }
+
+    func importAerodynamicTable(from url: URL) {
+        do {
+            let run = try WorkbenchAeroRunner.importTable(Data(contentsOf: url), build: build)
+            pushUndo()
+            build.aerodynamicRuns.append(run)
+            build.revision += 1
+            recomputeValidation()
+            statusMessage = "Аэротаблица привязана к текущей конфигурации. Сохраните сборку для переноса результата."
+        } catch { statusMessage = "Импорт CFD: \(error)" }
     }
 
     // MARK: Strength cases

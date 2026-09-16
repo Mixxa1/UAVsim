@@ -17,6 +17,7 @@ struct AeroDiagnosticsPanelView: View {
     let profile: DroneModelProfile
     let liveMach: Float
     let liveAlphaRad: Float
+    let liveBetaRad: Float
 
     @State private var machSlice: Double = 0.3
     @State private var followsLiveMach = true
@@ -34,7 +35,8 @@ struct AeroDiagnosticsPanelView: View {
             heightM: Float(dimensions.z) / 1000.0,
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
-            profileID: profile.id
+            profileID: profile.id,
+            engineering: profile.engineeringAerodynamics
         )
     }
 
@@ -63,13 +65,18 @@ struct AeroDiagnosticsPanelView: View {
             subtitleKey: "diagnostics.aero.curves.subtitle"
         ) {
             VStack(alignment: .leading, spacing: 10) {
+                Text(aerodynamics.usesEngineeringTable(alphaRad: liveAlphaRad, betaRad: liveBetaRad, mach: effectiveMach)
+                     ? "Источник: CFD / импортированная аэротаблица. Управление и демпфирование — профиль."
+                     : "Источник: исходный аэродинамический профиль (нет актуальной CFD-таблицы для этого режима).")
+                    .font(.system(size: 11)).foregroundStyle(GroundControlPalette.textSecondary)
                 machControl
 
                 AeroCurveChart(
                     aerodynamics: aerodynamics,
                     mach: effectiveMach,
                     liveAlphaRad: liveAlphaRad,
-                    stallAlphaRad: FixedWingAerodynamics.stallAngleOfAttack(for: wing.family)
+                    liveBetaRad: liveBetaRad,
+                    stallAlphaRad: stallAngle(for: wing)
                 )
                 .frame(height: 190)
 
@@ -81,12 +88,17 @@ struct AeroDiagnosticsPanelView: View {
             titleKey: "diagnostics.aero.drag_breakdown",
             subtitleKey: "diagnostics.aero.drag_breakdown.subtitle"
         ) {
-            DragBreakdownChart(
+            if profile.engineeringAerodynamics != nil {
+                Text("CFD-таблица содержит полное сопротивление. Разложение на профильное, индуктивное и волновое сопротивление этим расчётом не определено.")
+                    .font(.system(size: 11)).foregroundStyle(GroundControlPalette.textSecondary)
+            } else {
+                DragBreakdownChart(
                 aerodynamics: aerodynamics,
                 alphaRad: liveAlphaRad,
                 divergenceMach: FixedWingAerodynamics.dragDivergenceMach(for: wing.family)
             )
             .frame(height: 170)
+            }
         }
 
         ModuleSection(
@@ -111,7 +123,7 @@ struct AeroDiagnosticsPanelView: View {
                 )
                 ModuleMetricCell(
                     labelKey: "diagnostics.aero.source",
-                    value: aerodynamics.coefficientTable?.provenance
+                    value: profile.engineeringAerodynamics?.solverVersion ?? aerodynamics.coefficientTable?.provenance
                         ?? NSLocalizedString("diagnostics.aero.source.closed_form", comment: "")
                 )
             }
@@ -135,6 +147,13 @@ struct AeroDiagnosticsPanelView: View {
                     .opacity(followsLiveMach ? 0.4 : 1.0)
             }
         }
+    }
+
+    private func stallAngle(for wing: FixedWingParameters) -> Float? {
+        if let table = profile.engineeringAerodynamics?.table {
+            return table.possibleStallBracketDeg.map { Float($0.lowerBound) * .pi / 180 }
+        }
+        return FixedWingAerodynamics.stallAngleOfAttack(for: wing.family)
     }
 
     private var legend: some View {
@@ -165,7 +184,8 @@ private struct AeroCurveChart: View {
     let aerodynamics: FixedWingAerodynamics
     let mach: Float
     let liveAlphaRad: Float
-    let stallAlphaRad: Float
+    let liveBetaRad: Float
+    let stallAlphaRad: Float?
 
     private let alphaRangeDeg: ClosedRange<Float> = -10.0...30.0
 
@@ -180,7 +200,7 @@ private struct AeroCurveChart: View {
                 let alphaDeg = alphaRangeDeg.lowerBound
                     + (alphaRangeDeg.upperBound - alphaRangeDeg.lowerBound) * fraction
                 let alpha = alphaDeg * .pi / 180.0
-                let (cl, cd) = aerodynamics.liftDrag(alphaRad: alpha, mach: mach)
+                let (cl, cd) = aerodynamics.liftDrag(alphaRad: alpha, mach: mach, betaRad: liveBetaRad)
                 lift.append(cl)
                 drag.append(cd)
                 // Elevator neutral and no pitch rate: the airframe's own static moment,
@@ -189,7 +209,8 @@ private struct AeroCurveChart: View {
                     alphaRad: alpha,
                     elevatorFraction: 0.0,
                     qHat: 0.0,
-                    mach: mach
+                    mach: mach,
+                    betaRad: liveBetaRad
                 ))
             }
 
@@ -231,6 +252,7 @@ private struct AeroCurveChart: View {
     }
 
     private func drawStallMarker(context: GraphicsContext, size: CGSize) {
+        guard let stallAlphaRad else { return }
         let stallDeg = stallAlphaRad * 180.0 / .pi
         guard alphaRangeDeg.contains(stallDeg) else { return }
         var path = Path()

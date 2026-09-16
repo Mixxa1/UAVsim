@@ -72,7 +72,7 @@ enum WorkbenchValidationText {
         case .modalVibration:
             return "Решатель есть в CADNext («Анализ → Прочность и частоты детали»); запуск из Мастерской в разработке."
         case .aerodynamics:
-            return "CFD в разработке."
+            return "Одиночная точка, серии α/β и импорт таблиц доступны в панели «Аэродинамика / CFD». Нужна точная рама .uavframe v2 или готовая аэротаблица."
         case .geometryAssembly, .massProperties, .propulsionBench:
             return "Нужны рама и детали силовой установки."
         case .mechanism, .thermalLimits, .controlAuthority, .systemEndurance:

@@ -75,9 +75,10 @@ Result<FluidMesh> meshFluidDomain(const kernel::OcctKernel& kernel, const kernel
                                   const std::map<int, std::string>& wallMarkers, const FluidMeshSettings& settings) {
     const TopoDS_Shape* shape = kernel.findShape(handle);
     if (shape == nullptr || shape->IsNull()) return failure(ErrorCode::NotFound, "нет расчётной области");
-    if (!(settings.farfieldElementSizeM > 0.0) || !(settings.wallElementSizeM > 0.0)) {
+    if (!std::isfinite(settings.farfieldElementSizeM) || !std::isfinite(settings.wallElementSizeM) || !(settings.farfieldElementSizeM > 0.0) || !(settings.wallElementSizeM > 0.0)) {
         return failure(ErrorCode::InvalidArgument, "не заданы размеры элементов у стенки и в дальнем поле");
     }
+    if (!std::isfinite(settings.grading) || settings.grading <= 0 || settings.grading > 1) return failure(ErrorCode::InvalidArgument, "grading должен быть в (0,1]");
     if (wallMarkers.empty()) return failure(ErrorCode::InvalidArgument, "не указаны стенки");
     std::set<std::string> markerNames;
     for (const auto& [face, name] : wallMarkers) {
@@ -86,7 +87,7 @@ Result<FluidMesh> meshFluidDomain(const kernel::OcctKernel& kernel, const kernel
         markerNames.insert(name);
     }
     for (double height : settings.layerHeightsM) {
-        if (!(height > 0.0)) return failure(ErrorCode::InvalidArgument, "высота призматического слоя должна быть положительной");
+        if (!std::isfinite(height) || !(height > 0.0)) return failure(ErrorCode::InvalidArgument, "высота призматического слоя должна быть положительной");
     }
 
     std::vector<TopoDS_Shape> kernelFaces;
@@ -114,11 +115,6 @@ Result<FluidMesh> meshFluidDomain(const kernel::OcctKernel& kernel, const kernel
         netgen::MeshingParameters parameters;
         parameters.maxh = settings.farfieldElementSizeM;
         parameters.grading = settings.grading;
-        ngMesh = std::make_shared<netgen::Mesh>();
-        ngMesh->SetGeometry(geometry);
-        if (geometry->GenerateMesh(ngMesh, parameters) != 0) {
-            return failure(ErrorCode::KernelOperationFailed, "Netgen не построил объёмную сетку области течения");
-        }
         if (!settings.layerHeightsM.empty()) {
             netgen::BoundaryLayerParameters layer;
             layer.thickness = settings.layerHeightsM;
@@ -130,7 +126,15 @@ Result<FluidMesh> meshFluidDomain(const kernel::OcctKernel& kernel, const kernel
             // Shrink a layer where it would run into itself (narrow gaps, sharp concave corners)
             // instead of producing crossing prisms.
             layer.limit_growth_vectors = true;
-            netgen::GenerateBoundaryLayer(*ngMesh, layer);
+            // Netgen must grow the prisms BEFORE filling the remaining fluid with tetrahedra.
+            // Adding a layer to an already-filled volume leaves overlapping prisms and tets,
+            // which can look well shaped locally yet double-counts the near-wall fluid.
+            parameters.boundary_layers.Append(layer);
+        }
+        ngMesh = std::make_shared<netgen::Mesh>();
+        ngMesh->SetGeometry(geometry);
+        if (geometry->GenerateMesh(ngMesh, parameters) != 0) {
+            return failure(ErrorCode::KernelOperationFailed, "Netgen не построил объёмную сетку области течения");
         }
     } catch (const std::exception& error) {
         return failure(ErrorCode::KernelOperationFailed, std::string("Netgen: ") + error.what());
@@ -157,7 +161,7 @@ Result<FluidMesh> meshFluidDomain(const kernel::OcctKernel& kernel, const kernel
             mirror(out);
             volume = -volume;
         }
-        if (!(volume > 0.0)) return failure(ErrorCode::ShapeInvalid, "вырожденный элемент в сетке области течения");
+        if (!std::isfinite(volume) || !(volume > 0.0)) return failure(ErrorCode::ShapeInvalid, "вырожденный элемент в сетке области течения");
         result.smallestVolumeM3 = std::min(result.smallestVolumeM3, volume);
         mesh.elements.push_back(std::move(out));
     }
@@ -181,6 +185,10 @@ Result<FluidMesh> meshFluidDomain(const kernel::OcctKernel& kernel, const kernel
         if (name != "farfield") return failure(ErrorCode::KernelOperationFailed, "в сетке неизвестная граница «" + name + "»");
         mesh.markers.emplace_back(name, std::move(elements));
     }
+    if (mesh.elements.empty() || (!settings.layerHeightsM.empty() && result.prisms == 0))
+        return failure(ErrorCode::KernelOperationFailed, "Netgen не построил требуемые объёмные/пристеночные элементы");
+    if (std::none_of(mesh.markers.begin(), mesh.markers.end(), [](const auto& m) { return m.first == "farfield" && !m.second.empty(); }))
+        return failure(ErrorCode::KernelOperationFailed, "в сетке отсутствует дальнее поле");
     result.mesherVersion = std::string("netgen ") + NETGEN_VERSION;
     return Result<FluidMesh>::ok(std::move(result));
 }

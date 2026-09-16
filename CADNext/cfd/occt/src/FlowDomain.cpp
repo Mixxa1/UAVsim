@@ -28,7 +28,7 @@ Result<FlowDomain> failure(ErrorCode code, const std::string& message) {
 
 Result<FlowDomain> buildFlowDomain(kernel::OcctKernel& kernel, const std::vector<FlowBody>& bodies, const FlowDomainSettings& settings) {
     if (bodies.empty()) return failure(ErrorCode::InvalidArgument, "нет тел аппарата");
-    if (!(settings.farfieldDistanceLengths > 0.0)) {
+    if (!std::isfinite(settings.farfieldDistanceLengths) || !(settings.farfieldDistanceLengths > 0.0)) {
         return failure(ErrorCode::InvalidArgument, "не задано расстояние до границы дальнего поля");
     }
 

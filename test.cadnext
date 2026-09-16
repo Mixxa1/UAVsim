@@ -1,0 +1,139 @@
+{
+  "format": "cadnext",
+  "version": 1,
+  "document": {
+    "id": "document",
+    "name": "CADNext Prototype Document",
+    "unitSystem": "Metric",
+    "objects": [
+      {
+        "id": "object-1",
+        "name": "Тело выдавливания 1",
+        "type": "Body",
+        "primitive": {
+          "kind": "None",
+          "width": 1,
+          "height": 1,
+          "depth": 1,
+          "radius": 0.5
+        },
+        "transform": {
+          "position": { "x": 0, "y": 0, "z": 0 },
+          "rotationEuler": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        }
+      },
+      {
+        "id": "object-2",
+        "name": "Тело выдавливания 1",
+        "type": "Body",
+        "primitive": {
+          "kind": "Box",
+          "width": 0.40000020000000019,
+          "height": 0.10000020000000015,
+          "depth": 0.50000020000000012,
+          "radius": 0.5
+        },
+        "transform": {
+          "position": { "x": 0, "y": 0, "z": 0 },
+          "rotationEuler": { "x": 0, "y": 0, "z": 0 },
+          "scale": { "x": 1, "y": 1, "z": 1 }
+        }
+      }
+    ],
+    "sketches": [
+      {
+        "id": "sketch-1",
+        "name": "Эскиз XY 1",
+        "plane": "XY",
+        "reference": {
+          "type": "CanonicalPlane",
+          "sourceId": "workplane-xy",
+          "sourceBodyId": "",
+          "sourceFaceId": "",
+          "displayName": "",
+          "origin": { "x": 0, "y": 0, "z": 0 },
+          "uAxis": { "x": 1, "y": 0, "z": 0 },
+          "vAxis": { "x": 0, "y": 1, "z": 0 },
+          "normal": { "x": 0, "y": 0, "z": 1 }
+        },
+        "entities": [
+          {
+            "id": "entity-1",
+            "name": "Прямоугольник 1",
+            "type": "Rectangle",
+            "rectangle": {
+              "origin": { "u": -0.20000000000000001, "v": -0.20000000000000001 },
+              "width": 0.40000000000000002,
+              "height": 0.5
+            }
+          }
+        ]
+      },
+      {
+        "id": "sketch-2",
+        "name": "Эскиз Грань Тело выдавливания 1 2",
+        "plane": "XY",
+        "reference": {
+          "type": "BodyFace",
+          "sourceId": "face-1-4aa84ddc-9c9ca2ed-d8e605d7",
+          "sourceBodyId": "object-1",
+          "sourceFaceId": "face-1-4aa84ddc-9c9ca2ed-d8e605d7",
+          "displayName": "Грань Тело выдавливания 1",
+          "origin": { "x": 0.20000000000000001, "y": 0.049999999999999989, "z": 0.050000000000000003 },
+          "uAxis": { "x": 0, "y": 1, "z": 0 },
+          "vAxis": { "x": 0, "y": -0, "z": 1 },
+          "normal": { "x": 1, "y": -0, "z": -0 }
+        },
+        "entities": [
+          {
+            "id": "entity-2",
+            "name": "Прямоугольник 2",
+            "type": "Rectangle",
+            "rectangle": {
+              "origin": { "u": -0.20144550800323485, "v": -0.029937614873051646 },
+              "width": 0.40225991606712341,
+              "height": 0.060737254098057747
+            }
+          }
+        ]
+      }
+    ],
+    "workPlanes": [],
+    "features": [
+      {
+        "id": "feature-1",
+        "name": "Выдавливание 1",
+        "type": "Extrude",
+        "targetObjectId": "object-1",
+        "createdBodyId": "object-1",
+        "extrude": {
+          "sketchId": "sketch-1",
+          "profileId": "profile-entity-1",
+          "operation": "NewBody",
+          "direction": "Positive",
+          "depthMode": "Distance",
+          "distance": 0.10000000000000001
+        },
+        "suppressed": false
+      },
+      {
+        "id": "feature-2",
+        "name": "Вырез выдавливанием 1",
+        "type": "ExtrudeCut",
+        "targetObjectId": "object-1",
+        "modifiedBodyId": "object-1",
+        "extrudeCut": {
+          "targetBodyId": "object-1",
+          "sketchId": "sketch-2",
+          "profileId": "profile-entity-2",
+          "depthMode": "Distance",
+          "direction": "Negative",
+          "distance": 1,
+          "limitObjectId": "object-1"
+        },
+        "suppressed": false
+      }
+    ]
+  }
+}

@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CFD200000000000000000003 /* WorkbenchAerodynamicsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD100000000000000000003 /* WorkbenchAerodynamicsViews.swift */; };
+		CFD200000000000000000002 /* WorkbenchAerodynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD100000000000000000002 /* WorkbenchAerodynamics.swift */; };
+		CFD200000000000000000001 /* EngineeringAeroTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD100000000000000000001 /* EngineeringAeroTable.swift */; };
 		EE0A00000000000000000206 /* EngineeringSolverResult.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000106 /* EngineeringSolverResult.swift */; };
 		EE0A00000000000000000207 /* WorkbenchBuiltInChecks.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000107 /* WorkbenchBuiltInChecks.swift */; };
 		EE0A00000000000000000208 /* WorkbenchValidationViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = EE0A00000000000000000108 /* WorkbenchValidationViews.swift */; };
@@ -566,6 +569,9 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		CFD100000000000000000003 /* WorkbenchAerodynamicsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchAerodynamicsViews.swift; sourceTree = "<group>"; };
+		CFD100000000000000000002 /* WorkbenchAerodynamics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchAerodynamics.swift; sourceTree = "<group>"; };
+		CFD100000000000000000001 /* EngineeringAeroTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringAeroTable.swift; sourceTree = "<group>"; };
 		EE0A00000000000000000106 /* EngineeringSolverResult.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringSolverResult.swift; sourceTree = "<group>"; };
 		EE0A00000000000000000107 /* WorkbenchBuiltInChecks.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchBuiltInChecks.swift; sourceTree = "<group>"; };
 		EE0A00000000000000000108 /* WorkbenchValidationViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchValidationViews.swift; sourceTree = "<group>"; };
@@ -1561,6 +1567,7 @@
 				F1000000000000000000000B /* WorkbenchView.swift */,
 				EE0A00000000000000000108 /* WorkbenchValidationViews.swift */,
 				EE0A0000000000000000010B /* WorkbenchStructuralViews.swift */,
+				CFD100000000000000000003 /* WorkbenchAerodynamicsViews.swift */,
 				100000000000000000000123 /* AbstractModelEditorView.swift */,
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
 				100000000000000000000C74 /* WorldClockChipView.swift */,
@@ -1799,6 +1806,8 @@
 				EE0A00000000000000000107 /* WorkbenchBuiltInChecks.swift */,
 				EE0A00000000000000000109 /* WorkbenchStructuralStudy.swift */,
 				EE0A0000000000000000010A /* WorkbenchStructuralRunner.swift */,
+				CFD100000000000000000002 /* WorkbenchAerodynamics.swift */,
+				CFD100000000000000000001 /* EngineeringAeroTable.swift */,
 			);
 			path = EngineeringValidation;
 			sourceTree = "<group>";
@@ -2169,7 +2178,10 @@
 				EE0A00000000000000000208 /* WorkbenchValidationViews.swift in Sources */,
 				EE0A00000000000000000209 /* WorkbenchStructuralStudy.swift in Sources */,
 				EE0A0000000000000000020A /* WorkbenchStructuralRunner.swift in Sources */,
+				CFD200000000000000000002 /* WorkbenchAerodynamics.swift in Sources */,
+				CFD200000000000000000001 /* EngineeringAeroTable.swift in Sources */,
 				EE0A0000000000000000020B /* WorkbenchStructuralViews.swift in Sources */,
+				CFD200000000000000000003 /* WorkbenchAerodynamicsViews.swift in Sources */,
 				F20000000000000000000004 /* WorkbenchCompatibility.swift in Sources */,
 				F20000000000000000000005 /* WorkbenchComponentLibrary.swift in Sources */,
 				F20000000000000000000006 /* WorkbenchConstruction.swift in Sources */,

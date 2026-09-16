@@ -993,6 +993,175 @@ do {
     print("  bare case after the motor change: \(bareStatus?.staleReasons.joined(separator: " | ") ?? "current")")
 }
 
+// MARK: - CFD tables and runtime
+section("14. CFD: interpolation, provenance, axes, portable history and physics")
+do {
+    var build = WorkbenchBuild.defaultFixedWing()
+    let alphas = [-10.0, 0, 10, 20], betas = [-10.0, 0, 10]
+    let table = EngineeringAeroTable(schema: "uavsim-aerodynamics/1", frame: "flight-body-rhu",
+        reference: .init(areaM2: 2, spanM: 4, chordM: 0.5, momentCenterModelM: [0, 0, 0]),
+        speedMps: 20, densityKgM3: 1.225, viscosityPaS: 1.7894e-5, model: "imported", alphaDeg: alphas, betaDeg: betas,
+        points: alphas.flatMap { a in betas.map { b in .init(alphaDeg: a, betaDeg: b, cl: 0.2 + 0.1*a + 0.02*b,
+            cd: 0.04 + 0.001*a*a, cm: -0.01*a, cy: -0.02*b, cRoll: -0.003*b, cYaw: 0.005*b) } })
+    check(table.problem == nil && table.usableForFlight, "a complete finite alpha/beta map is usable")
+    check(table.possibleStallBracketDeg == nil, "a monotonically increasing polar makes no stall claim")
+    var stalled = table
+    for i in stalled.points.indices where stalled.points[i].alphaDeg == 20 { stalled.points[i].cl = 0.9 }
+    check(stalled.possibleStallBracketDeg == 10.0...20.0, "the measured lift peak and decline bracket possible stall")
+    let mid = table.sample(alphaRad: 5 * .pi / 180, betaRad: 5 * .pi / 180)
+    check(mid != nil && abs(mid!.cl - 0.8) < 1e-10 && abs(mid!.cd - 0.09) < 1e-10 && abs(mid!.cy + 0.1) < 1e-10,
+          "bilinear interpolation uses both axes and retains the polar shape")
+    check(table.sample(alphaRad: 30 * .pi / 180, betaRad: 0) == nil, "no extrapolation beyond the alpha envelope")
+    check(table.sample(alphaRad: 0, betaRad: 20 * .pi / 180) == nil, "no extrapolation beyond the beta envelope")
+    var malformed = table; malformed.points.removeLast()
+    check(malformed.problem != nil, "partial Cartesian product is rejected")
+    malformed = table; malformed.points.swapAt(0, 1)
+    check(malformed.problem != nil, "misordered or duplicate points are rejected")
+    malformed = table; malformed.points[0].cl = .nan
+    check(malformed.problem != nil, "nonfinite coefficients are rejected")
+    malformed = table; malformed.points[0].cd = -0.01
+    check(malformed.problem != nil, "negative drag is rejected")
+    malformed = table; malformed.reference.chordM = 0
+    check(malformed.problem != nil, "zero reference chord is rejected")
+    malformed = table; malformed.frame = "CAD"
+    check(malformed.problem != nil, "undeclared axes cannot enter runtime")
+    malformed = table; malformed.model = "euler"
+    check(!malformed.usableForFlight, "Euler is diagnostic only: no viscous drag or stall claim")
+    let imported = try WorkbenchAeroRunner.importTable(JSONEncoder().encode(table), build: build)
+    build.aerodynamicRuns = [imported]
+    let runtime = EngineeringAeroRuntime.resolve(build: build)
+    check(runtime != nil, "a current imported table resolves to the runtime profile")
+    let stored = try JSONDecoder().decode(WorkbenchBuild.self, from: JSONEncoder().encode(build))
+    check(stored.aerodynamicRuns == build.aerodynamicRuns && EngineeringAeroRuntime.resolve(build: stored) != nil,
+          ".uavbuild round-trip carries history and coefficients without solver artifacts")
+    var modified = imported.record
+    modified.aerodynamicTable!.points[0].cm += 0.01
+    check(modified.outputFingerprint != imported.record.outputFingerprint, "a curve change invalidates downstream even when scalar metrics match")
+    let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+    var changed = build; changed.frame = .library(id: "different-airframe")
+    check(EngineeringAeroRuntime.resolve(build: changed) == nil, "changed external geometry cannot fly an old table")
+    changed = build; changed.name = "Renamed only"
+    check(EngineeringAeroRuntime.resolve(build: changed) != nil, "a rename preserves the aerodynamic result")
+    modified = imported.record; modified.outcome = .error; modified.createdAt = Date().addingTimeInterval(10); modified.aerodynamicTable = nil
+    changed = build; changed.aerodynamicRuns.append(.init(record: modified, settings: nil, artifactDirectory: nil))
+    check(EngineeringAeroRuntime.resolve(build: changed) == nil, "a newer ERROR prevents silent reuse of an older successful run")
+    modified = imported.record; modified.outcome = .fail
+    changed = build; changed.aerodynamicRuns = [.init(record: modified, settings: nil, artifactDirectory: nil)]
+    check(EngineeringAeroRuntime.resolve(build: changed) == nil, "FAIL cannot enter runtime without an override")
+    modified = imported.record; modified.aerodynamicTable!.points.removeLast()
+    let evaluation = EngineeringValidationEngine.evaluate(snapshot: snapshot, records: [modified]).evaluation(.aerodynamics)
+    check(evaluation?.status == .error, "a corrupted portable table produces ERROR, not a current PASS/WARNING")
+    modified.aerodynamicTable = nil
+    check(EngineeringValidationEngine.evaluate(snapshot: snapshot, records: [modified]).evaluation(.aerodynamics)?.status == .error,
+          "a successful CFD record with a missing portable table cannot remain current")
+    let atOrigin = EngineeringAeroRuntime(table: table, centerOfMassModelM: .zero, source: .computed, solverVersion: "test")
+    var forwardCG = atOrigin; forwardCG.centerOfMassModelM.z = 0.1
+    let centered = atOrigin.sample(alphaRad: 0)!, shifted = forwardCG.sample(alphaRad: 0)!
+    check(abs(shifted.cm - centered.cm + 0.04) < 1e-10, "forward CG shifts pitching moment nose-down via r × F")
+    var rightCG = atOrigin; rightCG.centerOfMassModelM.x = -0.1
+    let rolled = rightCG.sample(alphaRad: 0)!
+    check(abs(rolled.cRoll - centered.cRoll + 0.005) < 1e-10, "rightward CG shifts roll about aft with the simulator sign")
+    check(atOrigin.sample(alphaRad: 0, mach: 0.5) == nil, "incompressible CFD is not used above Mach 0.3")
+    let aero = FixedWingAerodynamics.build(family: .conventionalSurvey, massKg: 3, wingSpanM: 2, fuselageLengthM: 1,
+        heightM: 0.2, turnAuthority: 1, minSustainableSpeedMps: 10, engineering: atOrigin)
+    check(aero.wingArea == 2 && aero.wingSpan == 4 && aero.meanChord == 0.5, "physics uses table reference dimensions, not inferred wing area")
+    let ld = aero.liftDrag(alphaRad: 5 * .pi / 180, betaRad: 5 * .pi / 180)
+    check(abs(ld.cl - 0.8) < 1e-5 && abs(ld.cd - 0.09) < 1e-5, "lift/drag physics consumes the 2D table")
+    check(abs(aero.pitchMoment(alphaRad: 5 * .pi / 180, elevatorFraction: 0, qHat: 0, betaRad: 5 * .pi / 180) + 0.05) < 1e-5,
+          "pitch physics consumes measured Cm instead of the family slope")
+    check(abs(aero.sideForce(alphaRad: 0, betaRad: 5 * .pi / 180) + 0.1) < 1e-5, "side force physics consumes beta sweep")
+    check(abs(aero.rollMoment(alphaRad: 0, betaRad: 5 * .pi / 180, aileronFraction: 0, pHat: 0) + 0.015) < 1e-5,
+          "roll physics consumes beta moment with correct reference span")
+    check(abs(aero.yawMoment(alphaRad: 0, betaRad: 5 * .pi / 180, rudderFraction: 0, rHat: 0) - 0.025) < 1e-5,
+          "yaw physics consumes beta moment")
+    check(!aero.usesEngineeringTable(alphaRad: 1.0), "out-of-envelope physics explicitly falls back")
+    var alphaOnly = table; alphaOnly.betaDeg = [0]; alphaOnly.points = table.points.filter { $0.betaDeg == 0 }
+    let alphaRuntime = EngineeringAeroRuntime(table: alphaOnly, centerOfMassModelM: .zero, source: .computed, solverVersion: "test")
+    let alphaAero = FixedWingAerodynamics.build(family: .conventionalSurvey, massKg: 3, wingSpanM: 2, fuselageLengthM: 1,
+        heightM: 0.2, turnAuthority: 1, minSustainableSpeedMps: 10, engineering: alphaRuntime)
+    check(abs(alphaAero.sideForce(alphaRad: 0, betaRad: 0.1) - alphaAero.cyBeta * 0.1) < 1e-6,
+          "alpha-only sweep preserves the explicitly unmeasured lateral profile")
+    var single = alphaOnly; single.alphaDeg = [0]; single.points = alphaOnly.points.filter { $0.alphaDeg == 0 }
+    check(!single.usableForFlight, "single point cannot replace the flight polar")
+    let profile = UAVBuildProfileSynthesizer.synthesizeProfile(for: build)
+    check(profile.engineeringAerodynamics != nil, "synthesized runtime profile carries the validated map")
+
+    if let bytes = try? Data(contentsOf: URL(fileURLWithPath: "CADNext/cfd/schema/aerodynamics-result.example.json")) {
+        let result = try EngineeringSolverResult.decode(bytes, expecting: .aerodynamics)
+        check(result.outcome == .warning && result.aeroTable?.problem == nil, "actual C++ CFD output decodes through the shared Swift envelope")
+        check(!result.solverVersion.contains("unknown"), "actual solver and adapter versions survive transport")
+    } else { check(false, "committed real SU2 result fixture exists") }
+}
+
+
+// MARK: - Workbench CFD execution
+section("15. Workbench CFD: immutable jobs, real solver, cancellation and durable history")
+do {
+    let fixture = URL(fileURLWithPath: "CADNext/cfd/schema/sphere.uavframe")
+    let construction = try WorkbenchConstruction.load(from: fixture).construction
+    var build = WorkbenchBuild.defaultFixedWing()
+    build.frame = .imported(construction)
+    for kind in WorkbenchBuild.slotKinds { build.setSpec(nil, for: kind) }
+    let example = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "CADNext/cfd/schema/aerodynamics-job.example.json"))) as! [String: Any]
+    let settings = try JSONDecoder().decode(WorkbenchAeroSettings.self, from: JSONSerialization.data(withJSONObject: example["settings"]!))
+    guard let tool = WorkbenchAeroToolLocator.adapter, let solver = WorkbenchAeroToolLocator.solver else {
+        check(false, "cadnext_cfd and SU2_CFD found (build the Netgen-enabled CLI first)"); exit(1)
+    }
+    let prepared = try WorkbenchAeroRunner.prepare(build: build, settings: settings, solver: solver)
+    let job = try JSONSerialization.jsonObject(with: prepared.job) as! [String: Any]
+    let geometry = job["geometry"] as! [[String: String]]
+    check(geometry.count == 1 && geometry[0]["sha256"] == construction.bodies![0].geometry.sha256,
+          "prepared job pins the exact BRep fingerprint")
+    check((job["proxies"] as! [[String: Any]]).isEmpty, "empty component slots introduce no hidden equipment")
+    var withEquipment = WorkbenchBuild.defaultFixedWing(); withEquipment.frame = .imported(construction)
+    let equipmentJob = try WorkbenchAeroRunner.prepare(build: withEquipment, settings: settings, solver: solver)
+    let equipmentObject = try JSONSerialization.jsonObject(with: equipmentJob.job) as! [String: Any]
+    let external = WorkbenchEngineeringSnapshot.make(from: withEquipment).items(.outerGeometry).keys.filter { $0 != "frame" && $0 != "cadAxes" }
+    check((equipmentObject["proxies"] as! [[String: Any]]).count == external.count && !external.isEmpty,
+          "every external component is represented by an explicit geometry envelope")
+    final class CFDOutcomes: @unchecked Sendable {
+        var runs: [WorkbenchAeroRun] = []
+        let lock = NSLock()
+        var stages: [String] = []
+        var cancelSeconds = 0.0
+        func progress(_ value: String) { lock.lock(); stages.append(value); lock.unlock() }
+    }
+    let outcome = CFDOutcomes(), semaphore = DispatchSemaphore(value: 0)
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("probe-cfd-" + UUID().uuidString)
+    let immutableBuild = build
+    Task.detached {
+        outcome.runs.append(await WorkbenchAeroRunner.run(build: immutableBuild, settings: settings, tool: tool,
+            solver: solver, root: root, progress: { outcome.progress($0) }))
+        let start = Date()
+        let cancelRun = Task { await WorkbenchAeroRunner.run(build: immutableBuild, settings: settings, tool: tool, solver: solver, root: root) }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        cancelRun.cancel()
+        outcome.runs.append(await cancelRun.value)
+        outcome.cancelSeconds = Date().timeIntervalSince(start)
+        let alreadyCancelled = Task { await WorkbenchAeroRunner.run(build: immutableBuild, settings: settings, tool: tool, solver: solver, root: root) }
+        alreadyCancelled.cancel()
+        outcome.runs.append(await alreadyCancelled.value)
+        semaphore.signal()
+    }
+    semaphore.wait()
+    let run = outcome.runs[0]
+    check(run.record.outcome == .warning && run.record.aerodynamicTable?.points.count == 1,
+          "Workbench runs actual BRep → Netgen → laminar SU2 → verified result", run.record.failureReasons.joined(separator: "; "))
+    check(run.record.source == .computed && run.record.upstream.isEmpty, "clean-airframe run records computed provenance without invented dependencies")
+    check(outcome.stages.contains { $0.contains("mesh") } && outcome.stages.contains { $0.contains("solve") },
+          "native progress reaches the Workbench callback")
+    check(FileManager.default.fileExists(atPath: run.record.reportRef ?? ""), "report reference resolves to the real run artifact")
+    check(outcome.runs.dropFirst().allSatisfy { $0.record.outcome == .error && $0.record.aerodynamicTable == nil && $0.record.failureReasons.contains("Расчёт отменён.") },
+          "cancellation before and during execution leaves ERROR and no runtime table")
+    check(outcome.cancelSeconds < 10, "cancellation interrupts native work promptly", String(format: "%.2f s", outcome.cancelSeconds))
+    check(Set(outcome.runs.compactMap(\.artifactDirectory)).count == 3, "every attempt owns a new immutable directory")
+    for saved in outcome.runs {
+        let url = URL(fileURLWithPath: saved.artifactDirectory!).appendingPathComponent("aero-run.json")
+        let decoded = try JSONDecoder().decode(WorkbenchAeroRun.self, from: Data(contentsOf: url))
+        check(decoded == saved, "completed/cancelled run survives local history reload")
+    }
+}
+
 // MARK: - Cost
 
 section("Cost (informational, not a gate)")

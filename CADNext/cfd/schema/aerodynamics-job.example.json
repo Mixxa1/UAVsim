@@ -1,0 +1,58 @@
+{
+  "schema": "cadnext-aerodynamics-job/1",
+  "solverPath": "/absolute/path/to/SU2_CFD",
+  "settings": {
+    "model": "laminar",
+    "alphaDeg": [
+      0
+    ],
+    "betaDeg": [
+      0
+    ],
+    "speedMps": 10,
+    "densityKgM3": 1.225,
+    "viscosityPaS": 0.6125,
+    "reference": {
+      "areaM2": 0.7853981633974483,
+      "spanM": 1,
+      "chordM": 1,
+      "momentCenterModelM": [
+        0,
+        0,
+        0
+      ]
+    },
+    "iterations": 1500,
+    "convergenceWindow": 20,
+    "threads": 2,
+    "residualTarget": -5,
+    "coefficientAbsoluteTolerance": 0.001,
+    "coefficientRelativeTolerance": 0.001,
+    "timeoutSeconds": 3600,
+    "farfieldLengths": 5,
+    "wallSizeM": 0.12,
+    "farfieldSizeM": 1.5,
+    "grading": 0.3,
+    "layerHeightsM": [
+      0.005,
+      0.007,
+      0.01,
+      0.014,
+      0.02
+    ]
+  },
+  "cadAxes": {
+    "forward": "+x",
+    "up": "+z",
+    "lengthUnit": "m"
+  },
+  "geometry": [
+    {
+      "id": "sphere",
+      "path": "sphere.brep",
+      "sha256": "ad30bb05191dd31b741d6c5f7311e0fa65832037124c4a955d305f2b736c4729"
+    }
+  ],
+  "workDirectory": "flow",
+  "resultPath": "result.json"
+}

@@ -42,6 +42,7 @@ CADNext строится как отдельный CAD-компонент:
 - `app` — standalone исполняемый файл `cadnext_app`; собирается только при `CADNEXT_BUILD_APP=ON` (требует Qt и Coin3D флаги).
 - `python` — SWIG/PyCXX/PySide-compatible зона для wrappers, macros и workbenches; собирается только при `CADNEXT_WITH_PYTHON=ON`.
 - `bridge` — нейтральный экспорт в UAVsim: visual mesh, collision mesh, mass properties, center of mass, attachments, material tags и UAV role tags.
+- [`cfd`](cfd/README.md) — внешний поток на точной геометрии, Netgen + SU2, серии α/β, отчёты и аэротаблицы для Workbench и физики полёта; CLI `cadnext_cfd`.
 - `tests` — первые unit-level контракты новой архитектуры.
 
 ## Roadmap

@@ -15,9 +15,11 @@ enum EngineeringStalenessReason: Hashable {
     case definitionChanged(recorded: Int, current: Int)
     /// Written by a newer schema than this build understands (spec §17 "incompatible").
     case schemaIncompatible(recorded: Int, supported: Int)
+    case invalidOutput(String)
 
     var displayText: String {
         switch self {
+        case let .invalidOutput(message): return message
         case let .inputChanged(category, items):
             let list = items.isEmpty ? "" : ": " + items.joined(separator: ", ")
             return "Изменились \(category.displayName)\(list)"
@@ -204,6 +206,15 @@ enum EngineeringValidationEngine {
                 supported: EngineeringTestRecord.currentSchemaVersion)])
         }
 
+        if let table = record.aerodynamicTable, let problem = table.problem {
+            return result(.error, [.invalidOutput(problem)])
+        }
+        if record.testType == .aerodynamics,
+           ["cadnext-su2", "aero-table-import"].contains(record.solverID),
+           record.outcome == .pass || record.outcome == .warning,
+           record.aerodynamicTable == nil {
+            return result(.error, [.invalidOutput("В CFD-результате отсутствует переносимая аэротаблица.")])
+        }
         var reasons: [EngineeringStalenessReason] = []
         if record.definitionVersion != definition.definitionVersion {
             reasons.append(.definitionChanged(

@@ -18,6 +18,7 @@ struct EngineeringSolverResult: Decodable, Hashable {
     static let schemaTests: [String: EngineeringTestType] = [
         "cadnext-structural-result/1": .structuralStatic,
         "cadnext-modal-result/1": .modalVibration,
+        "cadnext-aerodynamics-result/1": .aerodynamics,
     ]
     static var supportedSchemas: Set<String> { Set(schemaTests.keys) }
 
@@ -33,6 +34,7 @@ struct EngineeringSolverResult: Decodable, Hashable {
     /// into the record, so the same part under a different load case is a different result.
     let settings: EngineeringCanonicalValue
     let fieldRef: String?
+    let aeroTable: EngineeringAeroTable?
 
     enum DecodeError: Error, CustomStringConvertible {
         case unsupportedSchema(String)
@@ -53,6 +55,10 @@ struct EngineeringSolverResult: Decodable, Hashable {
         guard let schemaTest = schemaTests[result.schema] else { throw DecodeError.unsupportedSchema(result.schema) }
         guard result.testType == test else { throw DecodeError.wrongTest(expected: test, found: result.testType) }
         guard schemaTest == test else { throw DecodeError.wrongTest(expected: schemaTest, found: result.testType) }
+        if test == .aerodynamics && result.outcome != .error {
+            guard let table = result.aeroTable else { throw WorkbenchAeroError.message("В результате CFD нет аэротаблицы.") }
+            if let problem = table.problem { throw WorkbenchAeroError.message(problem) }
+        }
         return result
     }
 }
@@ -80,6 +86,7 @@ extension EngineeringValidationEngine {
             consumedUpstream: consumedUpstream,
             createdAt: createdAt)
         record.reportRef = result.fieldRef
+        record.aerodynamicTable = result.aeroTable
         return record
     }
 }

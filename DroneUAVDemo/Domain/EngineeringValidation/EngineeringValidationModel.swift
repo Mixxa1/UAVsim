@@ -319,10 +319,11 @@ struct EngineeringTestRecord: Codable, Hashable, Identifiable {
     var createdAt: Date
     var reportRef: String?
     var override: EngineeringOverride?
+    var aerodynamicTable: EngineeringAeroTable? = nil
 
     /// What downstream tests compare against: the numbers, not the verdict or the prose.
     var outputFingerprint: String {
-        EngineeringCanonicalValue.object(metrics.mapValues { metric in
+        let values = EngineeringCanonicalValue.object(metrics.mapValues { metric in
             var fields: [String: EngineeringCanonicalValue] = [
                 "value": .number(metric.value),
                 "unit": .string(metric.unit),
@@ -332,5 +333,7 @@ struct EngineeringTestRecord: Codable, Hashable, Identifiable {
             }
             return .object(fields)
         }).fingerprint
+        guard let table = aerodynamicTable else { return values }
+        return EngineeringFingerprint.combine(["metrics": values, "aerodynamicTable": table.fingerprint])
     }
 }
