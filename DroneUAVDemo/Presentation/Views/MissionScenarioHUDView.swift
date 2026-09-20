@@ -101,7 +101,7 @@ struct MissionScenarioHUDView: View {
                 // whole point of the option — so there is no approximate figure here either.
                 if !state.hidesRanges {
                     Text(String(
-                        format: NSLocalizedString("intercept.hud.range", comment: ""),
+                        format: L10n.s("intercept.hud.range"),
                         Double(state.distance)
                     ))
                     .font(.caption.monospacedDigit())
@@ -136,11 +136,11 @@ struct MissionScenarioHUDView: View {
         // are left, because that is the number the operator is actually flying against.
         state.maximumAttempts > 0
             ? String(
-                format: NSLocalizedString("intercept.hud.attempts_limited", comment: ""),
+                format: L10n.s("intercept.hud.attempts_limited"),
                 state.attempts,
                 state.maximumAttempts
             )
-            : String(format: NSLocalizedString("intercept.hud.attempts", comment: ""), state.attempts)
+            : String(format: L10n.s("intercept.hud.attempts"), state.attempts)
     }
 
     private func interceptOutcomeBanner(_ result: InterceptMissionResult) -> some View {
@@ -227,7 +227,7 @@ struct MissionScenarioHUDView: View {
                     if let gate = viewModel.raceNextGateNumber {
                         Label {
                             Text(String(
-                                format: NSLocalizedString("race.hud.next_gate", comment: ""),
+                                format: L10n.s("race.hud.next_gate"),
                                 gate,
                                 viewModel.raceNextGateDistanceMeters
                             ))
@@ -247,7 +247,7 @@ struct MissionScenarioHUDView: View {
                 if viewModel.raceLapCount > 0, viewModel.raceCurrentLap > 0 {
                     HStack {
                         Text(String(
-                            format: NSLocalizedString("race.hud.lap", comment: ""),
+                            format: L10n.s("race.hud.lap"),
                             viewModel.raceCurrentLap,
                             viewModel.raceLapCount
                         ))
@@ -255,7 +255,7 @@ struct MissionScenarioHUDView: View {
                         .foregroundStyle(.white.opacity(0.75))
                         Spacer()
                         Text(String(
-                            format: NSLocalizedString("race.hud.gates", comment: ""),
+                            format: L10n.s("race.hud.gates"),
                             viewModel.raceGatesTaken,
                             viewModel.raceGateTotal
                         ))
@@ -271,7 +271,7 @@ struct MissionScenarioHUDView: View {
 
                 if let best = viewModel.raceBestLapSeconds {
                     Text(String(
-                        format: NSLocalizedString("race.hud.best_lap", comment: ""),
+                        format: L10n.s("race.hud.best_lap"),
                         best
                     ))
                     .font(.caption2.monospacedDigit())
@@ -298,7 +298,7 @@ struct MissionScenarioHUDView: View {
             return nil
         }
         return String(
-            format: NSLocalizedString("race.hud.finished", comment: ""),
+            format: L10n.s("race.hud.finished"),
             viewModel.raceTotalSeconds,
             best
         )
@@ -334,7 +334,7 @@ struct MissionScenarioHUDView: View {
                 .foregroundStyle(GroundControlPalette.warning)
             } else if viewModel.agriSpraySwathMeters > 0.001 {
                 Text(String(
-                    format: NSLocalizedString("mission.hud.agri.swath", comment: ""),
+                    format: L10n.s("mission.hud.agri.swath"),
                     viewModel.agriSpraySwathMeters
                 ))
                 .font(.caption2.monospacedDigit())
@@ -351,7 +351,7 @@ struct MissionScenarioHUDView: View {
         switch viewModel.agriSprayRefillState {
         case .away:
             Text(String(
-                format: NSLocalizedString("mission.hud.agri.station_distance", comment: ""),
+                format: L10n.s("mission.hud.agri.station_distance"),
                 viewModel.agriSprayStationDistanceMeters
             ))
             .font(.caption2.monospacedDigit())
@@ -401,7 +401,7 @@ struct MissionScenarioHUDView: View {
                     "mission.hud.outcome.success",
                     GroundControlPalette.success,
                     String(
-                        format: NSLocalizedString("mission.hud.agri.result", comment: ""),
+                        format: L10n.s("mission.hud.agri.result"),
                         coverage * 100.0, used, wasted
                     )
                 )
@@ -455,7 +455,7 @@ struct MissionScenarioHUDView: View {
 
             HStack {
                 Text(String(
-                    format: NSLocalizedString("mission.hud.fires_remaining", comment: ""),
+                    format: L10n.s("mission.hud.fires_remaining"),
                     viewModel.fireResponseBurningCount,
                     viewModel.fireResponseTotalCount
                 ))

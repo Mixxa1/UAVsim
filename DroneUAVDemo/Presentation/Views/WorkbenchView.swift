@@ -52,8 +52,9 @@ struct WorkbenchView: View {
     // MARK: Top rail
 
     private var categories: [WorkbenchCategory] {
+        // Component slots are still available from the menu beside the rail. Keeping them out of
+        // the main rail leaves the five workflow steps readable at a glance.
         [.overview, .validation, .blueprints, .frame, .radio]
-            + WorkbenchBuild.slotKinds.map { .slot($0) }
     }
 
     private var topBar: some View {
@@ -84,6 +85,8 @@ struct WorkbenchView: View {
                         }
                     }
                 }
+
+                slotMenu
 
                 Spacer(minLength: 8)
 
@@ -170,6 +173,32 @@ struct WorkbenchView: View {
         .help(category.displayName)
     }
 
+    private var slotMenu: some View {
+        let slotSelected: Bool
+        if case .slot = viewModel.selectedCategory { slotSelected = true } else { slotSelected = false }
+        return Menu {
+            ForEach(WorkbenchBuild.slotKinds, id: \.self) { kind in
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) { viewModel.selectedCategory = .slot(kind) }
+                } label: {
+                    Label(kind.displayName, systemImage: kind.symbolName)
+                }
+            }
+        } label: {
+            Label(L10n.s("workbench.components"), systemImage: "square.grid.2x2")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(slotSelected ? .white : GroundControlPalette.textSecondary)
+                .padding(.horizontal, 9)
+                .frame(height: 36)
+                .background(slotSelected ? accent.opacity(0.18) : raised,
+                            in: RoundedRectangle(cornerRadius: 8))
+                .overlay(RoundedRectangle(cornerRadius: 8)
+                    .stroke(slotSelected ? accent.opacity(0.72) : GroundControlPalette.borderStrong))
+        }
+        .menuStyle(.borderlessButton)
+        .help(L10n.s("workbench.components.help"))
+    }
+
     private func toolbarButton(_ image: String, help: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: image)
@@ -245,7 +274,7 @@ struct WorkbenchView: View {
     private var shelfSubtitle: String {
         switch viewModel.selectedCategory {
         case .overview: return "Полная комплектация и быстрые действия"
-        case .validation: return "Что проверено для этой конфигурации, чем и насколько это верно сейчас"
+        case .validation: return L10n.s("workbench.validation.shelf_subtitle")
         case .blueprints: return "Сохранённые удачные сборки"
         case .frame: return "Выберите базовую геометрию аппарата"
         case .radio: return "Физические CONTROL / VIDEO / TELEMETRY и QoS"
@@ -571,9 +600,7 @@ struct WorkbenchView: View {
                 case .overview, .blueprints:
                     buildInspector
                 case .validation:
-                    WorkbenchAerodynamicsPanel(viewModel: viewModel)
-                    WorkbenchStructuralPanel(viewModel: viewModel)
-                    WorkbenchValidationInspector(state: viewModel.validation)
+                    WorkbenchValidationHub(viewModel: viewModel)
                 case .frame:
                     frameInspector
                 case .radio:
@@ -582,7 +609,9 @@ struct WorkbenchView: View {
                     componentInspector
                 }
 
-                compatibilityInspector
+                if viewModel.selectedCategory != .validation {
+                    compatibilityInspector
+                }
 
                 Text(viewModel.statusMessage)
                     .font(.system(size: 10, weight: .medium))
@@ -591,7 +620,9 @@ struct WorkbenchView: View {
             }
             .padding(18)
         }
-        .frame(width: 360)
+        // The test panels contain real controls and result tables. Give them room only while
+        // the Tests category is active; the rest of the Workbench keeps its compact inspector.
+        .frame(width: viewModel.selectedCategory == .validation ? 470 : 360)
         .frame(maxHeight: .infinity, alignment: .top)
         .foregroundStyle(GroundControlPalette.textPrimary)
         .background(panel)

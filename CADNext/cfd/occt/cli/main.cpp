@@ -1,6 +1,7 @@
 #include "cadnext/cfd/AerodynamicStudy.hpp"
 #include "cadnext/cfd/FlowDomain.hpp"
 #include "cadnext/cfd/FluidMesher.hpp"
+#include "cadnext/cfd/SectionFrames.hpp"
 #include "cadnext/bridge/ConstructionBuilder.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
 
@@ -14,6 +15,8 @@
 #include <iterator>
 #include <regex>
 #include <map>
+#include <cmath>
+#include <algorithm>
 
 using namespace cadnext;
 namespace fs = std::filesystem;
@@ -33,11 +36,30 @@ void write(const fs::path& p,const std::string& text) {
     { std::ofstream f(temp,std::ios::binary|std::ios::trunc); if (!f || !(f<<text)) throw std::runtime_error("не удалось записать "+p.string()); }
     fs::rename(temp,p);
 }
-void progress(int point,const char* stage,int iteration=0) { std::printf("progress %d %s %d\n",point,stage,iteration); std::fflush(stdout); }
-std::string embedded(cfd::Json j) {
-    std::string out; for (char c:j.serialize()) { if (c=='<') out+="\\u003c"; else if (c=='>') out+="\\u003e"; else if (c=='&') out+="\\u0026"; else out+=c; } return out;
+// A time-accurate run writes the whole volume at every output step: a few hundred megabytes a frame
+// on an airframe. Each finished frame is reduced to the section the result window shows and the full
+// frame removed (SectionFrames.hpp); the newest is left alone until SU2 is done with it.
+void reduceFrames(const fs::path& directory,const std::vector<std::size_t>& nodes,bool final) {
+    std::vector<fs::path> frames;
+    for(const auto& file:fs::directory_iterator(directory)){
+        const auto name=file.path().filename().string();
+        if(name.starts_with("volume_")&&name.ends_with(".csv"))frames.push_back(file.path());
+    }
+    std::sort(frames.begin(),frames.end());
+    if(!final&&!frames.empty())frames.pop_back();
+    for(const auto& frame:frames){
+        const auto stem=frame.stem().string(); // volume_00012
+        const auto step=stem.substr(std::string("volume").size());
+        const auto written=cfd::writeSectionFrame(frame.string(),nodes,(directory/("section"+step+".csv")).string());
+        if(!written.isOk())throw std::runtime_error(written.error().message);
+        fs::remove(frame);
+        fs::remove(directory/("volume"+step+".vtu"));
+    }
 }
-#include "AeroReportTemplate.inc"
+void progress(int point,const char* stage,int iteration,int total) {
+    std::printf("progress %d %s %d %d\n",point+1,stage,iteration,total);
+    std::fflush(stdout);
+}
 }
 int main(int argc,char** argv) {
     if (argc==2 && std::string(argv[1])=="--capabilities") { std::puts(cfd::aeroCapabilitiesJson().c_str()); return 0; }
@@ -47,15 +69,10 @@ int main(int argc,char** argv) {
     std::vector<cfd::AeroSample> samples;
     std::string solverVersion="unknown",mesherVersion="unknown";
     bool ownsOutput = false;
-    cfd::Json fields=cfd::Json::makeArray();
     auto finish=[&](const std::string& error) {
         if (!job || !ownsOutput) return;
         auto result=cfd::aeroResultJson(*job,samples,solverVersion,mesherVersion,error);
         write(job->resultPath,result.serialize());
-        auto reportData=result; reportData.set("surfaces",fields);
-        std::string report=kAeroReportTemplate;
-        const auto pos=report.find("__CFD_DATA__"); report.replace(pos,12,embedded(reportData));
-        write(fs::path(job->resultPath).parent_path()/"report.html",report);
     };
     try {
         const auto path=fs::absolute(argv[1]);
@@ -87,7 +104,7 @@ int main(int argc,char** argv) {
             bodies.push_back({p.id,kernel.adoptShape(shape,"equipment-envelope")});
         }
         if (cancelled) throw std::runtime_error("расчёт отменён");
-        progress(0,"domain");
+        progress(0,"domain",0,cfd::aeroProgressTotal(job->settings));
         const auto domain=cfd::buildFlowDomain(kernel,bodies,{job->settings.farfieldLengths});
         if (!domain.isOk()) throw std::runtime_error(domain.error().message);
         std::map<std::string,std::string> bodyMarkers;
@@ -102,7 +119,7 @@ int main(int argc,char** argv) {
             mapping.arrayItems.push_back(row);
         }
         write(fs::path(job->workDirectory)/"wall-origins.json",mapping.serialize());
-        progress(0,"mesh");
+        progress(0,"mesh",0,cfd::aeroProgressTotal(job->settings));
         const auto& s=job->settings;
         const auto meshed=cfd::meshFluidDomain(kernel,domain.value().domain,wallMarkers,{s.farfieldSizeM,s.wallSizeM,s.grading,s.layerHeightsM});
         if (!meshed.isOk()) throw std::runtime_error(meshed.error().message);
@@ -113,47 +130,79 @@ int main(int argc,char** argv) {
         const auto meshPath=fs::path(job->workDirectory)/"mesh.su2";
         if (!mesh.write(meshPath.string())) throw std::runtime_error("не удалось записать сетку");
         std::vector<std::string> names; for (const auto& marker:mesh.markers) if (marker.first!="farfield") names.push_back(marker.first);
+        // The section kept for the animation of a time-accurate run: halfway along the span.
+        std::vector<std::size_t> sectionNodes;
+        if (cfd::isUnsteady(s)) {
+            const auto plane=cfd::midSpanPlane(meshPath.string());
+            if (!plane.isOk()) throw std::runtime_error(plane.error().message);
+            const auto nodes=cfd::sectionNodes(meshPath.string(),plane.value());
+            if (!nodes.isOk()) throw std::runtime_error(nodes.error().message);
+            sectionNodes=nodes.value();
+            auto section=cfd::Json::makeObject();
+            section.set("planeY",cfd::Json::makeNumber(plane.value()));
+            section.set("nodes",cfd::Json::makeNumber(static_cast<double>(sectionNodes.size())));
+            write(fs::path(job->workDirectory)/"section.json",section.serialize());
+        }
         int index=0;
         for (double alpha:s.alphaDeg) for (double beta:s.betaDeg) {
             if (cancelled) throw std::runtime_error("расчёт отменён");
             const auto directory=fs::path(job->workDirectory)/("point-"+std::to_string(index));
             fs::create_directory(directory);
             fs::create_hard_link(meshPath,directory/"mesh.su2");
-            progress(index,"solve");
+            const int progressTotal=cfd::aeroProgressTotal(s);
+            progress(index,"solve",0,progressTotal);
             cfd::Su2RunControl control;
             control.cancel=[] { return cancelled!=0; }; control.timeoutSeconds=s.timeoutSeconds;
-            control.progress=[&](const cfd::Su2History& h) { progress(index,"solve",static_cast<int>(h.rows.size())); };
+            control.progress=[&](const cfd::Su2History& h) {
+                int current=static_cast<int>(h.rows.size());
+                if(cfd::isUnsteady(s)&&h.column("Time_Iter")>=0)current=static_cast<int>(std::llround(h.last("Time_Iter")))+1;
+                progress(index,"solve",std::min(current,progressTotal),progressTotal);
+                if(!sectionNodes.empty())reduceFrames(directory,sectionNodes,false);
+            };
             solverActive = 1;
             const auto run=cfd::runSu2(job->solverPath,directory.string(),cfd::aeroConfig(s,alpha,beta,names),s.threads,control);
             solverActive = 0;
             if (!run.isOk()) throw std::runtime_error(run.error().message);
+            if(cfd::isUnsteady(s)) {
+                auto latest=[&](const std::string& prefix,const std::string& extension) {
+                    fs::path found;
+                    for(const auto& file:fs::directory_iterator(directory)){
+                        const auto name=file.path().filename().string();
+                        if(name.starts_with(prefix+"_")&&name.ends_with(extension)&&(found.empty()||name>found.filename().string()))found=file.path();
+                    }
+                    if(found.empty())throw std::runtime_error("URANS не записал временные поля "+prefix+extension);
+                    fs::copy_file(found,directory/(prefix+extension),fs::copy_options::overwrite_existing);
+                };
+                latest("volume",".csv");latest("volume",".vtu");latest("surface",".csv");
+                reduceFrames(directory,sectionNodes,true);
+            }
             {
                 std::ifstream log(directory/"su2.log"); std::string header(8192,'\0'); log.read(header.data(),header.size()); header.resize(log.gcount());
                 std::smatch match;
                 if (std::regex_search(header,match,std::regex("Release ([0-9]+\\.[0-9]+\\.[0-9]+)"))) solverVersion="SU2 "+match[1].str()+" / cadnext-cfd 1";
             }
-            auto point=cfd::collectAeroSample(run.value(),s,alpha,beta);
-            if (!point.isOk()) throw std::runtime_error("точка "+std::to_string(index)+": "+point.error().message);
             if (solverVersion=="unknown") throw std::runtime_error("не удалось определить версию SU2 из журнала");
-            auto sample=point.value();
-            sample.directory=fs::relative(directory,fs::path(job->resultPath).parent_path()).generic_string();
             // Field files are part of a successful point. Do not claim a complete run if writing
             // them failed (e.g. the disk filled after the history was flushed).
             const auto surface=cfd::parseSu2History(read(directory/"surface.csv"));
-            if (!surface.isOk() || surface.value().empty() || !fs::exists(directory/"volume.vtu")) throw std::runtime_error("SU2 не записал полные поля давления/скорости");
+            if (!surface.isOk() || surface.value().empty() || !fs::exists(directory/"volume.vtu") || !fs::exists(directory/"volume.csv")) throw std::runtime_error("SU2 не записал полные поля давления/скорости");
             const auto& h=surface.value();
-            auto field=cfd::Json::makeObject(); auto rows=cfd::Json::makeArray();
+            // The surface field carries y+, so the near-wall resolution is judged here, from the run
+            // itself. A point with problems still counts as computed: its fields are written and can
+            // be inspected, and the result says why its coefficients are not usable.
+            auto point=cfd::collectAeroSample(run.value(),s,alpha,beta,h);
+            if (!point.isOk()) throw std::runtime_error("точка "+std::to_string(index)+": "+point.error().message);
+            auto sample=point.value();
+            sample.directory=fs::relative(directory,fs::path(job->resultPath).parent_path()).generic_string();
+            for (const auto& problem:sample.problems) std::fprintf(stderr,"cadnext_cfd: точка %d: %s\n",index,problem.c_str());
             std::vector<int> columns;
             for (const auto* key:{"x","y","z","Pressure_Coefficient","Velocity_x","Velocity_y","Velocity_z"}) columns.push_back(h.column(key));
             if (std::any_of(columns.begin(),columns.end(),[](int c){return c<0;})) throw std::runtime_error("неизвестный формат поля SU2");
-            for (const auto& row:h.rows) {
-                auto values=cfd::Json::makeArray();
-                for (std::size_t i=0;i<columns.size();++i)
-                    values.arrayItems.push_back(cfd::Json::makeNumber(row[columns[i]]*(i>=4 ? s.speedMps : 1.0)));
-                rows.arrayItems.push_back(values);
-            }
-            field.set("rows",rows); fields.arrayItems.push_back(field);
-            samples.push_back(sample); progress(index,"collected"); ++index;
+            const auto volume=cfd::parseSu2History(read(directory/"volume.csv"));
+            if(!volume.isOk() || volume.value().empty()) throw std::runtime_error("SU2 не записал объёмное поле скорости");
+            std::vector<int> vc;for(const auto* key:{"x","y","z","Velocity_x","Velocity_y","Velocity_z"})vc.push_back(volume.value().column(key));
+            if(std::any_of(vc.begin(),vc.end(),[](int c){return c<0;}))throw std::runtime_error("неизвестный формат объёмного поля SU2");
+            samples.push_back(sample); progress(index,"collected",progressTotal,progressTotal); ++index;
         }
         finish("");
         return 0;

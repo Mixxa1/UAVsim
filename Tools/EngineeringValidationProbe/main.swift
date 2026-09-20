@@ -1107,6 +1107,47 @@ do {
     guard let tool = WorkbenchAeroToolLocator.adapter, let solver = WorkbenchAeroToolLocator.solver else {
         check(false, "cadnext_cfd and SU2_CFD found (build the Netgen-enabled CLI first)"); exit(1)
     }
+    // Near-wall sizing must match the solver's own formulas, and the model must match the Reynolds
+    // number before a run is ever launched.
+    do {
+        var air = WorkbenchAeroSettings()
+        air.reference = .init(areaM2: 0.48, spanM: 1.2, chordM: 0.4, momentCenterModelM: [0, 0, 0])
+        air.speedMps = 20
+        air.wallSizeM = 0.4 / 60
+        air.farfieldSizeM = 1.2
+        let reynolds = WorkbenchWallLayers.reynolds(speedMps: air.speedMps, lengthM: air.reference.chordM,
+                                                    densityKgM3: air.densityKgM3, viscosityPaS: air.viscosityPaS)
+        check(abs(reynolds - 5.48e5) / 5.48e5 < 0.01, "Reynolds number of a 0.4 m chord at 20 m/s")
+        let resolved = WorkbenchWallLayers.plan(wallTreatment: "resolved", speedMps: air.speedMps, lengthM: air.reference.chordM,
+                                                densityKgM3: air.densityKgM3, viscosityPaS: air.viscosityPaS)
+        let functions = WorkbenchWallLayers.plan(wallTreatment: "functions", speedMps: air.speedMps, lengthM: air.reference.chordM,
+                                                 densityKgM3: air.densityKgM3, viscosityPaS: air.viscosityPaS)
+        // The same numbers the C++ side produces for this case: 16.5 µm × 27 layers, 0.82 mm × 7.
+        check(abs((resolved.first ?? 0) - 1.6461e-5) < 1e-8 && resolved.count == 27,
+              "resolved stack matches the solver's sizing", "\(resolved.first ?? 0) × \(resolved.count)")
+        check(abs((functions.first ?? 0) - 8.23e-4) < 1e-6 && functions.count == 7,
+              "wall-function stack matches the solver's sizing", "\(functions.first ?? 0) × \(functions.count)")
+        air.model = "laminar"; air.layerHeightsM = resolved
+        check(air.problem?.contains("Ламинарная") == true, "laminar flow at Re = 5.5·10^5 is refused before the run starts")
+        air.model = "sst"; air.wallTreatment = "functions"; air.layerHeightsM = functions
+        check(air.problem == nil, "SST with wall functions is a valid setup")
+        air.model = "laminar"
+        check(air.problem != nil, "wall functions are refused for a laminar model")
+        air.model = "sst"; air.transition = "lm"
+        check(air.problem?.contains("разрешённый") == true, "γ-Reθ transition is refused on a wall-function mesh")
+        air.wallTreatment = "resolved"; air.layerHeightsM = resolved
+        check(air.problem == nil, "SST with γ-Reθ transition on a resolved wall is a valid setup")
+        air.model = "laminar"
+        check(air.problem?.contains("SST") == true, "γ-Reθ transition is refused without a turbulence model")
+        air.model = "sst"; air.turbulenceIntensity = 0
+        check(air.problem != nil, "zero free-stream turbulence is refused")
+        // Settings saved before a field existed still open, with that field at its default.
+        var saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(WorkbenchAeroSettings())) as! [String: Any]
+        for key in ["wallTreatment", "transition", "turbulenceIntensity"] { saved.removeValue(forKey: key) }
+        let old = try? JSONDecoder().decode(WorkbenchAeroSettings.self, from: JSONSerialization.data(withJSONObject: saved))
+        check(old?.wallTreatment == "resolved" && old?.transition == "none" && old?.turbulenceIntensity == 0.01,
+              "settings saved before the wall and transition options still decode")
+    }
     let prepared = try WorkbenchAeroRunner.prepare(build: build, settings: settings, solver: solver)
     let job = try JSONSerialization.jsonObject(with: prepared.job) as! [String: Any]
     let geometry = job["geometry"] as! [[String: String]]

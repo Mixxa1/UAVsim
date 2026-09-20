@@ -1,0 +1,58 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "shock",
+  "geometry": {
+    "format": "uavpart",
+    "path": "camera_bracket.uavpart"
+  },
+  "material": "al_6061_t6",
+  "factorOfSafety": 1.5,
+  "mesh": {
+    "coarseElementSizeM": 0.003,
+    "refinementFactor": 1.6
+  },
+  "loadCase": {
+    "name": "camera bracket, catapult launch 15 g × 20 ms",
+    "supports": [
+      {
+        "face": "face-0",
+        "fix": [
+          "x",
+          "y",
+          "z"
+        ]
+      }
+    ],
+    "stressExclusions": [
+      {
+        "face": "face-0",
+        "distanceM": 0.002
+      }
+    ]
+  },
+  "shock": {
+    "modeCount": 20,
+    "dampingRatio": 0.03,
+    "direction": [
+      0,
+      1,
+      0
+    ],
+    "pulse": {
+      "shape": "halfSine",
+      "peakMps2": 147.1,
+      "durationS": 0.02
+    },
+    "attachedMasses": [
+      {
+        "face": "face-4",
+        "massKg": 0.12
+      }
+    ],
+    "probeFace": "face-4"
+  },
+  "output": {
+    "result": "camera_bracket.shock-result.json",
+    "field": "camera_bracket.shock-field.json"
+  }
+}

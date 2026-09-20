@@ -1,0 +1,22 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "random",
+  "geometry": {"format": "uavpart", "path": "camera_bracket.uavpart"},
+  "material": "al_6061_t6",
+  "factorOfSafety": 1.5,
+  "mesh": {"coarseElementSizeM": 0.003, "refinementFactor": 1.6},
+  "loadCase": {
+    "name": "camera bracket, airframe vibration 20-2000 Hz",
+    "supports": [{"face": "face-0", "fix": ["x", "y", "z"]}],
+    "stressExclusions": [{"face": "face-0", "distanceM": 0.002}]
+  },
+  "random": {
+    "modeCount": 20,
+    "dampingRatio": 0.03,
+    "direction": [0, 0, 1],
+    "accelerationPsd": [[20, 0.9617], [80, 3.8468], [350, 3.8468], [2000, 0.1178]],
+    "attachedMasses": [{"face": "face-4", "massKg": 0.12}],
+    "probeFace": "face-4"
+  },
+  "output": {"result": "camera_bracket.random-result.json", "field": "camera_bracket.random-field.json"}
+}

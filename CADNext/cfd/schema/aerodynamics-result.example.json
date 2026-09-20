@@ -2,10 +2,12 @@
   "schema": "cadnext-aerodynamics-result/1",
   "testType": "aerodynamics",
   "outcome": "warning",
+  "coefficientsUsable": true,
   "solverID": "cadnext-su2",
   "solverVersion": "SU2 8.5.0 / cadnext-cfd 1",
   "settings": {
     "model": "laminar",
+    "wallTreatment": "resolved",
     "alphaDeg": [
       0
     ],
@@ -28,6 +30,10 @@
     "iterations": 1500,
     "convergenceWindow": 20,
     "threads": 2,
+    "timeSteps": 240,
+    "innerIterations": 25,
+    "averagingSteps": 80,
+    "timeStepSeconds": 0.001,
     "residualTarget": -5,
     "coefficientAbsoluteTolerance": 0.001,
     "coefficientRelativeTolerance": 0.001,
@@ -62,6 +68,7 @@
   "warnings": [
     "Одна сетка: погрешность дискретизации и влияние дальнего поля не оценены.",
     "Стационарное несжимаемое течение, фиксированные Re; рули и обдув винтов не рассчитаны.",
+    "Ламинарная модель: переход к турбулентности не моделируется; проверьте число Рейнольдса.",
     "Одиночный угол атаки не задаёт полярную кривую для полёта.",
     "Зависимость от скольжения не рассчитана; в полёте боковые производные берутся из профиля."
   ],
@@ -75,6 +82,14 @@
       "value": 1,
       "unit": "1"
     },
+    "usablePoints": {
+      "value": 1,
+      "unit": "1"
+    },
+    "reynoldsChord": {
+      "value": 20,
+      "unit": "1"
+    },
     "maximumLiftCoefficient": {
       "value": -0.0225263678,
       "unit": "1"
@@ -82,9 +97,13 @@
     "referenceAreaM2": {
       "value": 0.7853981633974483,
       "unit": "m2"
+    },
+    "sampledPeakAlphaDeg": {
+      "value": 0,
+      "unit": "deg"
     }
   },
-  "fieldRef": "report.html",
+  "fieldRef": "flow",
   "points": [
     {
       "alphaDeg": 0,
@@ -96,9 +115,11 @@
       "cRoll": -0.002116701321,
       "cYaw": 0.005511995914,
       "iterations": 1500,
-      "residual": -15.65050562,
+      "residual": -15.64796474,
       "coefficientSpread": 0,
-      "directory": "flow/point-0"
+      "directory": "flow/point-0",
+      "usable": true,
+      "problems": []
     }
   ],
   "aeroTable": {
@@ -135,9 +156,11 @@
         "cRoll": -0.002116701321,
         "cYaw": 0.005511995914,
         "iterations": 1500,
-        "residual": -15.65050562,
+        "residual": -15.64796474,
         "coefficientSpread": 0,
-        "directory": "flow/point-0"
+        "directory": "flow/point-0",
+        "usable": true,
+        "problems": []
       }
     ]
   }

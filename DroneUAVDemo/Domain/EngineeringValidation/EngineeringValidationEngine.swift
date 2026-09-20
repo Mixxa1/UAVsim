@@ -213,7 +213,11 @@ enum EngineeringValidationEngine {
            ["cadnext-su2", "aero-table-import"].contains(record.solverID),
            record.outcome == .pass || record.outcome == .warning,
            record.aerodynamicTable == nil {
-            return result(.error, [.invalidOutput("В CFD-результате отсутствует переносимая аэротаблица.")])
+            // The solver withholds the table when a point did not converge or the near-wall mesh was
+            // not in a valid y+ regime. That is a result without usable coefficients, so validation
+            // fails — but it fails saying which physics, not "no table".
+            let reason = record.failureReasons.first.map { " Причина: \($0)" } ?? ""
+            return result(.error, [.invalidOutput("CFD-расчёт не дал коэффициентов, пригодных для полёта." + reason)])
         }
         var reasons: [EngineeringStalenessReason] = []
         if record.definitionVersion != definition.definitionVersion {

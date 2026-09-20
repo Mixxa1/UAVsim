@@ -161,14 +161,13 @@ int main(int argc, char** argv) {
         relative.geometryPath = "wing_spar.uavpart";
         relative.resultPath = "wing_spar.result.json";
         relative.fieldPath = "wing_spar.field.json";
-        relative.reportPath = "wing_spar.report.html";
         const auto back = parseStructuralJob(structuralJobJson(relative), "/base");
         bool same = back.isOk();
         if (same) {
             const auto& j = back.value();
             same = j.geometryPath == "/base/wing_spar.uavpart" && j.geometryFormat == relative.geometryFormat
                    && j.materialId == relative.materialId && j.resultPath == "/base/wing_spar.result.json"
-                   && j.reportPath == "/base/wing_spar.report.html"
+                   && j.fieldPath == "/base/wing_spar.field.json"
                    && j.settings.coarseElementSizeM == relative.settings.coarseElementSizeM
                    && j.settings.refinementFactor == relative.settings.refinementFactor
                    && j.settings.criteria.factorOfSafety == relative.settings.criteria.factorOfSafety
@@ -210,7 +209,7 @@ int main(int argc, char** argv) {
               "supports": [{"face": ")") + symX + R"(", "fix": ["x"]}, {"face": ")" + symY + R"(", "fix": ["y"]},
                            {"face": ")" + end0 + R"(", "fix": ["z"]}, {"face": ")" + end1 + R"(", "fix": ["z"]}],
               "pressures": [{"face": ")" + bore + R"(", "pressurePa": )" + num(p) + R"(}]},
-            "output": {"result": "pipe.result.json", "field": "pipe.field.json", "report": "pipe.report.html"}})";
+            "output": {"result": "pipe.result.json", "field": "pipe.field.json"}})";
         const int status = runJob("pipe", job);
         check(status == 0, "pipe: cadnext_structural completes (exit " + std::to_string(status) + ")");
         const JsonValue result = parseOrEmpty(readText(workDirectory / "pipe.result.json"));
@@ -240,10 +239,6 @@ int main(int argc, char** argv) {
                   && vm->arrayItems.size() * 3 == nodes->arrayItems.size() && !triangles->arrayItems.empty(),
               "pipe: field file has surface nodes, triangles and a stress per node");
         check(result.stringOr("fieldRef", "") == "pipe.field.json", "pipe: result points at its field file");
-        const std::string report = readText(workDirectory / "pipe.report.html");
-        check(report.find("__CADNEXT_RESULT_JSON__") == std::string::npos && report.find("__CADNEXT_FIELD_JSON__") == std::string::npos
-                  && report.find("\"cadnext-structural-field/1\"") != std::string::npos && report.find("</html>") != std::string::npos,
-              "pipe: HTML report embeds both files");
         // Viewers read the colours from the file; they must be the ones the presentation contract defines.
         const auto parsedField = parseStructuralField(readText(workDirectory / "pipe.field.json"));
         bool sameColors = parsedField.isOk() && !parsedField.value().nodes.empty();
@@ -291,7 +286,7 @@ int main(int argc, char** argv) {
             "loadCase": {"name": ")") + name + R"(",
               "supports": [{"face": ")" + root + R"(", "fix": ["x", "y", "z"]}],
               "forces": [{"face": ")" + tip + R"(", "totalForceN": [0, 0, )" + num(-P) + R"(]}])" + extra + R"(},
-            "output": {"result": ")" + name + R"(.result.json", "field": ")" + name + R"(.field.json", "report": ")" + name + R"(.report.html"}})";
+            "output": {"result": ")" + name + R"(.result.json", "field": ")" + name + R"(.field.json"}})";
     };
     {
         check(runJob("clamped", cantileverJob("clamped", "")) == 0, "clamped cantilever: completes");

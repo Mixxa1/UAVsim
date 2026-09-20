@@ -1,0 +1,17 @@
+diff --git a/SU2_CFD/src/solvers/CIncNSSolver.cpp b/SU2_CFD/src/solvers/CIncNSSolver.cpp
+index 3c22e64..f55da7e 100644
+--- a/SU2_CFD/src/solvers/CIncNSSolver.cpp
++++ b/SU2_CFD/src/solvers/CIncNSSolver.cpp
+@@ -109,7 +109,11 @@ void CIncNSSolver::Preprocessing(CGeometry *geometry, CSolver **solver_container
+   /*--- Compute the TauWall from the wall functions ---*/
+ 
+   if (wall_functions) {
+-    SU2_OMP_SAFE_GLOBAL_ACCESS(SetTau_Wall_WF(geometry, solver_container, config);)
++    /*--- UAVsim patch (see CADNext/tools/su2-patches): SetTau_Wall_WF contains an omp for, so it must
++     *    be entered by every thread. Wrapping it in SU2_OMP_SAFE_GLOBAL_ACCESS lets only the master
++     *    reach that work-sharing construct: libomp then asserts in kmp_dispatch (2D) or the run
++     *    stalls with the other threads waiting (3D). The compressible solver calls it directly. ---*/
++    SetTau_Wall_WF(geometry, solver_container, config);
+   }
+ 
+   /*--- Compute recovered pressure and temperature for streamwise periodic flow ---*/

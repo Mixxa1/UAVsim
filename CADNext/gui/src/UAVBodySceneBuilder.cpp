@@ -1,6 +1,16 @@
 #include "cadnext/gui/UAVBodySceneBuilder.hpp"
 #include "cadnext/gui/UAVCatalogPreviewProvider.hpp"
 
+#ifdef __APPLE__
+#include "cadnext/gui/UAVUSDZScene.hpp"
+#include <QCoreApplication>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QJsonArray>
+#endif
 #include <cmath>
 #include <string>
 
@@ -739,8 +749,31 @@ SoSeparator* buildGenericCustom(float s)
 // ─────────────────────────────────────────────────────────────────────────────
 SoSeparator* UAVBodySceneBuilder::buildScene(const std::string&    uavId,
                                               UAVPreviewVehicleType  type,
-                                              UAVPreviewMassCategory cat)
+                                              UAVPreviewMassCategory cat, std::string* source)
 {
+#ifdef __APPLE__
+    QStringList roots;
+    if (!qEnvironmentVariable("CADNEXT_UAV_MODEL_DIR").isEmpty()) roots << qEnvironmentVariable("CADNEXT_UAV_MODEL_DIR");
+    roots << QCoreApplication::applicationDirPath() + "/../Resources/UAVModels" << QString::fromUtf8(CADNEXT_UAV_MODEL_DIR);
+    std::string failure;
+    for (const auto& root : roots) {
+        QFile manifest(QDir(root).filePath("manifest.json"));
+        if (!manifest.open(QIODevice::ReadOnly)) continue;
+        for (const auto& value : QJsonDocument::fromJson(manifest.readAll()).object()["models"].toArray()) {
+            const auto entry = value.toObject();
+            if (entry["id"].toString().toStdString() != uavId) continue;
+            const auto path = QDir(root).filePath(QFileInfo(entry["file"].toString()).fileName());
+            if (auto* model = loadUAVUSDZ(path.toStdString(), failure)) {
+                if (source) *source = path.toStdString();
+                return model;
+            }
+        }
+    }
+    if (source) *source = "USDZ не загружен: " + (failure.empty() ? uavId : failure);
+    return new SoSeparator; // Never silently substitute an outdated procedural aircraft.
+#else
+    if (source) *source = "Процедурный просмотр: USDZ требует macOS";
+
     if (uavId == "dji-matrice-350-rtk")        return buildDJIMatrice350RTK();
     if (uavId == "dji-flycart-30")              return buildDJIFlyCart30();
     if (uavId == "dji-mavic-4-pro")             return buildDJIMavic4Pro();
@@ -767,6 +800,7 @@ SoSeparator* UAVBodySceneBuilder::buildScene(const std::string&    uavId,
     case UAVPreviewVehicleType::custom:      return buildGenericCustom(s);
     }
     return buildGenericCustom(s);
+#endif
 }
 
 } // namespace cadnext::gui

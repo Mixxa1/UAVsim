@@ -21,7 +21,7 @@ struct WorkbenchStructuralRun: Codable, Hashable {
     /// is a different calculation.
     var caseSettingsFingerprint: String
     var record: EngineeringTestRecord
-    /// Folder of the run (job, part, result, field, report), relative to the store's root.
+    /// Folder of the run (job, part, structured result and field), relative to the store's root.
     var directory: String
 }
 

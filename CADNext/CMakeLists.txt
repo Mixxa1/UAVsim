@@ -14,6 +14,10 @@ option(CADNEXT_WITH_NETGEN "Build the CAD solid mesher for structural analysis (
 option(CADNEXT_BUILD_TESTS "Build CADNext tests" ON)
 option(CADNEXT_BUILD_APP "Build CADNext standalone application" OFF)
 
+if(CADNEXT_BUILD_TESTS)
+    enable_testing()
+endif()
+
 if(CADNEXT_BUILD_APP AND NOT (CADNEXT_WITH_QT AND CADNEXT_WITH_COIN3D))
     message(FATAL_ERROR
         "CADNEXT_BUILD_APP=ON requires both CADNEXT_WITH_QT=ON and "
@@ -34,6 +38,7 @@ endif()
 add_subdirectory(core)
 add_subdirectory(kernel)
 add_subdirectory(assembly)
+add_subdirectory(em)
 add_subdirectory(fea)
 add_subdirectory(cfd)
 add_subdirectory(bridge)
@@ -55,6 +60,5 @@ if(CADNEXT_WITH_PYTHON)
 endif()
 
 if(CADNEXT_BUILD_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()

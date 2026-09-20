@@ -53,7 +53,7 @@ struct CommsLinkView<RadioEquipment: View>: View {
                                 )
                         }
                         .buttonStyle(.plain)
-                        .help(String(localized: "comms_link.toolbar.close"))
+                        .help(L10n.s("comms_link.toolbar.close"))
                         .controllerButtonTarget(id: "comms_link.close", action: onClose)
                     }
                 }
@@ -107,7 +107,7 @@ struct CommsLinkView<RadioEquipment: View>: View {
                         lengthPresetChips
                     }
 
-                    Text(String(format: NSLocalizedString("payload.fiber.rig_mass", comment: ""), fiberModule.spoolMassKg))
+                    Text(String(format: L10n.s("payload.fiber.rig_mass"), fiberModule.spoolMassKg))
                         .font(.caption2)
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }

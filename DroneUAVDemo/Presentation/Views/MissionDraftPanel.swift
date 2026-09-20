@@ -551,15 +551,15 @@ struct MissionDraftPanel: View {
 
     private func zoneBadgeTitle(zoneCount: Int) -> String {
         guard zoneCount > 0 else {
-            return String(localized: "mission.status.value.none")
+            return L10n.s("mission.status.value.none")
         }
 
-        return String(localized: "mission.plan.status.ready")
+        return L10n.s("mission.plan.status.ready")
     }
 
     private func zoneDescription(for zone: MissionZone) -> String {
         String(
-            format: String(localized: "tactical.map.zone.radius.value"),
+            format: L10n.s("tactical.map.zone.radius.value"),
             zone.radius,
             zone.center.x,
             zone.center.y

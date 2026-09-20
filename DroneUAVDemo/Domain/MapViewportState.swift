@@ -13,7 +13,7 @@ enum WorldDetailBoundaryState: String, Equatable {
     case outside
 
     var title: String {
-        NSLocalizedString("tactical.map.geofence.\(rawValue)", comment: "")
+        L10n.s("tactical.map.geofence.\(rawValue)")
     }
 }
 
@@ -24,7 +24,7 @@ enum MapBoundaryDirection: String, Equatable {
     case west
 
     var title: String {
-        NSLocalizedString("tactical.map.direction.\(rawValue)", comment: "")
+        L10n.s("tactical.map.direction.\(rawValue)")
     }
 }
 

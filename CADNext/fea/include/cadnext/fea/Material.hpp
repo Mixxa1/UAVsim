@@ -27,6 +27,16 @@ struct IsotropicMaterial {
     bool isotropicApproximation = false;
     std::string source;
     std::string notes;
+    // Thermal properties, each with its source; absent until one is known. The thermal and thermoelastic
+    // solvers refuse a material without the property they need rather than assume one.
+    std::optional<double> thermalExpansionPerK;
+    std::optional<double> thermalConductivityWmK;
+    std::optional<double> specificHeatJkgK;
+    std::string thermalSource;
+    // Electrical resistivity at 20 °C (lightning current spreading and its Joule heat); its rise with
+    // temperature is not in the database, so a study says so rather than assuming one.
+    std::optional<double> electricalResistivityOhmM;
+    std::string electricalSource;
 
     bool isValid() const {
         return densityKgPerM3 > 0.0 && youngsModulusPa > 0.0 && poissonRatio > -1.0
@@ -37,7 +47,7 @@ struct IsotropicMaterial {
 
 // Version of the table below. Recorded with every structural result (spec §17): a margin
 // that moves after an update must be traceable to a changed property.
-inline constexpr int kMaterialDatabaseVersion = 1;
+inline constexpr int kMaterialDatabaseVersion = 3; // 3: electrical resistivity of the two aluminium alloys
 
 const std::vector<IsotropicMaterial>& materialLibrary();
 

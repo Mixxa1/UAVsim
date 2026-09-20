@@ -138,6 +138,48 @@ if(EXISTS "${CADNEXT_SU2_CFD}")
              COMMAND cadnext_test_cfd_joukowski_euler ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-joukowski)
     set_tests_properties(cadnext_test_cfd_joukowski_euler PROPERTIES LABELS "cfd" TIMEOUT 900)
 
+    add_executable(cadnext_test_cfd_turbulent_plate
+        test_cfd_turbulent_plate.cpp
+    )
+
+    target_link_libraries(cadnext_test_cfd_turbulent_plate
+        PRIVATE
+            cadnext_cfd
+            cadnext_fea
+    )
+
+    add_test(NAME cadnext_test_cfd_turbulent_plate
+             COMMAND cadnext_test_cfd_turbulent_plate ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-turbulent-plate)
+    set_tests_properties(cadnext_test_cfd_turbulent_plate PROPERTIES LABELS "cfd" TIMEOUT 5400)
+
+    add_executable(cadnext_test_cfd_transition_plate
+        test_cfd_transition_plate.cpp
+    )
+
+    target_link_libraries(cadnext_test_cfd_transition_plate
+        PRIVATE
+            cadnext_cfd
+            cadnext_fea
+    )
+
+    add_test(NAME cadnext_test_cfd_transition_plate
+             COMMAND cadnext_test_cfd_transition_plate ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-transition-plate)
+    set_tests_properties(cadnext_test_cfd_transition_plate PROPERTIES LABELS "cfd" TIMEOUT 7200)
+
+    add_executable(cadnext_test_cfd_t3a
+        test_cfd_t3a.cpp
+    )
+
+    target_link_libraries(cadnext_test_cfd_t3a
+        PRIVATE
+            cadnext_cfd
+            cadnext_fea
+    )
+
+    add_test(NAME cadnext_test_cfd_t3a
+             COMMAND cadnext_test_cfd_t3a ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-t3a)
+    set_tests_properties(cadnext_test_cfd_t3a PROPERTIES LABELS "cfd" TIMEOUT 7200)
+
     add_executable(cadnext_test_cfd_blasius
         test_cfd_blasius.cpp
     )
@@ -680,6 +722,95 @@ target_link_libraries(cadnext_test_fea_modal
 
 add_test(NAME cadnext_test_fea_modal COMMAND cadnext_test_fea_modal)
 
+add_executable(cadnext_test_fea_harmonic
+    test_fea_harmonic.cpp
+)
+
+target_link_libraries(cadnext_test_fea_harmonic
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_harmonic COMMAND cadnext_test_fea_harmonic)
+
+add_executable(cadnext_test_fea_random
+    test_fea_random.cpp
+)
+
+target_link_libraries(cadnext_test_fea_random
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_random COMMAND cadnext_test_fea_random)
+
+add_executable(cadnext_test_fea_shock
+    test_fea_shock.cpp
+)
+
+target_link_libraries(cadnext_test_fea_shock
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_shock COMMAND cadnext_test_fea_shock)
+
+add_executable(cadnext_test_fea_thermal
+    test_fea_thermal.cpp
+)
+
+target_link_libraries(cadnext_test_fea_thermal
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_thermal COMMAND cadnext_test_fea_thermal)
+
+add_executable(cadnext_test_fea_climate_core
+    test_fea_climate_core.cpp
+)
+
+target_link_libraries(cadnext_test_fea_climate_core
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_climate_core COMMAND cadnext_test_fea_climate_core)
+
+add_executable(cadnext_test_fea_fire_core
+    test_fea_fire_core.cpp
+)
+
+target_link_libraries(cadnext_test_fea_fire_core
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_fire_core COMMAND cadnext_test_fea_fire_core)
+
+add_executable(cadnext_test_fea_pyrolysis
+    test_fea_pyrolysis.cpp
+)
+
+target_link_libraries(cadnext_test_fea_pyrolysis
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_pyrolysis COMMAND cadnext_test_fea_pyrolysis)
+
+add_executable(cadnext_test_fea_lightning
+    test_fea_lightning.cpp
+)
+
+target_link_libraries(cadnext_test_fea_lightning
+    PRIVATE
+        cadnext_fea
+)
+
+add_test(NAME cadnext_test_fea_lightning COMMAND cadnext_test_fea_lightning)
+set_tests_properties(cadnext_test_fea_pyrolysis PROPERTIES TIMEOUT 1200)
+
 add_executable(cadnext_test_fea_benchmark_cantilever
     test_fea_benchmark_cantilever.cpp
 )
@@ -971,6 +1102,163 @@ if(CADNEXT_WITH_OCCT AND CADNEXT_WITH_NETGEN)
     add_test(NAME cadnext_test_fea_modal_study
              COMMAND cadnext_test_fea_modal_study $<TARGET_FILE:cadnext_structural>
                      ${CMAKE_SOURCE_DIR}/fea/schema)
+
+    add_executable(cadnext_test_fea_harmonic_study
+        test_fea_harmonic_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_harmonic_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_harmonic_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_harmonic_study
+             COMMAND cadnext_test_fea_harmonic_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+
+    add_executable(cadnext_test_fea_random_study
+        test_fea_random_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_random_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_random_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_random_study
+             COMMAND cadnext_test_fea_random_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+
+    add_executable(cadnext_test_fea_shock_study
+        test_fea_shock_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_shock_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_shock_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_shock_study
+             COMMAND cadnext_test_fea_shock_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+
+    add_executable(cadnext_test_fea_climate_study
+        test_fea_climate_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_climate_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+
+    add_executable(cadnext_test_fea_fire_study
+        test_fea_fire_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_fire_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_fire_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_fire_study
+             COMMAND cadnext_test_fea_fire_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+    set_tests_properties(cadnext_test_fea_fire_study PROPERTIES TIMEOUT 3600)
+
+    add_executable(cadnext_test_fea_flutter_study
+        test_fea_flutter_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_flutter_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_flutter_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_flutter_study
+             COMMAND cadnext_test_fea_flutter_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+    set_tests_properties(cadnext_test_fea_flutter_study PROPERTIES TIMEOUT 3600)
+
+    add_executable(cadnext_test_fea_bird_strike_study
+        test_fea_bird_strike_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_bird_strike_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_bird_strike_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_bird_strike_study
+             COMMAND cadnext_test_fea_bird_strike_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+    set_tests_properties(cadnext_test_fea_bird_strike_study PROPERTIES TIMEOUT 3600)
+
+    add_executable(cadnext_test_fea_icing_study
+        test_fea_icing_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_icing_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_icing_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_icing_study
+             COMMAND cadnext_test_fea_icing_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+    set_tests_properties(cadnext_test_fea_icing_study PROPERTIES TIMEOUT 3600)
+
+    add_executable(cadnext_test_fea_emc_study
+        test_fea_emc_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_emc_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_emc_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_emc_study
+             COMMAND cadnext_test_fea_emc_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+    set_tests_properties(cadnext_test_fea_emc_study PROPERTIES TIMEOUT 3600)
+
+    add_executable(cadnext_test_fea_lightning_study
+        test_fea_lightning_study.cpp
+    )
+
+    target_link_libraries(cadnext_test_fea_lightning_study
+        PRIVATE
+            cadnext_fea_occt
+    )
+
+    add_dependencies(cadnext_test_fea_lightning_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_lightning_study
+             COMMAND cadnext_test_fea_lightning_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+    set_tests_properties(cadnext_test_fea_lightning_study PROPERTIES TIMEOUT 3600)
+    add_dependencies(cadnext_test_fea_climate_study cadnext_structural)
+
+    add_test(NAME cadnext_test_fea_climate_study
+             COMMAND cadnext_test_fea_climate_study $<TARGET_FILE:cadnext_structural>
+                     ${CMAKE_SOURCE_DIR}/fea/schema)
+    set_tests_properties(cadnext_test_fea_climate_study PROPERTIES TIMEOUT 3600)
 endif()
 
 # The CADNext «Прочность детали» panel driving the real solver process. Needs the GUI and the
@@ -1002,17 +1290,54 @@ if(CADNEXT_WITH_QT AND CADNEXT_WITH_COIN3D AND CADNEXT_WITH_OCCT AND CADNEXT_WIT
              COMMAND cadnext_test_gui_structural_study_panel $<TARGET_FILE:cadnext_structural>)
 endif()
 
+add_executable(cadnext_test_fea_bird_strike test_fea_bird_strike.cpp)
+target_link_libraries(cadnext_test_fea_bird_strike PRIVATE cadnext_fea)
+target_include_directories(cadnext_test_fea_bird_strike PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cadnext_test_fea_bird_strike COMMAND cadnext_test_fea_bird_strike)
+set_tests_properties(cadnext_test_fea_bird_strike PROPERTIES TIMEOUT 1800)
+
+add_executable(cadnext_test_fea_aeroelasticity test_fea_aeroelasticity.cpp)
+target_link_libraries(cadnext_test_fea_aeroelasticity PRIVATE cadnext_fea)
+target_include_directories(cadnext_test_fea_aeroelasticity PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cadnext_test_fea_aeroelasticity COMMAND cadnext_test_fea_aeroelasticity)
+
+add_executable(cadnext_test_fea_icing test_fea_icing.cpp)
+target_link_libraries(cadnext_test_fea_icing PRIVATE cadnext_fea)
+target_include_directories(cadnext_test_fea_icing PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cadnext_test_fea_icing COMMAND cadnext_test_fea_icing)
+set_tests_properties(cadnext_test_fea_icing PROPERTIES TIMEOUT 1800)
+
+add_executable(cadnext_test_fea_panel_flow test_fea_panel_flow.cpp)
+target_link_libraries(cadnext_test_fea_panel_flow PRIVATE cadnext_fea)
+target_include_directories(cadnext_test_fea_panel_flow PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cadnext_test_fea_panel_flow COMMAND cadnext_test_fea_panel_flow)
+
+add_executable(cadnext_test_em_fdtd test_em_fdtd.cpp)
+target_link_libraries(cadnext_test_em_fdtd PRIVATE cadnext_em cadnext_fea)
+target_include_directories(cadnext_test_em_fdtd PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cadnext_test_em_fdtd COMMAND cadnext_test_em_fdtd)
+
+add_executable(cadnext_test_em_shielding test_em_shielding.cpp)
+target_link_libraries(cadnext_test_em_shielding PRIVATE cadnext_em cadnext_fea)
+target_include_directories(cadnext_test_em_shielding PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+add_test(NAME cadnext_test_em_shielding COMMAND cadnext_test_em_shielding)
+
 add_executable(cadnext_test_cfd_study test_cfd_study.cpp)
 target_link_libraries(cadnext_test_cfd_study PRIVATE cadnext_cfd)
 add_test(NAME cadnext_test_cfd_study COMMAND cadnext_test_cfd_study)
 set_tests_properties(cadnext_test_cfd_study PROPERTIES LABELS "cfd-contract" TIMEOUT 20)
+add_executable(cadnext_test_cfd_particles test_cfd_particles.cpp)
+target_link_libraries(cadnext_test_cfd_particles PRIVATE cadnext_cfd)
+add_test(NAME cadnext_test_cfd_particles COMMAND cadnext_test_cfd_particles)
+set_tests_properties(cadnext_test_cfd_particles PROPERTIES LABELS "cfd-contract" TIMEOUT 60)
 if(TARGET cadnext_cfd_cli AND EXISTS "${CADNEXT_SU2_CFD}")
     add_executable(cadnext_test_cfd_cli test_cfd_cli.cpp)
     target_link_libraries(cadnext_test_cfd_cli PRIVATE cadnext_cfd_occt cadnext_construction)
     add_test(NAME cadnext_test_cfd_cli COMMAND cadnext_test_cfd_cli $<TARGET_FILE:cadnext_cfd_cli> ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-cli)
     add_test(NAME cadnext_test_cfd_cli_laminar COMMAND cadnext_test_cfd_cli $<TARGET_FILE:cadnext_cfd_cli> ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-cli-laminar laminar)
     add_test(NAME cadnext_test_cfd_cli_sst COMMAND cadnext_test_cfd_cli $<TARGET_FILE:cadnext_cfd_cli> ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-cli-sst sst)
-    set_tests_properties(cadnext_test_cfd_cli_laminar cadnext_test_cfd_cli_sst PROPERTIES LABELS "cfd" TIMEOUT 600)
+    add_test(NAME cadnext_test_cfd_cli_urans COMMAND cadnext_test_cfd_cli $<TARGET_FILE:cadnext_cfd_cli> ${CADNEXT_SU2_CFD} ${CMAKE_CURRENT_BINARY_DIR}/cfd-cli-urans urans_sst)
+    set_tests_properties(cadnext_test_cfd_cli_laminar cadnext_test_cfd_cli_sst cadnext_test_cfd_cli_urans PROPERTIES LABELS "cfd" TIMEOUT 600)
     set_tests_properties(cadnext_test_cfd_cli PROPERTIES LABELS "cfd" TIMEOUT 600)
 endif()
 if(TARGET cadnext_cfd_occt)

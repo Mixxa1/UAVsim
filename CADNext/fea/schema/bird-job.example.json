@@ -1,0 +1,65 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "bird",
+  "geometry": {
+    "format": "uavpart",
+    "path": "wing_leading_edge.uavpart"
+  },
+  "material": "al_6061_t6",
+  "factorOfSafety": 1.5,
+  "mesh": {
+    "coarseElementSizeM": 0.004,
+    "refinementFactor": 1.6
+  },
+  "loadCase": {
+    "name": "wing leading edge, 1 kg bird at cruise",
+    "supports": [
+      {
+        "face": "face-0",
+        "fix": [
+          "x",
+          "y",
+          "z"
+        ]
+      },
+      {
+        "face": "face-1",
+        "fix": [
+          "x",
+          "y",
+          "z"
+        ]
+      }
+    ],
+    "stressExclusions": [
+      {
+        "face": "face-0",
+        "distanceM": 0.004
+      }
+    ]
+  },
+  "bird": {
+    "modeCount": 30,
+    "dampingRatio": 0.02,
+    "impactFace": "face-4",
+    "direction": [
+      -1,
+      0,
+      0
+    ],
+    "bird": {
+      "massKg": 1.0,
+      "speedMps": 60,
+      "obliquityDeg": 90,
+      "densityKgM3": 950,
+      "lengthToDiameter": 2,
+      "shockSpeedMps": 1480,
+      "shockSlope": 2
+    },
+    "attachedMasses": []
+  },
+  "output": {
+    "result": "wing_leading_edge.bird-result.json",
+    "field": "wing_leading_edge.bird-field.json"
+  }
+}

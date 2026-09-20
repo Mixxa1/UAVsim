@@ -1,0 +1,38 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "flutter",
+  "geometry": {
+    "format": "uavpart",
+    "path": "wing_panel.uavpart"
+  },
+  "material": "al_6061_t6",
+  "mesh": {
+    "coarseElementSizeM": 0.042,
+    "refinementFactor": 1.3
+  },
+  "loadCase": {
+    "name": "консоль крыла, флаттер до 1.15·V_D (14 CFR 25.629)",
+    "supports": [
+      {
+        "face": "face-2",
+        "fix": ["x", "y", "z"]
+      }
+    ]
+  },
+  "flutter": {
+    "flowAxis": "x",
+    "spanAxis": "y",
+    "stations": 12,
+    "airDensityKgM3": 1.225,
+    "structuralDamping": 0.02,
+    "diveSpeedMps": 90,
+    "marginFactor": 1.15,
+    "lowSpeedMps": 10,
+    "highSpeedMps": 400,
+    "speeds": 300
+  },
+  "output": {
+    "result": "wing_panel.flutter-result.json",
+    "field": "wing_panel.flutter-field.json"
+  }
+}

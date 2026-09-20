@@ -1,0 +1,220 @@
+{
+  "schema": "cadnext-harmonic-result/1",
+  "testType": "modalVibration",
+  "outcome": "warning",
+  "solverID": "cadnext.fea.harmonic-tet10",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 1",
+  "metrics": {
+    "peakDynamicStressPa": {
+      "value": 245962775.16528785,
+      "unit": "Pa"
+    },
+    "peakStressFrequencyHz": {
+      "value": 16.53007859004148,
+      "unit": "Hz"
+    },
+    "reserveFactor": {
+      "value": 1.7685603022964693,
+      "unit": "1"
+    },
+    "ultimateMargin": {
+      "value": 0.8159929540821984,
+      "unit": "1"
+    },
+    "yieldMargin": {
+      "value": 0.7685603022964693,
+      "unit": "1"
+    },
+    "peakDisplacementM": {
+      "value": 0.03558777080220787,
+      "unit": "m"
+    },
+    "peakProbeAccelerationMps2": {
+      "value": 383.97657821818814,
+      "unit": "m/s2"
+    },
+    "effectiveMassFraction": {
+      "value": 0.9204671513527938,
+      "unit": "1"
+    },
+    "firstFrequencyHz": {
+      "value": 16.53007859004148,
+      "unit": "Hz"
+    }
+  },
+  "warnings": [
+    "максимум напряжения взят вне заданных зон исключения",
+    "сходимость по сетке немонотонна — погрешность оценена только разбросом",
+    "усталость не оценена: в базе материалов нет предела выносливости, а длительная вибрация разрушает при амплитудах заметно ниже предела текучести"
+  ],
+  "failureReasons": [],
+  "settings": {
+    "material": "steel_4130",
+    "materialDatabaseVersion": 1,
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.6,
+    "factorOfSafety": 1.5,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "shaker",
+      "supports": [
+        {
+          "face": "face-0",
+          "fix": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      ],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": [
+        {
+          "face": "face-0",
+          "distanceM": 0.03
+        }
+      ]
+    },
+    "harmonic": {
+      "modeCount": 10,
+      "dampingRatio": 0.02,
+      "excitation": {
+        "kind": "base",
+        "direction": [
+          0,
+          0,
+          1
+        ],
+        "amplitude": [
+          [
+            1,
+            9.80665
+          ]
+        ]
+      },
+      "frequencyRangeHz": [
+        5,
+        60
+      ],
+      "sweepPoints": 60,
+      "attachedMasses": [],
+      "probeFace": "face-5"
+    }
+  },
+  "criticalRegion": {
+    "point": [
+      0.03109574301162773,
+      0.022489170093936275,
+      0.02
+    ],
+    "face": "face-2",
+    "frequencyHz": 16.53007859004148
+  },
+  "response": {
+    "frequencyHz": [
+      5,
+      16.100296546700402,
+      17.68912012281842,
+      25.07453848491256,
+      60
+    ],
+    "excitation": [
+      9.80665,
+      9.80665,
+      9.80665,
+      9.80665,
+      9.80665
+    ],
+    "excitationUnit": "m/s2",
+    "maxVonMisesPa": [
+      11827993.699400181,
+      153496382.67357227,
+      64033323.1205831,
+      6507806.64253553,
+      1261710.3501605482
+    ],
+    "maxDisplacementM": [
+      0.0015478253721786968,
+      0.022076342369282697,
+      0.009425294699448172,
+      0.0011130649990053235,
+      0.00014590168321437224
+    ],
+    "probeDisplacementM": [
+      0.0015476865146298495,
+      0.02207425147991479,
+      0.009424390848085459,
+      0.0011129501627968885,
+      0.00014587164696289818
+    ],
+    "probeAccelerationMps2": [
+      11.334035735005761,
+      233.7818314881077,
+      107.04740443340948,
+      17.834066822038537,
+      10.925016584335845
+    ]
+  },
+  "modeFrequenciesHz": [
+    16.53007859004148,
+    24.7772119416132,
+    103.4016099892617,
+    154.63258602176379,
+    288.68212264396055,
+    430.13177275922243,
+    563.3211276035618,
+    680.7475463997644,
+    834.9821362863545,
+    926.1987236219107
+  ],
+  "dampingRatio": 0.02,
+  "totalMassKg": 4.710000000000158,
+  "attachedMassKg": 0,
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.02,
+      "elements": 568,
+      "peakDynamicStressPa": 247345072.25306994,
+      "peakFrequencyHz": 16.560650023903637
+    },
+    {
+      "maximumElementSizeM": 0.012499999999999999,
+      "elements": 1896,
+      "peakDynamicStressPa": 245759236.16130638,
+      "peakFrequencyHz": 16.54077496729579
+    },
+    {
+      "maximumElementSizeM": 0.007812499999999998,
+      "elements": 7938,
+      "peakDynamicStressPa": 245962775.16528785,
+      "peakFrequencyHz": 16.53007859004148
+    }
+  ],
+  "convergence": {
+    "stress": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 245962775.16528785,
+      "gciFineRelative": 0.003223731905565524,
+      "asymptoticRatio": 0
+    }
+  },
+  "material": {
+    "id": "steel_4130",
+    "youngsModulusPa": 205000000000,
+    "poissonRatio": 0.29,
+    "densityKgPerM3": 7850,
+    "yieldStrengthPa": 435000000,
+    "ultimateStrengthPa": 670000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "beam.harmonic-field.json"
+}

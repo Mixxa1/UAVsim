@@ -731,13 +731,13 @@ private struct HoseAimViewportOverlayView: View {
                         Text(state.feedLabel)
                             .font(.system(size: 22, weight: .bold, design: .monospaced))
                         Text(String(
-                            format: NSLocalizedString("payload.hose.throw_distance", comment: ""),
+                            format: L10n.s("payload.hose.throw_distance"),
                             state.nozzleThrowMeters
                         ))
                             .font(.system(size: 18, weight: .semibold, design: .monospaced))
                         if isTetherActive {
                             Text(String(
-                                format: NSLocalizedString("payload.hose.tether_distance", comment: ""),
+                                format: L10n.s("payload.hose.tether_distance"),
                                 tetherDistanceMeters,
                                 tetherLimitMeters
                             ))
@@ -782,7 +782,7 @@ private struct HoseAimViewportOverlayView: View {
 
                 Spacer()
 
-                Text(String(format: NSLocalizedString("mission.hud.fires_remaining", comment: ""), burningCount, totalCount))
+                Text(String(format: L10n.s("mission.hud.fires_remaining"), burningCount, totalCount))
                     .font(.system(size: 22, weight: .bold, design: .monospaced))
                     .frame(maxWidth: .infinity)
                     .padding(.bottom, 28)
@@ -816,7 +816,7 @@ private struct FireCapsuleStatusHUDView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(String(format: NSLocalizedString("payload.capsule.remaining", comment: ""), state.remainingCapsules))
+            Text(String(format: L10n.s("payload.capsule.remaining"), state.remainingCapsules))
                 .foregroundStyle(state.remainingCapsules > 0 ? GroundControlPalette.textPrimary : GroundControlPalette.danger)
 
             Text(LocalizedStringKey(state.capsuleSize.titleKey))
@@ -827,7 +827,7 @@ private struct FireCapsuleStatusHUDView: View {
 
             if state.isRecharging {
                 Text(String(
-                    format: NSLocalizedString("payload.capsule.recharge_countdown", comment: ""),
+                    format: L10n.s("payload.capsule.recharge_countdown"),
                     state.rechargeSecondsRemaining
                 ))
                 .foregroundStyle(GroundControlPalette.warning)
@@ -853,7 +853,7 @@ private struct AgriculturalSprayerStatusHUDView: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(String(
-                format: NSLocalizedString("payload.sprayer.tank_remaining", comment: ""),
+                format: L10n.s("payload.sprayer.tank_remaining"),
                 state.tankRemainingLiters,
                 state.tankCapacityLiters
             ))
@@ -885,7 +885,7 @@ private struct FiberOpticTetherStatusHUDView: View {
     var body: some View {
         HStack(spacing: 12) {
             Text(String(
-                format: NSLocalizedString("payload.fiber.remaining", comment: ""),
+                format: L10n.s("payload.fiber.remaining"),
                 remainingLengthMeters / 1000.0,
                 usableLengthMeters / 1000.0
             ))
@@ -893,7 +893,7 @@ private struct FiberOpticTetherStatusHUDView: View {
 
             if snagRiskLevel > 0.05 {
                 Text(String(
-                    format: NSLocalizedString("payload.fiber.snag_risk", comment: ""),
+                    format: L10n.s("payload.fiber.snag_risk"),
                     snagRiskLevel * 100.0
                 ))
                 .foregroundStyle(snagRiskLevel > 0.6 ? GroundControlPalette.danger : GroundControlPalette.warning)
@@ -1034,7 +1034,7 @@ private struct CapsuleBombardierOpticsOverlayView: View {
                 VStack {
                     Spacer()
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(String(format: NSLocalizedString("payload.capsule.remaining", comment: ""), state.remainingCapsules))
+                        Text(String(format: L10n.s("payload.capsule.remaining"), state.remainingCapsules))
                             .foregroundStyle(state.remainingCapsules > 0 ? GroundControlPalette.textPrimary : GroundControlPalette.danger)
                         Text(LocalizedStringKey(state.capsuleSize.titleKey))
                             .foregroundStyle(GroundControlPalette.textSecondary)
@@ -1043,7 +1043,7 @@ private struct CapsuleBombardierOpticsOverlayView: View {
 
                         if state.isRecharging {
                             Text(String(
-                                format: NSLocalizedString("payload.capsule.recharge_countdown", comment: ""),
+                                format: L10n.s("payload.capsule.recharge_countdown"),
                                 state.rechargeSecondsRemaining
                             ))
                             .foregroundStyle(GroundControlPalette.warning)

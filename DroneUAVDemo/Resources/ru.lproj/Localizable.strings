@@ -2637,7 +2637,7 @@
 // MARK: - Настройки
 "settings.menu.entry" = "Настройки";
 "settings.title" = "Настройки";
-"settings.subtitle" = "Графика, разрешение, язык и юридическая информация.";
+"settings.subtitle" = "Инструкции, клавиши, контроллер и параметры приложения.";
 "settings.section.video" = "Видео / Графика";
 "settings.section.resolution" = "Разрешение";
 "settings.section.language" = "Язык";
@@ -3542,3 +3542,160 @@
 "intercept.module.medicalPack.detail" = "1.6 кг. Габаритный, но не плотный: парусит на подвеске и заметно сносится при сбросе с ходу. Инертен.";
 "intercept.module.sensorPod" = "Датчик";
 "intercept.module.sensorPod.detail" = "1.1 кг. Станция, которую оставляют в районе. Самый лёгкий и компактный из грузов, ошибиться с ним проще всего простить. Инертен.";
+
+"menu.online_trials" = "Мульти-испытания";
+
+"menu.recorder" = "Самописец";
+
+"menu.workbench" = "Мастерская — сборка и испытания";
+
+"settings.page.guide" = "Инструкции";
+
+"settings.page.keys" = "Клавиши";
+
+"settings.page.controller" = "Контроллер";
+
+"settings.page.video" = "Изображение";
+
+"settings.page.audio" = "Звук";
+
+"settings.page.language" = "Язык";
+
+"settings.page.about" = "О программе";
+
+"settings.guide.intro" = "Управление под рукой";
+
+"settings.guide.context" = "Здесь показаны ваши текущие назначения. Откройте «Клавиши», чтобы изменить их. Для действий, зависящих от типа аппарата и оборудования, смотрите пояснения ниже.";
+
+"settings.guide.flight" = "01 · Полёт";
+
+"settings.guide.flight.detail" = "Сначала включите двигатели в панели управления. Газ изменяет тягу; команды направления управляют наклоном. У самолёта подъём требует скорости, у коптера — достаточной тяги.";
+
+"settings.guide.camera" = "02 · Камера";
+
+"settings.guide.camera.detail" = "Переключайте обзор, поворачивайте камеру и меняйте масштаб. Управление камерой не поворачивает сам аппарат.";
+
+"settings.guide.vtol" = "03 · Переход VTOL";
+
+"settings.guide.vtol.detail" = "Только для аппаратов с вертикальным взлётом и крылатым режимом. Удерживайте клавишу для перемещения рычага перехода; следите за скоростью и высотой.";
+
+"settings.guide.tools" = "04 · Панели и оборудование";
+
+"settings.guide.tools.detail" = "Сброс действует при установленной сбрасываемой нагрузке. Возврат аппарата сбрасывает его состояние. Постоянные сочетания: [ — параметры, ] — инструменты; ⌥1/⌥2/⌥3 — камеры оборудования.";
+
+"settings.guide.cfd" = "05 · Инженерные испытания и обдув";
+
+"settings.guide.cfd.detail" = "CADNext → Испытания → CFD — обдув и аэродинамика: настройте поток, запустите расчёт и откройте поля давления/скорости. В Мастерской UAVsim тот же расчёт находится во вкладке «Испытания». Для расчёта нужна точная геометрия; USDZ используется для внешнего вида аппарата.";
+
+"settings.guide.edit" = "Изменить назначения клавиш";
+
+"payload.placeholder.message" = "Оборудование не выбрано. Добавьте его в Мастерской.";
+
+"drone.model.lipo_atlas3pro" = "Lipo Atlas 3 Pro";
+
+"drone.model.lipo_scout4" = "Lipo Scout 4";
+
+"drone.model.lipo_vector3s" = "Lipo Vector 3S";
+
+"keybind.reserved.title" = "Клавиша занята интерфейсом";
+"keybind.reserved.detail" = "Клавиши [, ], I и K используются панелями и инструментами. Выберите другую клавишу.";
+
+/* Aerodynamics UI */
+"cfd.title" = "Аэродинамика / CFD";
+"cfd.pipeline" = "Точная геометрия рамы → SU2 → аэротаблица → физика полёта";
+"cfd.flow" = "Течение";
+"cfd.laminar" = "Ламинарное";
+"cfd.urans" = "URANS SST (нестационарный)";
+"cfd.wall_mode" = "Стенка";
+"cfd.wall_resolved" = "Разрешать слой, y+ ≈ 1";
+"cfd.wall_functions" = "Пристеночные функции, y+ 30…300";
+"cfd.wall_plan" = "Re = %@ по хорде. Для выбранного режима: первый слой %@ мм, %@ слоёв до δ99 = %@ мм. Сейчас задан первый слой %@ мм (ожидаемый y+ ≈ %@).";
+"cfd.wall_apply" = "Подобрать пристеночную сетку под скорость";
+"cfd.transition" = "Переход";
+"cfd.transition_none" = "Нет — турбулентный от кромки";
+"cfd.transition_lm" = "γ-Reθ — ламинарный участок и переход";
+"cfd.turbulence" = "Турбулентность потока Tu, %";
+"cfd.transition_hint" = "Переход γ-Reθ: слой начинается ламинарным и переходит там, где модель предсказывает по Tu. При Re < 10⁶ это меняет трение на десятки процентов. Tu: спокойная атмосфера 0.05–0.1 %, аэротруба 0.1–1 %, за винтом — несколько процентов.";
+"cfd.euler" = "Euler · диагностика";
+"cfd.angles_hint" = "Один угол — точка; несколько — серия. При нескольких α и β рассчитываются все сочетания.";
+"cfd.speed" = "Скорость, м/с";
+"cfd.area" = "Площадь S, м²";
+"cfd.span" = "Размах b, м";
+"cfd.chord" = "Хорда c, м";
+"cfd.advanced" = "Сетка, среда и точность";
+"cfd.density" = "Плотность, кг/м³";
+"cfd.viscosity" = "Вязкость, Па·с";
+"cfd.wall" = "Элемент у стенки, м";
+"cfd.far" = "Элемент в дальнем поле, м";
+"cfd.boundary" = "Удаление границы, габаритов";
+"cfd.layers" = "Высоты слоёв, м";
+"cfd.grading" = "Сгущение сетки";
+"cfd.iterations" = "Итерации";
+"cfd.window" = "Окно сходимости";
+"cfd.threads" = "Потоки";
+"cfd.abs" = "Допуск коэффициентов, abs";
+"cfd.rel" = "Допуск коэффициентов, rel";
+"cfd.timeout" = "Лимит на точку, с";
+"cfd.residual" = "Цель RMS log₁₀ ≤";
+"cfd.mesh_hint" = "Заданные размеры сетки — начальные. Для оценки погрешности повторите расчёт с более мелкой сеткой и более удалённой границей. Внешнее оборудование моделируется габаритными телами.";
+"cfd.cancel" = "Отменить расчёт";
+"cfd.run" = "Рассчитать CFD";
+"cfd.import" = "Импорт таблицы…";
+"cfd.geometry_hint" = "Для расчёта импортируйте .uavframe v2 с точными телами. Готовую таблицу можно привязать к любой сборке.";
+"cfd.choose_adapter" = "Указать cadnext_cfd…";
+"cfd.choose_solver" = "Указать SU2_CFD…";
+"cfd.adapter_ready" = "cadnext_cfd ✓";
+"cfd.solver_ready" = "SU2_CFD ✓";
+"cfd.tools" = "Инструменты и обмен";
+"cfd.history" = "История CFD";
+"cfd.run_label" = "Запуск";
+"cfd.export" = "Экспорт таблицы…";
+"cfd.repeat" = "Повторить настройки";
+"cfd.fields" = "Графики и поля";
+"cfd.files" = "Файлы и журнал";
+"cfd.report" = "Открыть отчёт";
+"cfd.report.title" = "Аэродинамический отчёт / CFD";
+"cfd.report.coefficients" = "Коэффициенты и полярная диаграмма";
+"cfd.report.metric" = "Показать коэффициент";
+"cfd.report.conditions" = "Условия расчёта";
+"cfd.report.messages" = "Сообщения и артефакты";
+"cfd.report.no_messages" = "Замечаний нет.";
+"cfd.report.no_table" = "В этом запуске нет принятой аэротаблицы.";
+"cfd.report.model" = "Модель";
+"cfd.report.solver" = "Решатель";
+"cfd.report.points" = "Расчётных точек";
+"cfd.report.source" = "Источник";
+"cfd.report.artifacts" = "Файлы расчёта сохранены локально.";
+"cfd.report.open_files" = "Открыть папку расчёта";
+"cfd.report.close" = "Закрыть";
+"structural.open_result" = "Открыть результат";
+"cfd.import_hint" = "Выбранная аэротаблица будет привязана к текущей конфигурации аппарата. Проверьте её геометрию, оси и опорные размеры.";
+"cfd.compare" = "Сравнить с другим запуском";
+"cfd.baseline" = "Базовый запуск";
+"cfd.compare_hint" = "Для сравнения коэффициентов нужны одинаковые S, b, c, оси и точка момента.";
+"cfd.flight_usable" = "может использоваться в физике при актуальной конфигурации";
+"cfd.diagnostics" = "только диагностика";
+"cfd.stall" = "Возможная зона срыва при β = 0: %.1f…%.1f°. Требует проверки сетки и нестационарности.";
+"cfd.moment" = "Точка момента %@, м";
+"cfd.axis_x" = "X влево";
+"cfd.axis_y" = "Y вверх";
+"cfd.axis_z" = "Z вперёд";
+"cfd.metres" = "м";
+"cfd.point_count" = "%d точек · %@";
+"cfd.executable" = "Выберите исполняемый файл %@";
+"cfd.export_error" = "Не удалось экспортировать аэротаблицу: %@";
+"cfd.shared_points" = "Общих точек α/β: %d. Максимальная |Δ|; условия расчётов сравните в отчётах.";
+"cfd.apply_list" = "%@: нажмите Enter, чтобы применить список.";
+"cfd.number_list" = "%@: введите числа через запятую; десятичный разделитель — точка.";
+
+/* Workbench test navigation */
+"workbench.validation.overview" = "Обзор";
+"workbench.validation.cfd" = "CFD";
+"workbench.validation.structural" = "Прочность";
+"workbench.validation.section" = "Раздел испытаний";
+"workbench.validation.instruction" = "Выберите один тип испытания ниже. Остальные разделы не занимают место на экране.";
+"workbench.validation.state" = "Состояние испытаний";
+"workbench.validation.report_hint" = "Подробный журнал запуска открывается через кнопку «Открыть отчёт» внутри выбранного теста.";
+"workbench.components" = "Детали";
+"workbench.components.help" = "Компоненты сборки";
+"workbench.validation.shelf_subtitle" = "Выберите тип испытания справа; здесь виден общий статус.";

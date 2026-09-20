@@ -2,14 +2,15 @@ import SwiftUI
 import AppKit
 
 struct KeyBindingsSettingsView: View {
-    @ObservedObject var simulationViewModel: DroneSimulationViewModel
+    let simulationViewModel: DroneSimulationViewModel?
     @ObservedObject var bindingsViewModel: BindingsViewModel
     @ObservedObject private var captureCoordinator: InputCaptureCoordinator
 
     @State private var keyCaptureMonitor: Any?
+    @State private var reservedKeyNotice = false
 
     init(
-        simulationViewModel: DroneSimulationViewModel,
+        simulationViewModel: DroneSimulationViewModel? = nil,
         bindingsViewModel: BindingsViewModel
     ) {
         self.simulationViewModel = simulationViewModel
@@ -21,10 +22,6 @@ struct KeyBindingsSettingsView: View {
         VStack(alignment: .leading, spacing: 12) {
             headerSection
             captureStatusSection
-
-            Divider()
-
-            controllerSettingsSection
 
             Divider()
 
@@ -58,12 +55,14 @@ struct KeyBindingsSettingsView: View {
                 .padding(.vertical, 2)
             }
         }
-        .padding(16)
-        .frame(minWidth: 680, idealWidth: 760, minHeight: 620)
+        .padding(4)
+        .frame(minHeight: 360)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .alert(Text("keybind.reserved.title"), isPresented: $reservedKeyNotice) {
+            Button("common.ok", role: .cancel) {}
+        } message: { Text("keybind.reserved.detail") }
         .onDisappear {
             stopRebindingCapture()
-            simulationViewModel.setBindingsPanelVisible(false)
         }
     }
 
@@ -75,14 +74,14 @@ struct KeyBindingsSettingsView: View {
                     .font(.title3.weight(.semibold))
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                doneButton
+                EmptyView()
             }
 
             VStack(alignment: .leading, spacing: 10) {
                 Text("keybind.section.title")
                     .font(.title3.weight(.semibold))
 
-                doneButton
+                EmptyView()
                     .frame(maxWidth: .infinity, alignment: .trailing)
             }
         }
@@ -107,87 +106,14 @@ struct KeyBindingsSettingsView: View {
         }
     }
 
-    private var controllerSettingsSection: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Игровой контроллер")
-                .font(.headline)
-
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 12) {
-                    controllerInfoChip(
-                        title: "Источник ввода",
-                        value: inputSourceTitle(simulationViewModel.activeInputSourceKind)
-                    )
-                    controllerInfoChip(
-                        title: "Устройство",
-                        value: simulationViewModel.activeGameControllerName ?? "Нет"
-                    )
-                }
-
-                VStack(alignment: .leading, spacing: 8) {
-                    controllerInfoChip(
-                        title: "Источник ввода",
-                        value: inputSourceTitle(simulationViewModel.activeInputSourceKind)
-                    )
-                    controllerInfoChip(
-                        title: "Устройство",
-                        value: simulationViewModel.activeGameControllerName ?? "Нет"
-                    )
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Подключённые контроллеры")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-
-                if simulationViewModel.connectedGameControllers.isEmpty {
-                    Text("Контроллер не подключён")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    ForEach(simulationViewModel.connectedGameControllers) { controller in
-                        HStack(spacing: 8) {
-                            Text(controller.name)
-                                .font(.caption)
-                            Spacer()
-                            if controller.isActive {
-                                Text("Активен")
-                                    .font(.caption2.weight(.semibold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 3)
-                                    .background(Color.accentColor.opacity(0.16), in: Capsule())
-                            }
-                        }
-                    }
-                }
-            }
-
-            ControllerAxisSettingsView(store: .shared)
-        }
-    }
-
-    private func controllerInfoChip(title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.caption.weight(.medium))
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
-    }
-
     private var doneButton: some View {
         Button("common.done") {
-            simulationViewModel.setBindingsPanelVisible(false)
+            simulationViewModel?.setBindingsPanelVisible(false)
         }
         .buttonStyle(.borderedProminent)
         .fixedSize(horizontal: true, vertical: false)
         .controllerButtonTarget(id: "keybind.done") {
-            simulationViewModel.setBindingsPanelVisible(false)
+            simulationViewModel?.setBindingsPanelVisible(false)
         }
     }
 
@@ -196,7 +122,7 @@ struct KeyBindingsSettingsView: View {
             if let rebindingCommand = captureCoordinator.activeCommand {
                 Text(
                     String(
-                        format: NSLocalizedString("keybind.capture.prompt", comment: ""),
+                        format: L10n.s("keybind.capture.prompt"),
                         localized(rebindingCommand.titleKey)
                     )
                 )
@@ -256,7 +182,7 @@ struct KeyBindingsSettingsView: View {
     }
 
     private func bindingKeyBadge(for binding: KeyBindingDescriptor) -> some View {
-        Text(binding.keyLabel)
+        Text(binding.keyCode == 49 ? L10n.s("keybind.key.space") : binding.keyLabel)
             .font(.caption.monospaced())
             .lineLimit(1)
             .padding(.horizontal, 6)
@@ -265,7 +191,7 @@ struct KeyBindingsSettingsView: View {
     }
 
     private func rebindButton(for binding: KeyBindingDescriptor) -> some View {
-        Button(captureCoordinator.activeCommand == binding.command ? String(localized: "keybind.capturing") : String(localized: "keybind.rebind")) {
+        Button(captureCoordinator.activeCommand == binding.command ? L10n.s("keybind.capturing") : L10n.s("keybind.rebind")) {
             beginRebinding(for: binding.command)
         }
         .buttonStyle(.bordered)
@@ -281,17 +207,27 @@ struct KeyBindingsSettingsView: View {
         stopRebindingCapture()
         bindingsViewModel.beginCapture(for: command)
 
-        keyCaptureMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+        keyCaptureMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             guard captureCoordinator.activeCommand != nil else {
                 return event
             }
 
+            if event.type == .flagsChanged {
+                let shift = [UInt16(56), 60].contains(event.keyCode) && event.modifierFlags.contains(.shift)
+                let option = [UInt16(58), 61].contains(event.keyCode) && event.modifierFlags.contains(.option)
+                if !shift && !option { return event }
+            }
+            if [30, 33, 34, 40].contains(event.keyCode) {
+                stopRebindingCapture()
+                reservedKeyNotice = true
+                return nil
+            }
             if event.keyCode == 53 { // Escape
                 stopRebindingCapture()
                 return nil
             }
 
-            if event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false {
+            if event.type != .flagsChanged && event.modifierFlags.intersection([.command, .control, .option]).isEmpty == false {
                 return nil
             }
 
@@ -334,17 +270,19 @@ struct KeyBindingsSettingsView: View {
         case 48:
             return "Tab"
         case 49:
-            return String(localized: "keybind.key.space")
+            return L10n.s("keybind.key.space")
         case 53:
             return "Esc"
         case 56, 60:
             return "Shift"
+        case 58, 61:
+            return "⌥"
         default:
             if let chars = event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines), !chars.isEmpty {
                 return chars.uppercased()
             }
             return String(
-                format: NSLocalizedString("keybind.key.code", comment: ""),
+                format: L10n.s("keybind.key.code"),
                 event.keyCode
             )
         }
@@ -367,5 +305,5 @@ struct KeyBindingsSettingsView: View {
 }
 
 private func localized(_ key: String) -> String {
-    NSLocalizedString(key, comment: "")
+    L10n.s(key)
 }

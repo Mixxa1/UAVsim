@@ -1,0 +1,228 @@
+{
+  "schema": "cadnext-icing-result/1",
+  "testType": "icing",
+  "outcome": "warning",
+  "solverID": "cadnext.fea.icing-panel",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 3",
+  "metrics": {
+    "iceThicknessM": {
+      "value": 0.008769696730675453,
+      "unit": "m",
+      "numericalUncertainty": 0.0018078329132152522
+    },
+    "iceMassKg": {
+      "value": 0.08429620558804148,
+      "unit": "kg"
+    },
+    "collectionEfficiency": {
+      "value": 0.34137931034482755,
+      "unit": "1"
+    },
+    "inertiaParameter": {
+      "value": 0.2752523707881783,
+      "unit": "1"
+    }
+  },
+  "warnings": [
+    "теплоотдача взята как у плоской пластины: при её изменении вдвое толщина льда лежит между 7.10 и 10.76 мм",
+    "лёд не меняет обтекание: толщина это скорость первого мгновения, продлённая на всё время — для наледи в режиме мокрого роста это оценка, а не форма",
+    "стекающая вода не прослеживается вдоль поверхности: доля намерзания посчитана, а куда уходит остальное — нет",
+    "сечения плоские: ни стреловидности, ни перетекания вдоль размаха, ни концевых эффектов",
+    "пограничный слой взят как у плоской пластины, шероховатость льда не моделируется"
+  ],
+  "failureReasons": [],
+  "settings": {
+    "material": "al_6061_t6",
+    "materialDatabaseVersion": 3,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "крыло, взлётное обледенение",
+      "supports": [],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    },
+    "icing": {
+      "flowAxis": "x",
+      "spanAxis": "y",
+      "angleOfAttackDeg": 0,
+      "stations": 2,
+      "panels": 120,
+      "trajectories": 121,
+      "refinementFactor": 1.3,
+      "surfaceElementSizeM": 0.025,
+      "condition": {
+        "temperatureC": -20,
+        "lwcGm3": 0.35,
+        "dropletMicrons": 20,
+        "altitudeM": 0,
+        "airspeedMps": 60,
+        "durationS": 600
+      },
+      "antiIceTargetC": 0,
+      "antiIceBudgetW": 0,
+      "maximumIceThicknessMm": 50
+    }
+  },
+  "cloud": {
+    "source": "задано в задании",
+    "temperatureK": 253.14999999999998,
+    "lwcKgM3": 0.00035,
+    "dropletDiameterM": 1.9999999999999998e-05,
+    "airspeedMps": 60,
+    "durationS": 600,
+    "altitudeM": 0,
+    "spanM": 0.6,
+    "inertiaParameter": 0.2752523707881783,
+    "heatTransferBandLowM": 0.00709537824299579,
+    "heatTransferBandHighM": 0.010760304748927259
+  },
+  "stations": [
+    {
+      "spanPositionM": 0.15,
+      "chordM": 0.29975861294522516,
+      "collectionEfficiency": 0.34137931034482755,
+      "maximumBeta": 0.7745460361621921,
+      "iceThicknessM": 0.0086698496870208,
+      "iceMassKgPerM": 0.13917471838396756,
+      "impingementLengthM": 0.03305583242637326,
+      "freezingFraction": 1,
+      "surfaceTemperatureK": 267.95175877607846,
+      "glaze": false,
+      "leadingEdgeRadiusM": 0.006906705776846795,
+      "stagnationFilmWm2K": 436.1368215715188,
+      "antiIcePowerWPerM": 0,
+      "arcLengthM": [
+        0.0014828931458564757,
+        0.15224338141559363,
+        0.3059178581770737,
+        0.4594179860436692,
+        0.6102114473304577
+      ],
+      "beta": [
+        0.7745460361621921,
+        0,
+        0,
+        0,
+        0.6364893930190678
+      ],
+      "iceM": [
+        0.0075326131457878,
+        0,
+        0,
+        0,
+        0.008084473501470053
+      ],
+      "panelXM": [
+        0.0002553907593914516,
+        0.14593393617547468,
+        0.29870567742975407,
+        0.14866177158033556,
+        0.0009718430186831503
+      ],
+      "panelYM": [
+        -0.0001303310993996734,
+        -0.016126724802172282,
+        -0.0002551527299319041,
+        0.01596211552592841,
+        0.0026345512298168367
+      ]
+    },
+    {
+      "spanPositionM": 0.44999999999999996,
+      "chordM": 0.2998199505091731,
+      "collectionEfficiency": 0.34137931034482755,
+      "maximumBeta": 0.7730343155439481,
+      "iceThicknessM": 0.008769696730675453,
+      "iceMassKgPerM": 0.1418126335761707,
+      "impingementLengthM": 0.03303335583792499,
+      "freezingFraction": 0.844592005506769,
+      "surfaceTemperatureK": 273.15,
+      "glaze": true,
+      "leadingEdgeRadiusM": 0.006917832126247155,
+      "stagnationFilmWm2K": 435.78594839847625,
+      "antiIcePowerWPerM": 0,
+      "arcLengthM": [
+        0.0014790385586272723,
+        0.15223331179331342,
+        0.3058801033225965,
+        0.4595192873186784,
+        0.6103052854643461
+      ],
+      "beta": [
+        0.7730343155439481,
+        0,
+        0,
+        0,
+        0.6479500781135351
+      ],
+      "iceM": [
+        0.008769696730675453,
+        0,
+        0,
+        0,
+        0.007927995656215964
+      ],
+      "panelXM": [
+        0.0002759179135652792,
+        0.1460868629908511,
+        0.2988009607373596,
+        0.1485088722763131,
+        0.0009135273548289382
+      ],
+      "panelYM": [
+        -0.0002757960970327779,
+        -0.016117523416025636,
+        -0.00017051652198488224,
+        0.015971753365381296,
+        0.0024983371524457585
+      ]
+    }
+  ],
+  "meshStudy": [
+    {
+      "panels": 120,
+      "trajectories": 121,
+      "iceThicknessM": 0.010290556011946,
+      "collectionEfficiency": 0.33000000000000007
+    },
+    {
+      "panels": 156,
+      "trajectories": 157,
+      "iceThicknessM": 0.010577529643890705,
+      "collectionEfficiency": 0.3384615384615385
+    },
+    {
+      "panels": 203,
+      "trajectories": 204,
+      "iceThicknessM": 0.008769696730675453,
+      "collectionEfficiency": 0.34137931034482755
+    }
+  ],
+  "convergence": {
+    "iceThickness": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 0.008769696730675453,
+      "gciFineRelative": 0.10307271555307311,
+      "asymptoticRatio": 0
+    }
+  },
+  "material": {
+    "id": "al_6061_t6",
+    "youngsModulusPa": 68900000000,
+    "poissonRatio": 0.33,
+    "densityKgPerM3": 2700,
+    "yieldStrengthPa": 276000000,
+    "ultimateStrengthPa": 310000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "wing.field.json"
+}

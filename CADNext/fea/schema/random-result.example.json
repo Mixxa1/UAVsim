@@ -1,0 +1,206 @@
+{
+  "schema": "cadnext-random-result/1",
+  "testType": "modalVibration",
+  "outcome": "warning",
+  "solverID": "cadnext.fea.random-tet10",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 1",
+  "metrics": {
+    "rmsVonMisesPa": {
+      "value": 25433006.5465647,
+      "unit": "Pa"
+    },
+    "threeSigmaStressPa": {
+      "value": 76299019.6396941,
+      "unit": "Pa"
+    },
+    "reserveFactor": {
+      "value": 5.701252808413464,
+      "unit": "1"
+    },
+    "ultimateMargin": {
+      "value": 4.854159971857503,
+      "unit": "1"
+    },
+    "yieldMargin": {
+      "value": 4.701252808413464,
+      "unit": "1"
+    },
+    "inputRmsAccelerationMps2": {
+      "value": 11.808770347457859,
+      "unit": "m/s2"
+    },
+    "rmsDisplacementM": {
+      "value": 0.0036145487303723828,
+      "unit": "m"
+    },
+    "probeRmsAccelerationMps2": {
+      "value": 66.52441898408847,
+      "unit": "m/s2"
+    },
+    "stressApparentFrequencyHz": {
+      "value": 25.432323865154537,
+      "unit": "Hz"
+    },
+    "effectiveMassFraction": {
+      "value": 0.9204671513528224,
+      "unit": "1"
+    },
+    "firstFrequencyHz": {
+      "value": 16.530078606450846,
+      "unit": "Hz"
+    }
+  },
+  "warnings": [
+    "вердикт по 3σ = 3 × RMS фон Мизеса — принятый уровень для гауссова отклика, а не вероятность (фон Мизес сам не гауссов)",
+    "максимум напряжения взят вне заданных зон исключения",
+    "сходимость по сетке немонотонна — погрешность оценена только разбросом",
+    "усталость не оценена: в базе материалов нет кривых усталости, а случайная вибрация накапливает повреждение при напряжениях заметно ниже предела текучести"
+  ],
+  "failureReasons": [],
+  "settings": {
+    "material": "steel_4130",
+    "materialDatabaseVersion": 1,
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.6,
+    "factorOfSafety": 1.5,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "table",
+      "supports": [
+        {
+          "face": "face-0",
+          "fix": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      ],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": [
+        {
+          "face": "face-0",
+          "distanceM": 0.03
+        }
+      ]
+    },
+    "random": {
+      "modeCount": 10,
+      "dampingRatio": 0.02,
+      "direction": [
+        0,
+        0,
+        1
+      ],
+      "accelerationPsd": [
+        [
+          5,
+          0.9617038422
+        ],
+        [
+          150,
+          0.9617038422
+        ]
+      ],
+      "attachedMasses": [],
+      "probeFace": "face-5"
+    }
+  },
+  "criticalRegion": {
+    "point": [
+      0.03109574301162773,
+      0.022489170093936275,
+      0.02
+    ],
+    "face": "face-2"
+  },
+  "spectra": {
+    "frequencyHz": [
+      5,
+      17.356834146680217,
+      27.007161024079068,
+      96.37030051177781,
+      150
+    ],
+    "inputPsd": [
+      0.9617038422,
+      0.9617038422,
+      0.9617038422,
+      0.9617038422,
+      0.9617038422
+    ],
+    "criticalStressPsd": [
+      1399014348581.8577,
+      77175850816560.16,
+      233676947353.33478,
+      317328682606.9398,
+      2968429912.514407
+    ],
+    "probeAccelerationPsd": [
+      1.2846036601981796,
+      207.2687538190352,
+      2.347762093527036,
+      35.21039003142124,
+      1.4562699425830261
+    ]
+  },
+  "modeFrequenciesHz": [
+    16.530078606450846,
+    24.77721194869639,
+    103.40160999117792,
+    154.63258602057428,
+    288.68212264636,
+    430.1317727597747,
+    563.3211276037144,
+    680.747546399544,
+    834.9821362860744,
+    926.1987236217991
+  ],
+  "dampingRatio": 0.02,
+  "totalMassKg": 4.710000000000158,
+  "attachedMassKg": 0,
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.02,
+      "elements": 568,
+      "rmsVonMisesPa": 25610260.68625346
+    },
+    {
+      "maximumElementSizeM": 0.012499999999999999,
+      "elements": 1896,
+      "rmsVonMisesPa": 25416093.00750893
+    },
+    {
+      "maximumElementSizeM": 0.007812499999999998,
+      "elements": 7938,
+      "rmsVonMisesPa": 25433006.5465647
+    }
+  ],
+  "convergence": {
+    "stress": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 25433006.5465647,
+      "gciFineRelative": 0.0038172380129150555,
+      "asymptoticRatio": 0
+    }
+  },
+  "material": {
+    "id": "steel_4130",
+    "youngsModulusPa": 205000000000,
+    "poissonRatio": 0.29,
+    "densityKgPerM3": 7850,
+    "yieldStrengthPa": 435000000,
+    "ultimateStrengthPa": 670000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "beam.random-field.json"
+}

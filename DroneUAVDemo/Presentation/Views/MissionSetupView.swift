@@ -117,7 +117,7 @@ struct MissionSetupView: View {
 
     private func profileBadgeText(for profile: DroneModelProfile) -> String {
         if profile.isAbstract {
-            return NSLocalizedString("uav.badge.custom", comment: "")
+            return L10n.s("uav.badge.custom")
         }
         return (profile.resolvedUAVProfile?.specConfidence ?? .partial).catalogTitle.uppercased()
     }
@@ -467,7 +467,7 @@ struct MissionSetupView: View {
                     Text("mission.setup.time_limit")
                         .font(.caption).foregroundStyle(.white.opacity(0.8))
                     Spacer()
-                    Text(String(format: NSLocalizedString("mission.setup.time_limit.value", comment: ""), timeLimitMinutes))
+                    Text(String(format: L10n.s("mission.setup.time_limit.value"), timeLimitMinutes))
                         .font(.caption.monospacedDigit()).foregroundStyle(.white)
                 }
             }
@@ -484,7 +484,7 @@ struct MissionSetupView: View {
                 Image(systemName: "drop.fill")
                     .foregroundStyle(GroundControlPalette.accent)
                 Text(String(
-                    format: NSLocalizedString("mission.setup.agri.briefing", comment: ""),
+                    format: L10n.s("mission.setup.agri.briefing"),
                     // The field is square, so its side goes in twice. Passing it once left the
                     // format reading the *next* argument as the second dimension and shifting
                     // everything after it — which is how a 2.56 ha field announced itself as
@@ -501,7 +501,7 @@ struct MissionSetupView: View {
                 Spacer(minLength: 0)
             }
             Text(String(
-                format: NSLocalizedString("mission.setup.agri.window", comment: ""),
+                format: L10n.s("mission.setup.agri.window"),
                 AgriSprayTuning.idealAltitudeRange.lowerBound,
                 AgriSprayTuning.idealAltitudeRange.upperBound,
                 AgriSprayTuning.idealMaxGroundSpeed,
@@ -795,7 +795,7 @@ struct MissionSetupView: View {
                 Image(systemName: "scope")
                     .foregroundStyle(GroundControlPalette.accent)
                 Text(String(
-                    format: NSLocalizedString("intercept.setup.briefing", comment: ""),
+                    format: L10n.s("intercept.setup.briefing"),
                     Double(settings.areaRadius),
                     Double(settings.acquisitionRange)
                 ))
@@ -961,7 +961,7 @@ struct MissionSetupView: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
                 Text(String(
-                    format: NSLocalizedString("race.setup.library.detail", comment: ""),
+                    format: L10n.s("race.setup.library.detail"),
                     summary.gateCount,
                     summary.lapLengthMeters,
                     summary.laps
@@ -1081,7 +1081,7 @@ struct MissionSetupView: View {
                     in: Double(hoseDiameterClass.lengthRangeMeters.lowerBound)...Double(hoseDiameterClass.lengthRangeMeters.upperBound),
                     step: Double(hoseDiameterClass.lengthStepMeters)
                 )
-                Text(String(format: NSLocalizedString("payload.hose.rig_mass", comment: ""), hoseDiameterClass.massForLength(Float(hoseLengthMeters))))
+                Text(String(format: L10n.s("payload.hose.rig_mass"), hoseDiameterClass.massForLength(Float(hoseLengthMeters))))
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
             }
@@ -1117,7 +1117,7 @@ struct MissionSetupView: View {
                     in: Double(FireCapsuleTuning.countRange.lowerBound)...Double(FireCapsuleTuning.countRange.upperBound),
                     step: 1
                 )
-                Text(String(format: NSLocalizedString("payload.capsule.rig_mass", comment: ""), FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)))
+                Text(String(format: L10n.s("payload.capsule.rig_mass"), FireCapsuleTuning.totalMass(size: capsuleSize, count: capsuleCount)))
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
             }

@@ -277,7 +277,7 @@ struct KeyBindingProfile {
             .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
             .vtolTransitionForward: KeyBindingDescriptor(command: .vtolTransitionForward, keyCode: 7, keyLabel: "X"),
             .vtolTransitionBack: KeyBindingDescriptor(command: .vtolTransitionBack, keyCode: 45, keyLabel: "N"),
-            .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: NSLocalizedString("keybind.key.space", comment: "")),
+            .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: L10n.s("keybind.key.space")),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
             .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
             .cameraModeFree: KeyBindingDescriptor(command: .cameraModeFree, keyCode: 18, keyLabel: "1"),
@@ -481,7 +481,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         .accelerate: KeyBindingDescriptor(command: .accelerate, keyCode: 56, keyLabel: "Shift"),
         .vtolTransitionForward: KeyBindingDescriptor(command: .vtolTransitionForward, keyCode: 7, keyLabel: "X"),
         .vtolTransitionBack: KeyBindingDescriptor(command: .vtolTransitionBack, keyCode: 45, keyLabel: "N"),
-        .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: NSLocalizedString("keybind.key.space", comment: "")),
+        .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: L10n.s("keybind.key.space")),
         .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
         .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
         .cameraModePayloadOptics: KeyBindingDescriptor(command: .cameraModePayloadOptics, keyCode: 31, keyLabel: "O"),
@@ -507,10 +507,14 @@ final class KeyboardInputService: KeyboardInputProviding {
         } else {
             self.profile = .default
         }
-        sanitizeLegacyPanelToggleBinding()
-        sanitizeCanonicalFlightCameraBindings()
-        sanitizeMissionOverlayBindings()
-        sanitizeRangefinderAndThermalQuickBindings()
+        // Migrate older profiles once; subsequent launches preserve deliberate rebindings.
+        if profile == nil && !userDefaults.bool(forKey: "input.bindings.migrated.v4") {
+            sanitizeLegacyPanelToggleBinding()
+            sanitizeCanonicalFlightCameraBindings()
+            sanitizeMissionOverlayBindings()
+            sanitizeRangefinderAndThermalQuickBindings()
+            userDefaults.set(true, forKey: "input.bindings.migrated.v4")
+        }
     }
 
     func start() {
@@ -641,7 +645,6 @@ final class KeyboardInputService: KeyboardInputProviding {
 
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String) {
         profile.rebind(command: command, keyCode: keyCode, keyLabel: keyLabel)
-        sanitizeCanonicalFlightCameraBindings()
         // Prevent stale pressed-state links when a command changes key while held.
         activeContinuousCommands.removeAll()
         activeContinuousByKey.removeAll()
@@ -766,19 +769,26 @@ final class KeyboardInputService: KeyboardInputProviding {
             return event
         }
 
-        if isAccelerateBoundToShift {
-            if event.modifierFlags.contains(.shift) {
-                activeContinuousCommands.insert(.accelerate)
-            } else if !isAccelerateHeldByOtherKey {
-                activeContinuousCommands.remove(.accelerate)
-            }
+        guard processingMode == .flight || processingMode == .spectator else { return event }
+        let codes: [UInt16]
+        let pressed: Bool
+        switch event.keyCode {
+        case 56, 60: codes = [56, 60]; pressed = event.modifierFlags.contains(.shift)
+        case 58, 61: codes = [58, 61]; pressed = event.modifierFlags.contains(.option)
+        default: return event
         }
-
-        if isCameraLookPrecisionBoundToOption {
-            if event.modifierFlags.contains(.option) {
-                activeContinuousCommands.insert(.cameraLookPrecision)
-            } else if !isCameraLookPrecisionHeldByOtherKey {
-                activeContinuousCommands.remove(.cameraLookPrecision)
+        for code in codes {
+            if !pressed {
+                let held = activeContinuousByKey.removeValue(forKey: code) ?? []
+                activeContinuousCommands.subtract(held)
+                continue
+            }
+            for command in commands(for: code) {
+                if processingMode == .spectator && !isSpectatorCameraCommand(command) { continue }
+                if command.isContinuous {
+                    activeContinuousCommands.insert(command)
+                    activeContinuousByKey[code, default: []].insert(command)
+                } else { mapCommandToAction(command) }
             }
         }
         return event

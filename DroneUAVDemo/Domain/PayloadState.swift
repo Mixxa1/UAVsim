@@ -12,19 +12,19 @@ enum PayloadState: String, Hashable {
     var title: String {
         switch self {
         case .noPayload:
-            return NSLocalizedString("payload.state.no_payload", comment: "")
+            return L10n.s("payload.state.no_payload")
         case .attached:
-            return NSLocalizedString("payload.state.attached", comment: "")
+            return L10n.s("payload.state.attached")
         case .removed:
-            return NSLocalizedString("payload.state.removed", comment: "")
+            return L10n.s("payload.state.removed")
         case .released:
-            return NSLocalizedString("payload.state.released", comment: "")
+            return L10n.s("payload.state.released")
         case .falling:
-            return NSLocalizedString("payload.state.falling", comment: "")
+            return L10n.s("payload.state.falling")
         case .landed:
-            return NSLocalizedString("payload.state.landed", comment: "")
+            return L10n.s("payload.state.landed")
         case .cleanedUp:
-            return NSLocalizedString("payload.state.cleaned_up", comment: "")
+            return L10n.s("payload.state.cleaned_up")
         }
     }
 }

@@ -510,9 +510,9 @@
 "abstract.validation.speed" = "Horizontal speed must be >= ascent/descent speeds.";
 "abstract.validation.radius" = "Collision radius is too large for selected dimensions.";
 
-"drone.model.lipo_scout4" = "LIPO Scout 4";
-"drone.model.lipo_vector3s" = "LIPO Vector 3S";
-"drone.model.lipo_atlas3pro" = "LIPO Atlas 3 Pro";
+"drone.model.lipo_scout4" = "Lipo Scout 4";
+"drone.model.lipo_vector3s" = "Lipo Vector 3S";
+"drone.model.lipo_atlas3pro" = "Lipo Atlas 3 Pro";
 "drone.model.abstract" = "Abstract UAV";
 
 "drone.visual.mini" = "Light compact quadcopter";
@@ -656,7 +656,7 @@
 "payload.type.sensorModule.description" = "Multi-sensor package for environment and air-quality monitoring.";
 "payload.type.radioRelay.description" = "Communications relay that extends reliable signal coverage.";
 "payload.type.custom.description" = "Universal enclosure for user-defined equipment.";
-"payload.placeholder.message" = "This function will be added later.";
+"payload.placeholder.message" = "No payload selected. Add equipment in the Workbench.";
 "control_mode.angle" = "Angle";
 "command.arm" = "Arm";
 "command.disarm" = "Disarm";
@@ -2642,7 +2642,7 @@
 // MARK: - Settings
 "settings.menu.entry" = "Settings";
 "settings.title" = "Settings";
-"settings.subtitle" = "Graphics, resolution, language and legal information.";
+"settings.subtitle" = "Guides, key bindings, controller and application preferences.";
 "settings.section.video" = "Video / Graphics";
 "settings.section.resolution" = "Resolution";
 "settings.section.language" = "Language";
@@ -3547,3 +3547,152 @@
 "intercept.module.medicalPack.detail" = "1.6 kg. Bulky rather than dense: it drags on the mount and drifts noticeably when released at speed. Inert.";
 "intercept.module.sensorPod" = "Sensor pod";
 "intercept.module.sensorPod.detail" = "1.1 kg. A station left behind at the zone. The lightest and smallest of the cargo, and the most forgiving to place. Inert.";
+
+"menu.online_trials" = "Multiplayer trials";
+
+"menu.recorder" = "Flight recorder";
+
+"menu.workbench" = "Workbench — assembly and tests";
+
+"settings.page.guide" = "Quick guide";
+
+"settings.page.keys" = "Key bindings";
+
+"settings.page.controller" = "Controller";
+
+"settings.page.video" = "Display";
+
+"settings.page.audio" = "Audio";
+
+"settings.page.language" = "Language";
+
+"settings.page.about" = "About";
+
+"settings.guide.intro" = "Your controls at a glance";
+
+"settings.guide.context" = "These are your current bindings. Open Key bindings to change them. Some actions depend on the aircraft and its installed equipment.";
+
+"settings.guide.flight" = "01 · Flight";
+
+"settings.guide.flight.detail" = "Arm the motors in the control panel first. Throttle changes thrust; directional controls change attitude. Fixed-wing aircraft need airspeed to lift off; multicopters need sufficient thrust.";
+
+"settings.guide.camera" = "02 · Camera";
+
+"settings.guide.camera.detail" = "Switch views, look around and zoom. Camera controls do not turn the aircraft.";
+
+"settings.guide.vtol" = "03 · VTOL transition";
+
+"settings.guide.vtol.detail" = "For aircraft with vertical takeoff and wing-borne flight. Hold the key to move the transition lever; monitor airspeed and altitude.";
+
+"settings.guide.tools" = "04 · Panels and equipment";
+
+"settings.guide.tools.detail" = "Release requires a releasable payload. Reset restores the aircraft state. Fixed shortcuts: [ parameters, ] tools; ⌥1/⌥2/⌥3 payload camera stations.";
+
+"settings.guide.cfd" = "05 · Engineering tests and airflow";
+
+"settings.guide.cfd.detail" = "CADNext → Tests → Aerodynamics / CFD: configure the flow, run the solver and inspect pressure/velocity fields. In the UAVsim Workbench, use the Tests tab. The solver requires exact geometry; USDZ supplies the aircraft visual model.";
+
+"settings.guide.edit" = "Edit key bindings";
+
+"keybind.reserved.title" = "Reserved interface key";
+"keybind.reserved.detail" = "The [, ], I and K keys control panels and tools. Choose another key.";
+
+/* Aerodynamics UI */
+"cfd.title" = "Aerodynamics / CFD";
+"cfd.pipeline" = "Exact airframe geometry → SU2 → aerodynamic table → flight physics";
+"cfd.flow" = "Flow model";
+"cfd.laminar" = "Laminar";
+"cfd.urans" = "URANS SST (unsteady)";
+"cfd.wall_mode" = "Wall";
+"cfd.wall_resolved" = "Resolve the layer, y+ ≈ 1";
+"cfd.wall_functions" = "Wall functions, y+ 30…300";
+"cfd.wall_plan" = "Re = %@ on the chord. For this regime: first layer %@ mm, %@ layers up to δ99 = %@ mm. Currently the first layer is %@ mm (expected y+ ≈ %@).";
+"cfd.wall_apply" = "Size the near-wall mesh for this speed";
+"cfd.transition" = "Transition";
+"cfd.transition_none" = "None — turbulent from the leading edge";
+"cfd.transition_lm" = "γ-Reθ — laminar run and transition";
+"cfd.turbulence" = "Free-stream turbulence Tu, %";
+"cfd.transition_hint" = "γ-Reθ transition: the boundary layer starts laminar and turns turbulent where the model predicts from Tu. Below Re ≈ 10⁶ this changes friction by tens of per cent. Tu: calm air 0.05–0.1 %, wind tunnel 0.1–1 %, behind a propeller several per cent.";
+"cfd.euler" = "Euler · diagnostics";
+"cfd.angles_hint" = "One angle gives one point; multiple angles give a sweep. All α and β combinations are calculated.";
+"cfd.speed" = "Speed, m/s";
+"cfd.area" = "Area S, m²";
+"cfd.span" = "Span b, m";
+"cfd.chord" = "Chord c, m";
+"cfd.advanced" = "Mesh, environment and accuracy";
+"cfd.density" = "Density, kg/m³";
+"cfd.viscosity" = "Viscosity, Pa·s";
+"cfd.wall" = "Wall element size, m";
+"cfd.far" = "Farfield element size, m";
+"cfd.boundary" = "Boundary distance, body lengths";
+"cfd.layers" = "Layer heights, m";
+"cfd.grading" = "Mesh grading";
+"cfd.iterations" = "Iterations";
+"cfd.window" = "Convergence window";
+"cfd.threads" = "Threads";
+"cfd.abs" = "Coefficient tolerance, abs";
+"cfd.rel" = "Coefficient tolerance, rel";
+"cfd.timeout" = "Time limit per point, s";
+"cfd.residual" = "RMS target log₁₀ ≤";
+"cfd.mesh_hint" = "Mesh sizes are initial estimates. Repeat with a finer mesh and a more distant boundary to assess error. External equipment uses bounding solids.";
+"cfd.cancel" = "Cancel calculation";
+"cfd.run" = "Run CFD";
+"cfd.import" = "Import table…";
+"cfd.geometry_hint" = "Import a .uavframe v2 file with exact solids to run CFD. An existing table can be attached to any assembly.";
+"cfd.choose_adapter" = "Locate cadnext_cfd…";
+"cfd.choose_solver" = "Locate SU2_CFD…";
+"cfd.adapter_ready" = "cadnext_cfd ✓";
+"cfd.solver_ready" = "SU2_CFD ✓";
+"cfd.tools" = "Tools and exchange";
+"cfd.history" = "CFD history";
+"cfd.run_label" = "Run";
+"cfd.export" = "Export table…";
+"cfd.repeat" = "Reuse settings";
+"cfd.fields" = "Plots and flow fields";
+"cfd.files" = "Files and log";
+"cfd.report" = "Open report";
+"cfd.report.title" = "Aerodynamics report / CFD";
+"cfd.report.coefficients" = "Coefficients and polar plot";
+"cfd.report.metric" = "Show coefficient";
+"cfd.report.conditions" = "Run conditions";
+"cfd.report.messages" = "Messages and artifacts";
+"cfd.report.no_messages" = "No warnings or errors.";
+"cfd.report.no_table" = "This run does not contain an accepted aerodynamic table.";
+"cfd.report.model" = "Model";
+"cfd.report.solver" = "Solver";
+"cfd.report.points" = "Calculated points";
+"cfd.report.source" = "Source";
+"cfd.report.artifacts" = "Run files are saved locally.";
+"cfd.report.open_files" = "Open run folder";
+"cfd.report.close" = "Close";
+"structural.open_result" = "Open result";
+"cfd.import_hint" = "The selected aerodynamic table will be attached to the current aircraft configuration. Check its geometry, axes and reference dimensions.";
+"cfd.compare" = "Compare with another run";
+"cfd.baseline" = "Baseline run";
+"cfd.compare_hint" = "Coefficient comparison requires matching S, b, c, axes and moment reference point.";
+"cfd.flight_usable" = "usable in flight physics for a matching configuration";
+"cfd.diagnostics" = "diagnostics only";
+"cfd.stall" = "Possible stall range at β = 0: %.1f…%.1f°. Requires mesh and unsteady-flow verification.";
+"cfd.moment" = "Moment reference %@, m";
+"cfd.axis_x" = "X left";
+"cfd.axis_y" = "Y up";
+"cfd.axis_z" = "Z forward";
+"cfd.metres" = "m";
+"cfd.point_count" = "%d points · %@";
+"cfd.executable" = "Choose the %@ executable";
+"cfd.export_error" = "Could not export aerodynamic table: %@";
+"cfd.shared_points" = "Shared α/β points: %d. Maximum |Δ|; compare run conditions in the reports.";
+"cfd.apply_list" = "%@: press Enter to apply the list.";
+"cfd.number_list" = "%@: enter comma-separated numbers with a decimal point.";
+
+/* Workbench test navigation */
+"workbench.validation.overview" = "Overview";
+"workbench.validation.cfd" = "CFD";
+"workbench.validation.structural" = "Strength";
+"workbench.validation.section" = "Test section";
+"workbench.validation.instruction" = "Choose one test type below. Other panels stay out of the way.";
+"workbench.validation.state" = "Test status";
+"workbench.validation.report_hint" = "Open the selected test's run report with the “Open report” button.";
+"workbench.components" = "Components";
+"workbench.components.help" = "Assembly components";
+"workbench.validation.shelf_subtitle" = "Choose a test on the right; the overall status stays visible here.";

@@ -55,9 +55,12 @@ struct EngineeringSolverResult: Decodable, Hashable {
         guard let schemaTest = schemaTests[result.schema] else { throw DecodeError.unsupportedSchema(result.schema) }
         guard result.testType == test else { throw DecodeError.wrongTest(expected: test, found: result.testType) }
         guard schemaTest == test else { throw DecodeError.wrongTest(expected: schemaTest, found: result.testType) }
-        if test == .aerodynamics && result.outcome != .error {
-            guard let table = result.aeroTable else { throw WorkbenchAeroError.message("В результате CFD нет аэротаблицы.") }
-            if let problem = table.problem { throw WorkbenchAeroError.message(problem) }
+        // A CFD result may legitimately have no table: the run finished and wrote its fields, but a
+        // point did not converge or the near-wall mesh was not in a valid y+ regime, and the solver
+        // says so instead of exporting coefficients. The table, when present, must still be sound.
+        if test == .aerodynamics, result.outcome != .error, let table = result.aeroTable,
+           let problem = table.problem {
+            throw WorkbenchAeroError.message(problem)
         }
         return result
     }

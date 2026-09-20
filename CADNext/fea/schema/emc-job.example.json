@@ -1,0 +1,41 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "emc",
+  "geometry": {
+    "format": "uavpart",
+    "path": "avionics_enclosure.uavpart"
+  },
+  "material": "al_6061_t6",
+  "mesh": {
+    "coarseElementSizeM": 0.004,
+    "refinementFactor": 1.25
+  },
+  "loadCase": {
+    "name": "корпус авионики, MIL-STD-461G RS103, волна по +x",
+    "supports": []
+  },
+  "emc": {
+    "incidence": "+x",
+    "polarization": "z",
+    "level": "mil461g-rs103-200",
+    "lowHz": 500000000,
+    "highHz": 2000000000,
+    "points": 8,
+    "surfaceElementSizeM": 0,
+    "pmlCells": 8,
+    "marginCells": 4,
+    "equipment": [
+      {
+        "name": "блок авионики",
+        "x": 0.048,
+        "y": 0.048,
+        "z": 0.048,
+        "immunityVm": 20
+      }
+    ]
+  },
+  "output": {
+    "result": "avionics_enclosure.emc-result.json",
+    "field": "avionics_enclosure.emc-field.json"
+  }
+}

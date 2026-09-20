@@ -48,7 +48,7 @@ struct RaceBuilderPanelView: View {
                 .foregroundStyle(.white)
             Spacer()
             Text(String(
-                format: NSLocalizedString("race.builder.gate_count", comment: ""),
+                format: L10n.s("race.builder.gate_count"),
                 viewModel.raceTrack?.gateCount ?? 0
             ))
             .font(.caption2.monospacedDigit())

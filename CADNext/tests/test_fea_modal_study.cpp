@@ -22,13 +22,14 @@
 //  - Effective-mass fractions: 0.5 percentage point, as in test_fea_modal.
 //
 // Scenarios:
-//  1. Clamped cantilever (with its HTML report), 4 modes, a two-blade rotor at 900–1080 rpm (1P 15–18 Hz, 2P 30–36 Hz).
+//  1. Clamped cantilever, 4 modes, a two-blade rotor at 900–1080 rpm (1P 15–18 Hz, 2P 30–36 Hz).
 //     Mode 1 (16.5 Hz) lies in 1P → WARNING naming the mode and band; mode 2 (24.8 Hz) is clear
 //     of 2P by ≈ 20 %. An explicit band at 300–400 Hz lies above mode 4 (155 Hz) and must be
 //     reported as unchecked; the rotor bands below mode 4 must not.
 //  2. Free–free beam, 2 modes, a band below both (40–60 Hz) → six rigid modes skipped, PASS.
 //     (A band above the last computed mode would be WARNING: modes above it are not checked.)
 //  3. The root supported in z only — the part can still slide → ERROR with the reason, exit 2.
+//     An identical rerun must reproduce the result and field files byte for byte.
 //  4. In-process: job parsing refuses loads in a modal job, the modal job round-trips, the
 //     outcome rules (overlap, no band, unknown uncertainty → WARNING), and the result keys match
 //     schema/modal-result.example.json, which the Swift probe decodes.
@@ -192,7 +193,7 @@ std::string beamJob(const std::string& name, const std::string& supports, int mo
         "mesh": {"coarseElementSizeM": 0.02, "refinementFactor": 1.6},
         "loadCase": {"name": ")") + name + R"(", "supports": [)" + supports + R"(]},
         "modal": {"modeCount": )" + std::to_string(modeCount) + ", " + excitation + R"(},
-        "output": {"result": ")" + name + R"(.result.json", "field": ")" + name + R"(.field.json", "report": ")" + name + R"(.report.html"}})";
+        "output": {"result": ")" + name + R"(.result.json", "field": ")" + name + R"(.field.json"}})";
 }
 
 } // namespace
@@ -352,11 +353,16 @@ int main(int argc, char** argv) {
         check(field.stringOr("schema", "") == "cadnext-modal-field/1" && result.stringOr("fieldRef", "") == "cantilever.field.json",
               "cantilever: field schema, and the result points at it");
 
-        const std::string report = readText(workDirectory / "cantilever.report.html");
-        check(report.find("__CADNEXT_RESULT_JSON__") == std::string::npos && report.find("__CADNEXT_FIELD_JSON__") == std::string::npos
-                  && report.find("\"cadnext-modal-field/1\"") != std::string::npos && report.find("\"cadnext-modal-result/1\"") != std::string::npos
-                  && report.find("</html>") != std::string::npos,
-              "cantilever: modal HTML report embeds both files");
+        // The same job again must give the same bytes: the Engineering Validation fingerprints results
+        // without tolerance, and Accelerate's multithreaded solve once made reruns differ by ~1e-9
+        // (cadnext_structural now runs vecLib on one thread).
+        {
+            const std::string first = readText(workDirectory / "cantilever.result.json");
+            const std::string firstField = readText(workDirectory / "cantilever.field.json");
+            check(runJob("cantilever", job) == 0 && readText(workDirectory / "cantilever.result.json") == first
+                      && readText(workDirectory / "cantilever.field.json") == firstField,
+                  "cantilever: an identical rerun reproduces the result and field byte for byte");
+        }
 
         // Contract with the Swift side.
         const JsonValue fixture = parseOrEmpty(readText(schemaDirectory / "modal-result.example.json"));

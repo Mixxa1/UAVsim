@@ -40,9 +40,9 @@ enum LANParticipantRole: String, Codable, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .pilot:
-            return NSLocalizedString("online.role.flight", comment: "")
+            return L10n.s("online.role.flight")
         case .spectator:
-            return NSLocalizedString("online.role.spectator", comment: "")
+            return L10n.s("online.role.spectator")
         }
     }
 }

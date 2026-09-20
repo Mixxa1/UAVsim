@@ -1,0 +1,166 @@
+{
+  "schema": "cadnext-emc-result/1",
+  "testType": "radiatedSusceptibility",
+  "outcome": "fail",
+  "solverID": "cadnext.em.fdtd-yee",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 3",
+  "metrics": {
+    "shieldingEffectivenessDb": {
+      "value": 48.66743411511676,
+      "unit": "dB",
+      "numericalUncertainty": 6.606374424812685
+    },
+    "interiorFieldVm": {
+      "value": 0.7373238632095528,
+      "unit": "V/m"
+    },
+    "worstFrequencyHz": {
+      "value": 2000000000,
+      "unit": "Hz"
+    },
+    "cellsPerWavelength": {
+      "value": 58.553214453124994,
+      "unit": "1"
+    }
+  },
+  "warnings": [
+    "объём вокселей отличается от объёма детали на 11.3 % — стенки тоньше ячейки либо теряются, либо запаиваются, и щели вместе с ними",
+    "корпус пуст и без потерь: на собственных частотах полости поле внутри ограничено только длиной счёта, и экранирование там — нижняя оценка",
+    "металл идеальный, сквозь стенки не проходит ничего: результат определяют только отверстия, щели и стыки",
+    "волна приходит по оси под прямым углом; другие направления — другие расчёты",
+    "кабели и их связь с полем не моделируются (это CS114/CS116, а не RS103)",
+    "резонансы полости в развёртке: 743.0 МГц"
+  ],
+  "failureReasons": [
+    "блок авионики: поле 0.74 В/м на 2000.0 МГц против предела 0.05 В/м"
+  ],
+  "settings": {
+    "material": "al_6061_t6",
+    "materialDatabaseVersion": 3,
+    "coarseElementSizeM": 0.004,
+    "refinementFactor": 1.25,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "корпус авионики, RS103, отверстие 16 мм",
+      "supports": [],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    },
+    "emc": {
+      "incidence": "+x",
+      "polarization": "z",
+      "level": "mil461g-rs103-200",
+      "lowHz": 500000000,
+      "highHz": 2000000000,
+      "points": 8,
+      "surfaceElementSizeM": 0,
+      "pmlCells": 8,
+      "marginCells": 4,
+      "equipment": [
+        {
+          "name": "блок авионики",
+          "x": 0.048,
+          "y": 0.048,
+          "z": 0.048,
+          "immunityVm": 0.05
+        }
+      ]
+    }
+  },
+  "environment": {
+    "level": "mil461g-rs103-200",
+    "description": "MIL-STD-461G RS103, 200 В/м (внешние поверхности самолёта, палуба), 2 МГц – 18 ГГц",
+    "fieldVm": 200,
+    "lowHz": 500000000,
+    "highHz": 2000000000,
+    "frequenciesHz": [
+      500000000,
+      609506827.1022377,
+      742997144.5684742,
+      905723664.2639066,
+      1104089513.6738122,
+      1345900192.6323562,
+      1640670712.0152757,
+      2000000000
+    ],
+    "resonancesHz": [
+      742997144.5684742
+    ],
+    "stepS": 4.880831665999375e-12,
+    "steps": 2273,
+    "numericalFloorDb": -50,
+    "cellsPerWavelength": 58.553214453124994,
+    "voxelVolumeRatio": 1.1129805082872923
+  },
+  "equipment": [
+    {
+      "name": "блок авионики",
+      "shieldingDb": [
+        59.1480444044869,
+        59.5047226879974,
+        57.35223036183935,
+        61.628896552652876,
+        60.29432757634548,
+        54.39112283263647,
+        50.542765106001816,
+        48.66743411511676
+      ],
+      "worstShieldingDb": 48.66743411511676,
+      "worstFrequencyHz": 2000000000,
+      "uncertaintyDb": 6.606374424812685,
+      "fieldVm": 0.7373238632095528,
+      "immunityVm": 0.05,
+      "outcome": "fail"
+    }
+  ],
+  "meshStudy": [
+    {
+      "cellM": 0.004,
+      "metalCells": 5792,
+      "grid": "52 × 52 × 52",
+      "worstShieldingDb": 45.33461538831062,
+      "worstFrequencyHz": 2000000000
+    },
+    {
+      "cellM": 0.0032,
+      "metalCells": 11175,
+      "grid": "58 × 58 × 58",
+      "worstShieldingDb": 42.06105969030408,
+      "worstFrequencyHz": 2000000000
+    },
+    {
+      "cellM": 0.00256,
+      "metalCells": 24591,
+      "grid": "66 × 66 × 66",
+      "worstShieldingDb": 48.66743411511676,
+      "worstFrequencyHz": 2000000000
+    }
+  ],
+  "convergence": {
+    "shielding": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 48.66743411511676,
+      "gciFineRelative": 0.06787263952714384,
+      "asymptoticRatio": 0
+    }
+  },
+  "material": {
+    "id": "al_6061_t6",
+    "youngsModulusPa": 68900000000,
+    "poissonRatio": 0.33,
+    "densityKgPerM3": 2700,
+    "yieldStrengthPa": 276000000,
+    "ultimateStrengthPa": 310000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "box.field.json"
+}

@@ -22,7 +22,13 @@ AnalysisResultWindow* AnalysisResultWindow::forResultFile(const QString& resultP
         return nullptr;
     }
     const std::string schema = root.stringOr("schema", "");
-    if (schema == "cadnext-structural-result/1") return new StructuralResultWindow();
+    if (schema == "cadnext-structural-result/1" || schema == "cadnext-harmonic-result/1" || schema == "cadnext-random-result/1"
+        || schema == "cadnext-shock-result/1" || schema == "cadnext-climate-result/1"
+        || schema == "cadnext-fire-result/1" || schema == "cadnext-lightning-result/1"
+        || schema == "cadnext-emc-result/1"
+        || schema == "cadnext-icing-result/1"
+        || schema == "cadnext-flutter-result/1" || schema == "cadnext-bird-result/1")
+        return new StructuralResultWindow();
     if (schema == "cadnext-modal-result/1") return new ModalResultWindow();
     if (error) *error = QObject::tr("Неизвестный формат результата «%1»").arg(QString::fromStdString(schema));
     return nullptr;

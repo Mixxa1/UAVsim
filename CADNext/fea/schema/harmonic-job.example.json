@@ -1,0 +1,23 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "harmonic",
+  "geometry": {"format": "uavpart", "path": "motor_arm.uavpart"},
+  "material": "cfrp_quasi_isotropic",
+  "factorOfSafety": 1.5,
+  "mesh": {"coarseElementSizeM": 0.004, "refinementFactor": 1.6},
+  "loadCase": {
+    "name": "arm on the shaker, 2 g sine sweep",
+    "supports": [{"face": "face-0", "fix": ["x", "y", "z"]}],
+    "stressExclusions": [{"face": "face-0", "distanceM": 0.003}]
+  },
+  "harmonic": {
+    "modeCount": 12,
+    "dampingRatio": 0.02,
+    "excitation": {"kind": "base", "direction": [0, 0, 1], "amplitude": [[5, 19.6133], [500, 19.6133]]},
+    "frequencyRangeHz": [5, 500],
+    "sweepPoints": 200,
+    "attachedMasses": [{"face": "face-5", "massKg": 0.061}],
+    "probeFace": "face-5"
+  },
+  "output": {"result": "motor_arm.harmonic-result.json", "field": "motor_arm.harmonic-field.json"}
+}

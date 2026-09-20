@@ -8,11 +8,11 @@ enum PayloadMountState: Hashable {
     var title: String {
         switch self {
         case .unavailable:
-            return NSLocalizedString("payload.mount.unavailable", comment: "")
+            return L10n.s("payload.mount.unavailable")
         case .ready:
-            return NSLocalizedString("payload.mount.ready", comment: "")
+            return L10n.s("payload.mount.ready")
         case .occupied:
-            return NSLocalizedString("payload.mount.occupied", comment: "")
+            return L10n.s("payload.mount.occupied")
         }
     }
 }

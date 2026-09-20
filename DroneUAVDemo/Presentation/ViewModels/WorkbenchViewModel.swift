@@ -599,10 +599,15 @@ final class WorkbenchViewModel: ObservableObject {
             let run = await WorkbenchAeroRunner.run(build: preparedBuild, settings: settings, tool: tool, solver: solver, root: root) { text in
                 let parts = text.split(separator: " ")
                 let description: String
-                if parts.count == 4, let point = Int(parts[1]) {
+                if parts.count >= 4, let rawPoint = Int(parts[1]) {
                     let stage = String(parts[2])
                     let label = ["domain": "Воздушная область", "mesh": "Построение сетки", "solve": "Решение", "collected": "Точка готова"][stage] ?? stage
-                    description = "\(label) · точка \(point + 1)/\(settings.alphaDeg.count * settings.betaDeg.count) · итерация \(parts[3])"
+                    let point = parts.count >= 5 ? rawPoint : rawPoint + 1
+                    if stage == "solve", parts.count >= 5, let iteration = Int(parts[3]), let total = Int(parts[4]), total > 0 {
+                        description = "\(label) · точка \(point)/\(settings.alphaDeg.count * settings.betaDeg.count) · \(iteration)/\(total) · \(Int((100.0 * Double(iteration) / Double(total)).rounded()))%"
+                    } else {
+                        description = "\(label) · точка \(point)/\(settings.alphaDeg.count * settings.betaDeg.count)"
+                    }
                 } else { description = text }
                 Task { @MainActor in
                     guard let viewModel = relay.value, viewModel.aerodynamicRunToken == runToken else { return }
@@ -802,8 +807,8 @@ final class WorkbenchViewModel: ObservableObject {
         structuralRunTask?.cancel()
     }
 
-    func structuralReportURL(for run: WorkbenchStructuralRun) -> URL? {
-        structuralStore?.root.appendingPathComponent(run.directory).appendingPathComponent(WorkbenchStructuralJob.reportFileName)
+    func structuralResultURL(for run: WorkbenchStructuralRun) -> URL? {
+        structuralStore?.root.appendingPathComponent(run.directory).appendingPathComponent(WorkbenchStructuralJob.resultFileName)
     }
 
     /// Analyzer totals retain every propulsion unit for electrical sizing.

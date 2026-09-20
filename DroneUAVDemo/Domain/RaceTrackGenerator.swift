@@ -40,17 +40,17 @@ enum RaceTrackGenerator {
             case .easy:
                 return Parameters(
                     gateCount: 6, radiusMeters: 65.0, radiusVariation: 0.12,
-                    laps: 2, seed: seed, name: NSLocalizedString("race.track.generated.easy", comment: "")
+                    laps: 2, seed: seed, name: L10n.s("race.track.generated.easy")
                 )
             case .medium:
                 return Parameters(
                     gateCount: 9, radiusMeters: 95.0, radiusVariation: 0.22,
-                    laps: 3, seed: seed, name: NSLocalizedString("race.track.generated.medium", comment: "")
+                    laps: 3, seed: seed, name: L10n.s("race.track.generated.medium")
                 )
             case .hard:
                 return Parameters(
                     gateCount: 13, radiusMeters: 130.0, radiusVariation: 0.34,
-                    laps: 3, seed: seed, name: NSLocalizedString("race.track.generated.hard", comment: "")
+                    laps: 3, seed: seed, name: L10n.s("race.track.generated.hard")
                 )
             }
         }

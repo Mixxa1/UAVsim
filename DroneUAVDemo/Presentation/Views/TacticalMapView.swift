@@ -301,40 +301,40 @@ struct TacticalMapView: View {
 
     private var routeDistanceText: String {
         guard let previewRoute = state.previewRoute else {
-            return String(localized: "tactical.map.preview.none")
+            return L10n.s("tactical.map.preview.none")
         }
         return String(format: "%.0f m", previewRoute.totalLengthMeters)
     }
 
     private var dropZoneText: String {
         guard let dropZone = state.workingDraft.dropZone else {
-            return String(localized: "mission.status.value.none")
+            return L10n.s("mission.status.value.none")
         }
         return String(format: "%.0f m", dropZone.radius)
     }
 
     private var linkStatusText: String {
         if state.viewport.isLinkLost {
-            return String(localized: "tactical.map.link.lost")
+            return L10n.s("tactical.map.link.lost")
         }
         if state.viewport.isInCriticalLinkZone {
-            return String(localized: "tactical.map.link.critical")
+            return L10n.s("tactical.map.link.critical")
         }
         if state.viewport.isInWarningLinkZone {
-            return String(localized: "tactical.map.link.warning")
+            return L10n.s("tactical.map.link.warning")
         }
-        return String(localized: "tactical.map.link.nominal")
+        return L10n.s("tactical.map.link.nominal")
     }
 
     private var safeReturnText: String {
         let qualifier = state.viewport.canReachHomeSafely
-            ? String(localized: "tactical.map.safe_return.ok")
-            : String(localized: "tactical.map.safe_return.limit")
+            ? L10n.s("tactical.map.safe_return.ok")
+            : L10n.s("tactical.map.safe_return.limit")
         return "\(qualifier) \(Int(state.viewport.estimatedSafeReturnRangeM.rounded())) m"
     }
 
     private var edgeDistanceText: String {
-        let direction = NSLocalizedString("tactical.map.direction.\(state.viewport.nearestBoundaryDirection.rawValue)", comment: "")
+        let direction = L10n.s("tactical.map.direction.\(state.viewport.nearestBoundaryDirection.rawValue)")
         return "\(direction) \(Int(max(0.0, state.viewport.distanceToNearestMapEdge).rounded())) m"
     }
 
@@ -1202,7 +1202,7 @@ private struct TacticalMapCanvas: View {
 
         let edgePoint = projection.project(state.viewport.clampedToWorld(state.viewport.dronePosition))
         context.draw(
-            Text(String(localized: "tactical.map.overlay.boundary"))
+            Text(L10n.s("tactical.map.overlay.boundary"))
                 .font(.system(size: 8, weight: .bold, design: .monospaced))
                 .foregroundColor(GroundControlPalette.textPrimary),
             at: CGPoint(x: boundaryRect.minX + 44, y: boundaryRect.minY + 10),
@@ -1239,7 +1239,7 @@ private struct TacticalMapCanvas: View {
                 center: center,
                 projection: projection,
                 context: &context,
-                label: String(localized: "tactical.map.overlay.safe_return")
+                label: L10n.s("tactical.map.overlay.safe_return")
             )
         }
 
@@ -1251,7 +1251,7 @@ private struct TacticalMapCanvas: View {
                 center: center,
                 projection: projection,
                 context: &context,
-                label: String(localized: "tactical.map.overlay.link")
+                label: L10n.s("tactical.map.overlay.link")
             )
         }
     }
@@ -1390,7 +1390,7 @@ private struct TacticalMapCanvas: View {
             context.fill(Path(ellipseIn: rect), with: .color(GroundControlPalette.warning.opacity(0.14)))
             context.stroke(Path(ellipseIn: rect), with: .color(GroundControlPalette.warning.opacity(0.92)), lineWidth: 1.6)
             context.draw(
-                Text(String(format: NSLocalizedString("tactical.map.overlay.drop_zone_radius", comment: ""), zone.radius))
+                Text(String(format: L10n.s("tactical.map.overlay.drop_zone_radius"), zone.radius))
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundColor(GroundControlPalette.warning),
                 at: CGPoint(x: rect.midX, y: rect.maxY + 10),

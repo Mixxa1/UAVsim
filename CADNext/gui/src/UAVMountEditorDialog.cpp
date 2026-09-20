@@ -9,6 +9,7 @@
 #include <QFile>
 #include <QFormLayout>
 #include <QGroupBox>
+#include <QScrollArea>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -513,8 +514,9 @@ UAVMountEditorDialog::UAVMountEditorDialog(
     ghostRoot_   = new SoSeparator; ghostRoot_->ref();
     debugRoot_   = new SoSeparator; debugRoot_->ref();
 
+    std::string modelSource;
     SoSeparator* bodyRoot = UAVBodySceneBuilder::buildScene(
-        uav.id, uav.vehicleType, uav.massCategory);
+        uav.id, uav.vehicleType, uav.massCategory, &modelSource);
 
     sceneRoot_->addChild(bodyRoot);
     sceneRoot_->addChild(markersRoot_);
@@ -560,8 +562,7 @@ UAVMountEditorDialog::UAVMountEditorDialog(
         addRow(tr("Масса БЛА:"),  QString("%1 кг").arg(uav.emptyMassKg,      0,'f',2));
         addRow(tr("Макс. нагр.:"),QString("%1 кг").arg(uav.maxPayloadMassKg, 0,'f',2));
         addRow(tr("MTOW:"),       QString("%1 кг").arg(uav.maxTakeoffMassKg, 0,'f',1));
-        // Model source: always procedural for now; updated when sim model is wired in.
-        addRow(tr("Источник модели:"), tr("Используется резервная модель БЛА"));
+        addRow(tr("Источник модели:"), QString::fromStdString(modelSource));
         rightLayout->addWidget(grp);
     }
 
@@ -665,7 +666,11 @@ UAVMountEditorDialog::UAVMountEditorDialog(
     auto* contentRow = new QHBoxLayout;
     contentRow->setSpacing(8);
     contentRow->addWidget(viewerContainer, 3);
-    contentRow->addWidget(rightWidget, 0);
+    auto* rightScroll = new QScrollArea;
+    rightScroll->setWidgetResizable(true);
+    rightScroll->setMinimumWidth(420);
+    rightScroll->setWidget(rightWidget);
+    contentRow->addWidget(rightScroll, 0);
 
     auto* btnRow   = new QHBoxLayout;
     auto* backBtn  = new QPushButton(tr("Назад к выбору БЛА"));

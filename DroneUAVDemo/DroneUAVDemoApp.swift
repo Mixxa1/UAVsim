@@ -12,7 +12,7 @@ private final class CreditsWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = NSLocalizedString("credits.title", comment: "")
+        window.title = L10n.s("credits.title")
         window.contentView = view
         window.center()
         super.init(window: window)
@@ -40,7 +40,7 @@ private final class WorldBuilderWindowController: NSWindowController {
             backing: .buffered,
             defer: false
         )
-        window.title = NSLocalizedString("world.preview.title", comment: "")
+        window.title = L10n.s("world.preview.title")
         window.contentView = view
         window.center()
         super.init(window: window)

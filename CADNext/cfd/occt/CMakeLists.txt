@@ -33,12 +33,7 @@ target_link_libraries(cadnext_cfd_occt
         TKBool
 )
 
-file(READ ${CMAKE_CURRENT_SOURCE_DIR}/../report/aerodynamics-report.html report_hex HEX)
-string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," report_bytes "${report_hex}")
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/../report/aerodynamics-report.html)
-file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/generated/AeroReportTemplate.inc
-    "static const unsigned char reportBytes[] = {${report_bytes}};\nstatic const std::string kAeroReportTemplate(reinterpret_cast<const char*>(reportBytes), sizeof(reportBytes));\n")
 add_executable(cadnext_cfd_cli cli/main.cpp)
 set_target_properties(cadnext_cfd_cli PROPERTIES OUTPUT_NAME cadnext_cfd)
-target_include_directories(cadnext_cfd_cli PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/generated ${OpenCASCADE_INCLUDE_DIR})
+target_include_directories(cadnext_cfd_cli PRIVATE ${OpenCASCADE_INCLUDE_DIR})
 target_link_libraries(cadnext_cfd_cli PRIVATE cadnext_cfd_occt cadnext_construction)

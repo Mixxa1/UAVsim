@@ -1,0 +1,39 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "icing",
+  "geometry": {
+    "format": "uavpart",
+    "path": "wing_panel.uavpart"
+  },
+  "material": "al_6061_t6",
+  "mesh": {
+    "coarseElementSizeM": 0.025,
+    "refinementFactor": 1.5
+  },
+  "loadCase": {
+    "name": "консоль крыла, взлётное обледенение по 14 CFR 25 Приложение C",
+    "supports": []
+  },
+  "icing": {
+    "flowAxis": "x",
+    "spanAxis": "y",
+    "angleOfAttackDeg": 2,
+    "stations": 3,
+    "panels": 240,
+    "trajectories": 201,
+    "refinementFactor": 1.3,
+    "surfaceElementSizeM": 0.025,
+    "condition": "takeoffMaximum",
+    "flight": {
+      "airspeedMps": 60,
+      "durationS": 600
+    },
+    "antiIceTargetC": 2,
+    "antiIceBudgetW": 400,
+    "maximumIceThicknessMm": 5
+  },
+  "output": {
+    "result": "wing_panel.icing-result.json",
+    "field": "wing_panel.icing-field.json"
+  }
+}

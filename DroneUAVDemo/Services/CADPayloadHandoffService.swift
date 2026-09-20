@@ -7,9 +7,9 @@ enum CADPayloadHandoffError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unreadable:
-            return NSLocalizedString("cad.mount_editor.launch_failed", comment: "")
+            return L10n.s("cad.mount_editor.launch_failed")
         case let .decodingFailed(error):
-            return "\(NSLocalizedString("cad.mount_editor.launch_failed", comment: "")): \(error.localizedDescription)"
+            return "\(L10n.s("cad.mount_editor.launch_failed")): \(error.localizedDescription)"
         }
     }
 }

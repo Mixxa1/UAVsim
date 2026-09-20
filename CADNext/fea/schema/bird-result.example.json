@@ -1,0 +1,253 @@
+{
+  "schema": "cadnext-bird-result/1",
+  "testType": "birdStrike",
+  "outcome": "fail",
+  "solverID": "cadnext.fea.bird-tet10",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 3",
+  "metrics": {
+    "peakStressPa": {
+      "value": 1735376667.3286393,
+      "unit": "Pa",
+      "numericalUncertainty": 4341670.654987795
+    },
+    "peakTimeS": {
+      "value": 9.71040678571025e-06,
+      "unit": "s"
+    },
+    "reserveFactor": {
+      "value": 0.2506660416666886,
+      "unit": "1",
+      "numericalUncertainty": 0.0006255664342582623
+    },
+    "ultimateMargin": {
+      "value": -0.7426111143039366,
+      "unit": "1"
+    },
+    "yieldMargin": {
+      "value": -0.7493339583333114,
+      "unit": "1"
+    },
+    "normalSpeedMps": {
+      "value": 90,
+      "unit": "m/s"
+    },
+    "impulseNs": {
+      "value": 4.5,
+      "unit": "N*s"
+    },
+    "energyJ": {
+      "value": 202.5,
+      "unit": "J"
+    },
+    "peakForceN": {
+      "value": 115855.08463512987,
+      "unit": "N"
+    },
+    "hugoniotPressurePa": {
+      "value": 141930000,
+      "unit": "Pa"
+    },
+    "steadyPressurePa": {
+      "value": 3847500,
+      "unit": "Pa"
+    },
+    "impactDurationS": {
+      "value": 0.0009100809026385102,
+      "unit": "s"
+    },
+    "shockDurationS": {
+      "value": 9.71040678571025e-06,
+      "unit": "s"
+    },
+    "shockImpulseFraction": {
+      "value": 0.2500000000000001,
+      "unit": "1"
+    },
+    "birdAreaM2": {
+      "value": 0.0008162832708738805,
+      "unit": "m2"
+    },
+    "impactFaceAreaM2": {
+      "value": 0.0005999999999999995,
+      "unit": "m2"
+    },
+    "patchRatio": {
+      "value": 0.7350389520511222,
+      "unit": "1"
+    },
+    "highestModeHz": {
+      "value": 926.1987236218696,
+      "unit": "Hz"
+    },
+    "firstFrequencyHz": {
+      "value": 16.530078639722305,
+      "unit": "Hz"
+    }
+  },
+  "warnings": [
+    "грань удара меньше миделя птицы (0.74 от него): часть тела проходит мимо грани, а остальное сосредоточено сильнее, чем в действительности — оценка с запасом",
+    "ударная фаза длится 9.7 мкс и несёт 25.0 % импульса, а самая быстрая удержанная мода — 0.9 кГц: неудержанные моды учтены статической поправкой, то есть в полную статическую величину, тогда как на столь коротком импульсе они отозвались бы слабее — оценка с запасом",
+    "расчётное напряжение выше предела текучести: линейно-упругая модель за ним не описывает деталь — результат означает необходимость испытания, а не величину напряжения",
+    "максимум напряжения взят вне заданных зон исключения",
+    "наблюдаемый порядок сходимости выше теоретического — погрешность оценена по теоретическому"
+  ],
+  "failureReasons": [
+    "текучесть при эксплуатационной нагрузке"
+  ],
+  "settings": {
+    "material": "steel_4130",
+    "materialDatabaseVersion": 3,
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.6,
+    "factorOfSafety": 1.5,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "strike",
+      "supports": [
+        {
+          "face": "face-4",
+          "fix": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      ],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": [
+        {
+          "face": "face-4",
+          "distanceM": 0.03
+        }
+      ]
+    },
+    "bird": {
+      "modeCount": 10,
+      "dampingRatio": 0.02,
+      "impactFace": "face-5",
+      "direction": [
+        0,
+        0,
+        -1
+      ],
+      "bird": {
+        "massKg": 0.05,
+        "speedMps": 90,
+        "obliquityDeg": 90,
+        "densityKgM3": 950,
+        "lengthToDiameter": 2,
+        "shockSpeedMps": 1480,
+        "shockSlope": 2
+      },
+      "attachedMasses": []
+    }
+  },
+  "criticalRegion": {
+    "point": [
+      0.9335988459752667,
+      0.0075003466260391465,
+      0
+    ],
+    "face": "face-0",
+    "timeS": 9.71040678571025e-06
+  },
+  "load": {
+    "diameterM": 0.03223855052855803,
+    "lengthM": 0.06447710105711606,
+    "areaM2": 0.0008162832708738805,
+    "normalSpeedMps": 90,
+    "hugoniotPressurePa": 141930000,
+    "steadyPressurePa": 3847500,
+    "shockDurationS": 9.71040678571025e-06,
+    "decayDurationS": 9.71040678571025e-06,
+    "steadyDurationS": 0.0008906600890670897,
+    "totalDurationS": 0.0009100809026385102,
+    "geometricDurationS": 0.0007164122339679562,
+    "normalMomentumNs": 4.5,
+    "deliveredImpulseNs": 4.498941076807198
+  },
+  "history": {
+    "timeS": [
+      9.71040678571025e-06,
+      6.190384325890284e-05,
+      9.346266531246115e-05,
+      0.00012502148736601946,
+      0.06097043040662644,
+      0.12187895696999398,
+      0.12190201918611004
+    ],
+    "forceN": [
+      115855.08463512987,
+      3140.649884687255,
+      3140.649884687255,
+      3140.649884687255,
+      0,
+      0,
+      0
+    ],
+    "maxVonMisesPa": [
+      1735376667.3286393,
+      67734057.14146847,
+      85629926.59134546,
+      106606448.56654476,
+      98841570.94227672,
+      32303632.30032259,
+      33458747.582733728
+    ]
+  },
+  "modeFrequenciesHz": [
+    16.530078639722305,
+    24.777211945031503,
+    103.40160999250557
+  ],
+  "dampingRatio": 0.02,
+  "totalMassKg": 4.710000000000158,
+  "attachedMassKg": 0,
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.02,
+      "elements": 568,
+      "peakStressPa": 1713347749.5019805,
+      "peakTimeS": 9.71040678571025e-06
+    },
+    {
+      "maximumElementSizeM": 0.012499999999999999,
+      "elements": 1896,
+      "peakStressPa": 1729827466.176794,
+      "peakTimeS": 9.71040678571025e-06
+    },
+    {
+      "maximumElementSizeM": 0.007812499999999998,
+      "elements": 7938,
+      "peakStressPa": 1735376667.3286393,
+      "peakTimeS": 9.71040678571025e-06
+    }
+  ],
+  "convergence": {
+    "stress": {
+      "behaviour": "monotonic",
+      "observedOrder": 2.9203920164888064,
+      "orderLimitedToFormal": true,
+      "extrapolated": 1738850003.8526297,
+      "gciFineRelative": 0.002501860683462552,
+      "asymptoticRatio": 1.485454982710402
+    }
+  },
+  "material": {
+    "id": "steel_4130",
+    "youngsModulusPa": 205000000000,
+    "poissonRatio": 0.29,
+    "densityKgPerM3": 7850,
+    "yieldStrengthPa": 435000000,
+    "ultimateStrengthPa": 670000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "strike.field.json"
+}

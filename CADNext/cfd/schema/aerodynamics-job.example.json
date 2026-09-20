@@ -39,7 +39,8 @@
       0.01,
       0.014,
       0.02
-    ]
+    ],
+    "wallTreatment": "resolved"
   },
   "cadAxes": {
     "forward": "+x",

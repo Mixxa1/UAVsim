@@ -27,9 +27,9 @@ class ModalSpectrum;
 // with its reasons, the spectrum of modes with their mesh bands against the excitation bands, the
 // mode table, and the selected mode animated on the part.
 //
-// What is drawn follows the same honesty rules as the HTML report (fea/report/modal-report.html):
-// a frequency always with its band or "не оценена"; an overlap on the spectrum is exactly an
-// overlap in the verdict; the shape amplitude is conventional and labelled so.
+// What is drawn follows the solver's result contract: a frequency always has its band or
+// "не оценена"; an overlap on the spectrum is exactly an overlap in the verdict; the shape
+// amplitude is conventional and labelled so.
 class ModalResultWindow : public AnalysisResultWindow {
     Q_OBJECT
 
@@ -51,7 +51,6 @@ public:
 private:
     void buildInterface();
     void advanceAnimation();
-    void saveReport();
 
     QString resultPath_;
     QByteArray resultJson_;

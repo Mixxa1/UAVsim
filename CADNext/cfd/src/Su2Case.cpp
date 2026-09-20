@@ -8,6 +8,10 @@
 #include <iterator>
 #include <limits>
 #include <sstream>
+#include <thread>
+#if defined(__APPLE__)
+#include <sys/sysctl.h>
+#endif
 #include <sys/wait.h>
 #include <spawn.h>
 #include <unistd.h>
@@ -22,6 +26,17 @@
 extern char** environ;
 
 namespace cadnext::cfd {
+
+int recommendedSolverThreads() {
+#if defined(__APPLE__)
+    int cores = 0;
+    std::size_t size = sizeof(cores);
+    if (sysctlbyname("hw.perflevel0.logicalcpu", &cores, &size, nullptr, 0) == 0 && cores > 0) return cores;
+#endif
+    const unsigned hardware = std::thread::hardware_concurrency();
+    return hardware > 0 ? static_cast<int>(hardware) : 1;
+}
+
 
 void Su2Config::set(const std::string& key, const std::string& value) {
     for (auto& [existing, current] : entries) {

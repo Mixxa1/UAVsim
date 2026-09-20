@@ -23,13 +23,28 @@ final class CADNextLauncherService {
     ]
 
     func openCADNext() {
+        launch(arguments: [])
+    }
+
+    /// Opens the solver result directly in CADNext's full native strength/modal window.
+    func openStructuralResult(at resultURL: URL) {
+        launch(arguments: ["--open-structural-result", resultURL.path])
+    }
+
+    private func launch(arguments: [String]) {
         guard let executable = locateExecutable() else {
             presentNotFoundAlert()
             return
         }
         let process = Process()
         process.executableURL = executable
+        process.arguments = arguments
         process.currentDirectoryURL = executable.deletingLastPathComponent()
+        var environment = ProcessInfo.processInfo.environment
+        if let models = Bundle.main.url(forResource: "UAVModels", withExtension: nil) {
+            environment["CADNEXT_UAV_MODEL_DIR"] = models.path
+        }
+        process.environment = environment
         do {
             try process.run()
         } catch {
@@ -82,12 +97,12 @@ final class CADNextLauncherService {
     private func presentNotFoundAlert() {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = NSLocalizedString("cadnext.alert.notFound.title", comment: "")
+        alert.messageText = L10n.s("cadnext.alert.notFound.title")
         let searchedPaths = candidateExecutables()
             .map { $0.path }
             .joined(separator: "\n")
         alert.informativeText = String(
-            format: NSLocalizedString("cadnext.alert.notFound.message", comment: ""),
+            format: L10n.s("cadnext.alert.notFound.message"),
             searchedPaths,
             Self.buildCommand
         )
@@ -97,7 +112,7 @@ final class CADNextLauncherService {
     private func presentLaunchFailedAlert(executable: URL, error: Error) {
         let alert = NSAlert()
         alert.alertStyle = .warning
-        alert.messageText = NSLocalizedString("cadnext.alert.launchFailed.title", comment: "")
+        alert.messageText = L10n.s("cadnext.alert.launchFailed.title")
         alert.informativeText = "\(executable.path)\n\n\(error.localizedDescription)"
         alert.runModal()
     }

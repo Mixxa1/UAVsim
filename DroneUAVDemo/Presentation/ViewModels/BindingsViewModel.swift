@@ -27,8 +27,8 @@ final class BindingsViewModel: ObservableObject {
     }
 
     func dismiss() {
-        captureCoordinator.endCapture(restoreTo: .flight)
         isPresented = false
+        captureCoordinator.endCapture(restoreTo: .flight)
     }
 
     func beginCapture(for command: KeyboardCommand) {
@@ -36,7 +36,7 @@ final class BindingsViewModel: ObservableObject {
     }
 
     func endCapture() {
-        captureCoordinator.endCapture(restoreTo: .flight)
+        captureCoordinator.endCapture(restoreTo: isPresented ? .editing : .flight)
     }
 
     func rebindCurrentCommand(keyCode: UInt16, keyLabel: String) {

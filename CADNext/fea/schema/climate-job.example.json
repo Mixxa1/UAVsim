@@ -1,0 +1,54 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "climate",
+  "geometry": {
+    "format": "uavpart",
+    "path": "avionics_tray.uavpart"
+  },
+  "material": "al_6061_t6",
+  "factorOfSafety": 1.5,
+  "mesh": {
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.5
+  },
+  "loadCase": {
+    "name": "avionics tray, MIL-STD-810H A1 with sun, parked",
+    "supports": []
+  },
+  "climate": {
+    "environment": "hot",
+    "category": "A1",
+    "exposure": "sun",
+    "airflow": "chamber",
+    "airSpeedMps": 1.5,
+    "upDirection": [
+      0,
+      0,
+      1
+    ],
+    "flowDirection": [
+      1,
+      0,
+      0
+    ],
+    "solarAbsorptance": 0.6,
+    "emissivity": 0.8,
+    "stressFreeK": 293.15,
+    "operating": true,
+    "components": [
+      {
+        "name": "flight controller",
+        "face": "face-4",
+        "powerW": 5,
+        "minimumK": 233.15,
+        "maximumK": 358.15
+      }
+    ],
+    "convectionBand": 0.25,
+    "stepS": 300
+  },
+  "output": {
+    "result": "avionics_tray.climate-result.json",
+    "field": "avionics_tray.climate-field.json"
+  }
+}

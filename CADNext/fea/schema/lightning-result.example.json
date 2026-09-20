@@ -1,0 +1,246 @@
+{
+  "schema": "cadnext-lightning-result/1",
+  "testType": "lightningDirect",
+  "outcome": "fail",
+  "solverID": "cadnext.fea.lightning-tet10",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 3",
+  "metrics": {
+    "peakTemperatureK": {
+      "value": 823.15,
+      "unit": "K",
+      "numericalUncertainty": 0.039132277874387
+    },
+    "burnThroughTimeS": {
+      "value": 6.711296413453669e-06,
+      "unit": "s",
+      "numericalUncertainty": 7.215447632413024e-08
+    },
+    "resistanceOhm": {
+      "value": 4.009534883766805e-07,
+      "unit": "Ohm"
+    },
+    "arcEnergyJ": {
+      "value": 2294.264262855471,
+      "unit": "J"
+    },
+    "jouleEnergyJ": {
+      "value": 0.8454314816048664,
+      "unit": "J"
+    },
+    "peakCurrentDensityAm2": {
+      "value": 1999998730.6284273,
+      "unit": "A/m2"
+    }
+  },
+  "warnings": [
+    "максимум 550.0 °C выше 500 °C — свойства EN 1999-1-2 там экстраполированы",
+    "SAE ARP5412 component A: 200 kA ± 10 %, ∫i² dt = 2·10⁶ A² s ± 20 %",
+    "SAE ARP5412 component B: 2 kA average over 5 ms, 10 C ± 10 %",
+    "SAE ARP5412 component C: 200 C ± 20 % at 200–800 A (here 400 A for 0.5 s)",
+    "тепло дуги 10 В·I на площади привязки (эквивалентный радиус 5.6 мм); плазма дуги не моделируется",
+    "энергия дуги 2294 Дж против джоулевой 0.8 Дж (сопротивление 0.40 мкОм)",
+    "сопротивление взято при 20 °C: с нагревом оно растёт, джоулев нагрев здесь занижен",
+    "расчёт остановлен в момент прожога: плавление и унос металла дугой не моделируются"
+  ],
+  "failureReasons": [
+    "прожог: через 0.01 ± 0.00 мс металл дошёл до 550.0 °C, где прочность по EN 1999-1-2 равна нулю",
+    "fuel probe: максимум 310.0 °C ± 78.13 K против предела 85.0 °C"
+  ],
+  "settings": {
+    "material": "al_6061_t6",
+    "materialDatabaseVersion": 3,
+    "coarseElementSizeM": 0.004,
+    "refinementFactor": 1.4,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "coupon 10 x 10 x 1 mm, arc on the top face (test_fea_lightning_study)",
+      "supports": [],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    },
+    "lightning": {
+      "components": [
+        "A",
+        "B",
+        "C"
+      ],
+      "attachmentFaces": [
+        "face-5"
+      ],
+      "groundFaces": [
+        "face-4"
+      ],
+      "polarity": "anode",
+      "continuingCurrentA": 400,
+      "surfaceEmissivity": 0.3,
+      "stepsPerComponent": 400,
+      "equipment": [
+        {
+          "name": "fuel probe",
+          "face": "face-4",
+          "powerW": 0,
+          "maximumK": 358.15
+        }
+      ]
+    }
+  },
+  "strike": {
+    "waveforms": [
+      {
+        "source": "SAE ARP5412 component A: 200 kA ± 10 %, ∫i² dt = 2·10⁶ A² s ± 20 %",
+        "peakA": 199999.8726450098,
+        "actionIntegralA2s": 2000008.0455815261,
+        "chargeC": 18.933569142689947,
+        "durationS": 0.0008807468733485996
+      },
+      {
+        "source": "SAE ARP5412 component B: 2 kA average over 5 ms, 10 C ± 10 %",
+        "peakA": 4173.399674642477,
+        "actionIntegralA2s": 28544.457671957676,
+        "chargeC": 10.492857142857142,
+        "durationS": 0.014285714285714285
+      },
+      {
+        "source": "SAE ARP5412 component C: 200 C ± 20 % at 200–800 A (here 400 A for 0.5 s)",
+        "peakA": 400,
+        "actionIntegralA2s": 80000,
+        "chargeC": 200,
+        "durationS": 0.5
+      }
+    ],
+    "peakCurrentA": 199999.8726450098,
+    "totalChargeC": 229.42642628554708,
+    "totalActionIntegralA2s": 2108552.503253484,
+    "arcVoltsPerAmp": 10,
+    "attachmentAreaM2": 9.999999999999994e-05,
+    "arcRootRadiusM": 0.005641895835477561
+  },
+  "integrity": {
+    "burnedThrough": true,
+    "timeS": 6.711296413453669e-06,
+    "uncertaintyS": 7.215447632413024e-08,
+    "noStrengthK": 823.15,
+    "peakK": 823.15,
+    "peakUncertaintyK": 0.039132277874387,
+    "hottestPoint": [
+      0.00930494601191844,
+      0.0006094711384034646,
+      0.001
+    ]
+  },
+  "equipment": [
+    {
+      "name": "fuel probe",
+      "face": "face-4",
+      "maximumK": 583.1202984874772,
+      "maximumTimeS": 6.711296413453669e-06,
+      "uncertaintyK": 78.13081288872957,
+      "outcome": "fail",
+      "checks": [
+        {
+          "limit": "maximum",
+          "valueK": 583.1202984874772,
+          "uncertaintyK": 78.13081288872957,
+          "limitK": 358.15,
+          "outcome": "fail"
+        }
+      ]
+    }
+  ],
+  "series": {
+    "timeS": [
+      0,
+      2.201867183371499e-06,
+      4.403734366742998e-06,
+      6.605601550114497e-06,
+      6.711296413453669e-06
+    ],
+    "currentA": [
+      0,
+      160791.98515027424,
+      195486.44277506758,
+      199957.20576383738,
+      199914.9152282493
+    ],
+    "partMaximumK": [
+      293.15,
+      424.59719883465067,
+      614.4433650381438,
+      814.0300593099735,
+      823.15
+    ],
+    "equipment": [
+      {
+        "name": "fuel probe",
+        "maximumK": [
+          293.15,
+          363.3741479467589,
+          466.7032382225584,
+          577.9309959252901,
+          583.1202984874772
+        ]
+      }
+    ]
+  },
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.004,
+      "elements": 148,
+      "peakK": 823.15,
+      "burnThroughTimeS": 6.652354225711302e-06,
+      "resistanceOhm": 4.0095348844680035e-07
+    },
+    {
+      "maximumElementSizeM": 0.0028571428571428576,
+      "elements": 150,
+      "peakK": 823.15,
+      "burnThroughTimeS": 6.639141937129539e-06,
+      "resistanceOhm": 4.0095348834507757e-07
+    },
+    {
+      "maximumElementSizeM": 0.0020408163265306124,
+      "elements": 190,
+      "peakK": 823.15,
+      "burnThroughTimeS": 6.711296413453669e-06,
+      "resistanceOhm": 4.009534883766805e-07
+    }
+  ],
+  "convergence": {
+    "peakTemperature": {
+      "behaviour": "converged",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 823.15,
+      "gciFineRelative": 0,
+      "asymptoticRatio": 0
+    },
+    "burnThroughTime": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 6.711296413453669e-06,
+      "gciFineRelative": 0.0053755989811064804,
+      "asymptoticRatio": 0
+    }
+  },
+  "material": {
+    "id": "al_6061_t6",
+    "youngsModulusPa": 68900000000,
+    "poissonRatio": 0.33,
+    "densityKgPerM3": 2700,
+    "yieldStrengthPa": 276000000,
+    "ultimateStrengthPa": 310000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables",
+    "hotSource": "EN 1999-1-2:2007 (Eurocode 9, part 1-2): §3.2.2 ρ, §3.3.1 λ(θ), c(θ), Δl/l(θ) (0–500 °C), Table 2 E(θ); Table 1a EN AW-6061 T6 k₀.₂(θ)",
+    "electricalResistivityOhmM": 4.00953488372093e-08,
+    "electricalSource": "Aluminum Association / ASM alloy data: 6061-T6 43 % IACS at 20 °C (ρ = 4.01e-8 Ω m); no temperature dependence"
+  },
+  "fieldRef": "example.field.json"
+}

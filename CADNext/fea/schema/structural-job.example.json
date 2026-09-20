@@ -12,5 +12,5 @@
     "bodyAccelerationMps2": [0.0, 0.0, -34.32],
     "stressExclusions": [{"face": "face-0", "distanceM": 0.006}]
   },
-  "output": {"result": "wing_spar.result.json", "field": "wing_spar.field.json", "report": "wing_spar.report.html"}
+  "output": {"result": "wing_spar.result.json", "field": "wing_spar.field.json"}
 }

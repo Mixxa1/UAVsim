@@ -70,9 +70,9 @@ enum WorkbenchValidationText {
         case .structuralStatic:
             return "Считается в Мастерской по точной геометрии рамы: варианты нагрузок задаются в панели «Прочность по точной геометрии»."
         case .modalVibration:
-            return "Решатель есть в CADNext («Анализ → Прочность и частоты детали»); запуск из Мастерской в разработке."
+            return "Считается в Мастерской по точной геометрии: откройте «Прочность», добавьте вариант и выберите «Частоты и резонанс». В CADNext тот же расчёт находится в «Испытания → Прочность и частоты детали»."
         case .aerodynamics:
-            return "Одиночная точка, серии α/β и импорт таблиц доступны в панели «Аэродинамика / CFD». Нужна точная рама .uavframe v2 или готовая аэротаблица."
+            return "Одиночная точка и серии α/β доступны в панели «CFD». После расчёта откройте запуск: отчёт появится в отдельном окне, поля и линии тока — в CADNext. Нужна точная рама .uavframe v2 или готовая аэротаблица."
         case .geometryAssembly, .massProperties, .propulsionBench:
             return "Нужны рама и детали силовой установки."
         case .mechanism, .thermalLimits, .controlAuthority, .systemEndurance:
@@ -344,5 +344,128 @@ struct WorkbenchValidationInspector: View {
         .padding(12)
         .background(GroundControlPalette.panelRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(GroundControlPalette.border, lineWidth: 1))
+    }
+}
+
+/// Compact entry point for the Tests inspector. The old layout rendered CFD, strength and the
+/// complete validation report one after another in a narrow sidebar, which made every control
+/// look like it belonged to the current test. Keep the verdict visible, then show exactly one
+/// editor at a time.
+struct WorkbenchValidationHub: View {
+    @ObservedObject var viewModel: WorkbenchViewModel
+    @State private var selectedPanel: Panel = .overview
+
+    private enum Panel: String, CaseIterable, Identifiable {
+        case overview
+        case cfd
+        case structural
+
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .overview: return L10n.s("workbench.validation.overview")
+            case .cfd: return L10n.s("workbench.validation.cfd")
+            case .structural: return L10n.s("workbench.validation.structural")
+            }
+        }
+
+        var icon: String {
+            switch self {
+            case .overview: return "checkmark.seal"
+            case .cfd: return "wind"
+            case .structural: return "cube.transparent"
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            compactSummary
+            Picker(L10n.s("workbench.validation.section"), selection: $selectedPanel) {
+                ForEach(Panel.allCases) { panel in
+                    Label(panel.title, systemImage: panel.icon).tag(panel)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+
+            switch selectedPanel {
+            case .overview:
+                overview
+            case .cfd:
+                WorkbenchAerodynamicsPanel(viewModel: viewModel)
+            case .structural:
+                WorkbenchStructuralPanel(viewModel: viewModel)
+            }
+        }
+    }
+
+    private var compactSummary: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(WorkbenchValidationText.color(viewModel.validation.readiness))
+                    .frame(width: 9, height: 9)
+                Text(viewModel.validation.readiness.displayName)
+                    .font(.system(size: 16, weight: .bold, design: .rounded))
+                Spacer(minLength: 4)
+                Text(statusCounts)
+                    .font(.system(size: 9, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            }
+            Text(WorkbenchValidationText.explanation(viewModel.validation.readiness))
+                .font(.system(size: 10))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(L10n.s("workbench.validation.instruction"))
+                .font(.system(size: 9))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+        }
+        .padding(12)
+        .background(GroundControlPalette.panelRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(GroundControlPalette.border))
+    }
+
+    private var statusCounts: String {
+        let pairs: [(String, Int)] = [
+            ("OK", viewModel.validation.count(.pass)),
+            ("!", viewModel.validation.count(.warning)),
+            ("×", viewModel.validation.count(.fail)),
+            ("—", viewModel.validation.count(.notRun)),
+        ]
+        return pairs.filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
+    }
+
+    private var overview: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.s("workbench.validation.state"))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 7) {
+                ForEach(viewModel.validation.evaluations, id: \.type) { evaluation in
+                    HStack(spacing: 7) {
+                        Circle()
+                            .fill(WorkbenchValidationText.color(evaluation.status))
+                            .frame(width: 7, height: 7)
+                        Text(evaluation.type.displayName)
+                            .font(.system(size: 9, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 2)
+                        Text(WorkbenchValidationText.status(evaluation.status))
+                            .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                            .foregroundStyle(WorkbenchValidationText.color(evaluation.status))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 7)
+                    .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 7))
+                }
+            }
+            Text(L10n.s("workbench.validation.report_hint"))
+                .font(.system(size: 9))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 3)
+        }
     }
 }

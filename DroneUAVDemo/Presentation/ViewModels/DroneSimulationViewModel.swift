@@ -1498,7 +1498,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         let countdownText: String?
         if signalState.isCountdownActive {
-            let format = NSLocalizedString("signal_loss.warning", comment: "")
+            let format = L10n.s("signal_loss.warning")
             countdownText = String.localizedStringWithFormat(format, signalCountdownSecondsRemaining)
         } else {
             countdownText = nil
@@ -1508,14 +1508,14 @@ final class DroneSimulationViewModel: ObservableObject {
         let warningDetail: String?
         switch signalState {
         case .outOfBoundsWarning:
-            warningTitle = String(localized: "signal_loss.warning_stage_title")
-            warningDetail = String(localized: "signal_loss.warning_stage_detail")
+            warningTitle = L10n.s("signal_loss.warning_stage_title")
+            warningDetail = L10n.s("signal_loss.warning_stage_detail")
         case .signalDegrading:
-            warningTitle = String(localized: "signal_loss.critical_stage_title")
-            warningDetail = String(localized: "signal_loss.critical_stage_detail")
+            warningTitle = L10n.s("signal_loss.critical_stage_title")
+            warningDetail = L10n.s("signal_loss.critical_stage_detail")
         case .boundaryCountdown:
-            warningTitle = String(localized: "signal_loss.boundary_stage_title")
-            warningDetail = String(localized: "signal_loss.boundary_stage_detail")
+            warningTitle = L10n.s("signal_loss.boundary_stage_title")
+            warningDetail = L10n.s("signal_loss.boundary_stage_detail")
         case .normal, .signalLost, .recoveryPending:
             warningTitle = nil
             warningDetail = nil
@@ -1526,18 +1526,18 @@ final class DroneSimulationViewModel: ObservableObject {
         if signalState.isInteractionBlocking {
             switch signalLossCause {
             case .impactDamage:
-                lostTitle = String(localized: "signal_loss.impact_title")
-                lostMessage = String(localized: "signal_loss.impact_message")
+                lostTitle = L10n.s("signal_loss.impact_title")
+                lostMessage = L10n.s("signal_loss.impact_message")
             case .linkRange, .none:
-                lostTitle = String(localized: "signal_loss.lost_title")
-                lostMessage = String(localized: "signal_loss.lost_message")
+                lostTitle = L10n.s("signal_loss.lost_title")
+                lostMessage = L10n.s("signal_loss.lost_message")
             }
         } else {
             lostTitle = nil
             lostMessage = nil
         }
         let recoveryButtonTitle = signalState == .signalLost
-            ? String(localized: "signal_loss.recover")
+            ? L10n.s("signal_loss.recover")
             : nil
 
         return SignalInterferencePresentation(
@@ -6928,8 +6928,8 @@ final class DroneSimulationViewModel: ObservableObject {
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
-        panel.message = String(localized: "telemetry.export.select_folder")
-        panel.prompt = String(localized: "common.export")
+        panel.message = L10n.s("telemetry.export.select_folder")
+        panel.prompt = L10n.s("common.export")
 
         guard panel.runModal() == .OK else {
             return
@@ -7352,7 +7352,7 @@ final class DroneSimulationViewModel: ObservableObject {
             // choice, not a missing one: the pilot asked for an empty world and will build the
             // course in it, so nothing is generated behind their back.
             let track = config.raceTrack ?? RaceTrack(
-                name: NSLocalizedString("race.builder.new_track", comment: ""),
+                name: L10n.s("race.builder.new_track"),
                 laps: 3
             )
             installRaceTrack(track, mode: config.raceMode)
@@ -7541,7 +7541,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
         missionTimeline = missionEventRecorder.beginSession(
             projectID: settings.missionID,
-            projectName: NSLocalizedString("intercept.title", comment: ""),
+            projectName: L10n.s("intercept.title"),
             missionPlanID: session.director.runID
         )
         setCameraMode(.fpv)
@@ -8109,7 +8109,7 @@ final class DroneSimulationViewModel: ObservableObject {
     /// Commits the ghost where it stands.
     func placeRaceBuilderElement() {
         guard isRaceBuilderActive, let descriptor = raceBuilderSelectedDescriptor else { return }
-        var track = raceTrack ?? RaceTrack(name: NSLocalizedString("race.builder.new_track", comment: ""))
+        var track = raceTrack ?? RaceTrack(name: L10n.s("race.builder.new_track"))
         let nextOrder = descriptor.role.isScorable
             ? (track.elements.compactMap(\.gateOrder).max().map { $0 + 1 } ?? 0)
             : nil
@@ -8143,7 +8143,7 @@ final class DroneSimulationViewModel: ObservableObject {
 
     func clearRaceBuilderTrack() {
         guard isRaceBuilderActive else { return }
-        var track = raceTrack ?? RaceTrack(name: NSLocalizedString("race.builder.new_track", comment: ""))
+        var track = raceTrack ?? RaceTrack(name: L10n.s("race.builder.new_track"))
         track.elements.removeAll()
         applyEditedRaceTrack(track)
         raceBuilderStatusKey = "race.builder.status.cleared"
@@ -10447,7 +10447,7 @@ final class DroneSimulationViewModel: ObservableObject {
             recordMissionReplayEvent(
                 .warning,
                 message: String(
-                    format: NSLocalizedString("event.carrier_release", comment: ""),
+                    format: L10n.s("event.carrier_release"),
                     carrier.attachedUAVPosition().y,
                     simd_length(carrier.velocity)
                 )
@@ -11382,7 +11382,7 @@ final class DroneSimulationViewModel: ObservableObject {
         recordMissionReplayEvent(
             .warning,
             message: String(
-                format: NSLocalizedString("event.sonic_boom", comment: ""),
+                format: L10n.s("event.sonic_boom"),
                 boom.mach,
                 boom.overpressurePa,
                 boom.arrivalDelaySeconds

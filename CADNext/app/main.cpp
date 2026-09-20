@@ -9,6 +9,8 @@
 
 #include "cadnext/gui/MainWindow.hpp"
 #include "cadnext/gui/AnalysisResultWindow.hpp"
+#include "cadnext/gui/AerodynamicsStudyDialog.hpp"
+#include "cadnext/bridge/ConstructionExport.hpp"
 
 int main(int argc, char** argv) {
     QApplication app(argc, argv);
@@ -39,11 +41,28 @@ int main(int argc, char** argv) {
                                         QStringLiteral("Open a cadnext_structural result file (strength or modal)."), QStringLiteral("path"));
     const QCommandLineOption screenshot(QStringLiteral("screenshot"),
                                         QStringLiteral("Save the opened result window to a PNG and quit."), QStringLiteral("png"));
-    options.addOptions({openResult, screenshot});
+    const QCommandLineOption openFlow(QStringLiteral("open-aerodynamics-result"),QStringLiteral("Open a native CFD result."),QStringLiteral("path"));
+    const QCommandLineOption flowFrames(QStringLiteral("flow-frames"),QStringLiteral("Save two CFD animation frames and quit."),QStringLiteral("prefix"));
+    const QCommandLineOption openStudy(QStringLiteral("open-aerodynamics-study"),QStringLiteral("Open the CFD study for a .uavframe (with --screenshot: save the dialog and quit)."),QStringLiteral("uavframe"));
+    options.addOptions({openResult, screenshot,openFlow,flowFrames,openStudy});
     options.process(app);
 
     window.resize(1440, 900);
-    if (options.isSet(openResult)) {
+    if(options.isSet(openStudy)){
+        const auto construction=cadnext::bridge::ConstructionExport::loadFromFile(options.value(openStudy).toStdString());
+        if(!construction.isOk())return 2;
+        cadnext::gui::showAerodynamicsStudy(construction.value(),nullptr);
+        if(options.isSet(screenshot)){
+            const QString target=options.value(screenshot);
+            QTimer::singleShot(1500,[target]{
+                for(auto* widget:QApplication::topLevelWidgets())
+                    if(widget->isVisible()&&widget->inherits("QDialog")){QApplication::exit(widget->grab().save(target)?0:3);return;}
+                QApplication::exit(3);
+            });
+        }
+    } else if(options.isSet(openFlow)){
+        cadnext::gui::showAerodynamicsResult(options.value(openFlow),options.value(flowFrames));
+    } else if (options.isSet(openResult)) {
         auto* result = cadnext::gui::AnalysisResultWindow::showResult(options.value(openResult), nullptr);
         if (result == nullptr) {
             return 2;

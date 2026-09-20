@@ -7,7 +7,7 @@
 #include <vector>
 
 // How a structural result is shown — one definition for every surface that shows it (CADNext,
-// the Workbench, the vehicle passport, the HTML report, replay). The field file carries these
+// the Workbench, the vehicle passport and replay). The field file carries these
 // values, so a viewer draws what the solver side decided instead of re-deciding it.
 //
 // Two decisions live here, both about honesty rather than looks:

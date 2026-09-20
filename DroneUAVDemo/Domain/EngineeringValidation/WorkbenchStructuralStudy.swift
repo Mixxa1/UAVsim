@@ -209,7 +209,6 @@ struct WorkbenchStructuralJob {
     static let partFileName = "part.brep"
     static let resultFileName = "result.json"
     static let fieldFileName = "field.json"
-    static let reportFileName = "report.html"
 
     static func prepare(
         _ loadCase: WorkbenchStructuralCase,
@@ -302,7 +301,7 @@ struct WorkbenchStructuralJob {
                 "bodyAccelerationMps2": vector(acceleration),
                 "stressExclusions": exclusions,
             ],
-            "output": ["result": resultFileName, "field": fieldFileName, "report": reportFileName],
+            "output": ["result": resultFileName, "field": fieldFileName],
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: job, options: [.prettyPrinted, .sortedKeys]) else {
             return .failure(.encodingFailed)
@@ -390,7 +389,7 @@ struct WorkbenchStructuralJob {
                 "separationMargin": modal.separationMargin,
                 "attachedMasses": masses,
             ],
-            "output": ["result": resultFileName, "field": fieldFileName, "report": reportFileName],
+            "output": ["result": resultFileName, "field": fieldFileName],
         ]
         guard let data = try? JSONSerialization.data(withJSONObject: job, options: [.prettyPrinted, .sortedKeys]) else {
             return .failure(.encodingFailed)

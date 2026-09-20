@@ -82,3 +82,20 @@ target_link_libraries(cadnext_gui
         Qt6::Gui
         Qt6::Widgets
 )
+
+if(APPLE)
+    enable_language(OBJCXX)
+    target_sources(cadnext_gui PRIVATE src/UAVUSDZScene.mm)
+    set_source_files_properties(src/UAVUSDZScene.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+    target_link_libraries(cadnext_gui PRIVATE "-framework SceneKit" "-framework AppKit")
+    target_compile_definitions(cadnext_gui PRIVATE CADNEXT_UAV_MODEL_DIR="${CMAKE_SOURCE_DIR}/../DroneUAVDemo/Resources/Models/UAVModels")
+endif()
+
+target_sources(cadnext_gui PRIVATE src/AerodynamicsStudyDialog.cpp src/FlowAnimation.cpp src/FlowAnimation.hpp src/FlowScene3D.cpp src/FlowScene3D.hpp src/FlowResultView.cpp src/FlowResultView.hpp)
+target_link_libraries(cadnext_gui PUBLIC cadnext_cfd)
+target_compile_definitions(cadnext_gui PRIVATE CADNEXT_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+if(APPLE AND CADNEXT_BUILD_TESTS)
+    add_executable(cadnext_test_usdz_preview ../tests/test_usdz_preview.cpp)
+    target_link_libraries(cadnext_test_usdz_preview PRIVATE cadnext_gui)
+    add_test(NAME cadnext_test_usdz_preview COMMAND cadnext_test_usdz_preview "${CMAKE_SOURCE_DIR}/../DroneUAVDemo/Resources/Models/UAVModels")
+endif()

@@ -1,0 +1,46 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "lightning",
+  "geometry": {
+    "format": "uavpart",
+    "path": "wing_skin_panel.uavpart"
+  },
+  "material": "al_6061_t6",
+  "mesh": {
+    "coarseElementSizeM": 0.004,
+    "refinementFactor": 1.4
+  },
+  "loadCase": {
+    "name": "wing skin panel, zone 1A attachment, ARP5412 A + B + C",
+    "supports": []
+  },
+  "lightning": {
+    "components": [
+      "A",
+      "B",
+      "C"
+    ],
+    "attachmentFaces": [
+      "face-5"
+    ],
+    "groundFaces": [
+      "face-0"
+    ],
+    "polarity": "anode",
+    "continuingCurrentA": 400,
+    "surfaceEmissivity": 0.3,
+    "stepsPerComponent": 400,
+    "equipment": [
+      {
+        "name": "fuel probe",
+        "face": "face-2",
+        "powerW": 0,
+        "maximumK": 358.15
+      }
+    ]
+  },
+  "output": {
+    "result": "wing_skin_panel.lightning-result.json",
+    "field": "wing_skin_panel.lightning-field.json"
+  }
+}

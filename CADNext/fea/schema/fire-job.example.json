@@ -1,0 +1,40 @@
+{
+  "schema": "cadnext-structural-job/1",
+  "analysis": "fire",
+  "geometry": {
+    "format": "uavpart",
+    "path": "battery_bay_wall.uavpart"
+  },
+  "material": "al_6061_t6",
+  "mesh": {
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.5
+  },
+  "loadCase": {
+    "name": "battery bay wall, battery fire, ISO 2685 fireproof",
+    "supports": []
+  },
+  "fire": {
+    "standard": "iso2685",
+    "durationS": 900,
+    "flameFaces": [
+      "face-5"
+    ],
+    "surfaceEmissivity": 0.7,
+    "stepS": 1,
+    "operating": true,
+    "components": [
+      {
+        "name": "flight controller",
+        "face": "face-4",
+        "powerW": 5,
+        "minimumK": 233.15,
+        "maximumK": 358.15
+      }
+    ]
+  },
+  "output": {
+    "result": "battery_bay_wall.fire-result.json",
+    "field": "battery_bay_wall.fire-field.json"
+  }
+}

@@ -270,7 +270,7 @@ struct DamageState {
     var summary: String {
         let damaged = DamageComponent.allCases.filter { health(for: $0) < 0.95 }
         guard !damaged.isEmpty else {
-            return NSLocalizedString("summary.damage.none", comment: "")
+            return L10n.s("summary.damage.none")
         }
 
         let top = damaged

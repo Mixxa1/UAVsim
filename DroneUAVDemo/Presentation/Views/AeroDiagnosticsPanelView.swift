@@ -124,7 +124,7 @@ struct AeroDiagnosticsPanelView: View {
                 ModuleMetricCell(
                     labelKey: "diagnostics.aero.source",
                     value: profile.engineeringAerodynamics?.solverVersion ?? aerodynamics.coefficientTable?.provenance
-                        ?? NSLocalizedString("diagnostics.aero.source.closed_form", comment: "")
+                        ?? L10n.s("diagnostics.aero.source.closed_form")
                 )
             }
         }

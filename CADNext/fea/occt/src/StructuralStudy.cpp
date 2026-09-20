@@ -16,6 +16,8 @@ Result<StructuralStudyResult> failure(ErrorCode code, const std::string& message
     return Result<StructuralStudyResult>::fail({code, message});
 }
 
+} // namespace
+
 // Nodes within `distance` of any node of `faceNodes`, via a uniform grid of that cell size.
 std::vector<bool> nodesNear(const TetMesh& mesh, const std::vector<int>& faceNodes, double distance) {
     std::vector<bool> near(mesh.nodes.size(), false);
@@ -45,8 +47,6 @@ std::vector<bool> nodesNear(const TetMesh& mesh, const std::vector<int>& faceNod
     }
     return near;
 }
-
-} // namespace
 
 Result<StructuralStudyResult> runStructuralStudy(const kernel::OcctKernel& kernel, const kernel::ShapeHandle& shape,
                                                  const IsotropicMaterial& material, const StructuralLoadCase& loadCase,

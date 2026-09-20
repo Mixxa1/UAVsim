@@ -333,9 +333,9 @@ struct WorkbenchStructuralPanel: View {
                     Label("Рассчитать", systemImage: "play.fill")
                 }
                 .disabled(problem != nil || viewModel.runningStructuralCaseID != nil || viewModel.structuralTool == nil)
-                if let run = status.run, let url = viewModel.structuralReportURL(for: run),
+                if let run = status.run, let url = viewModel.structuralResultURL(for: run),
                    FileManager.default.fileExists(atPath: url.path) {
-                    Button("Отчёт") { NSWorkspace.shared.open(url) }
+                    Button(L10n.s("structural.open_result")) { CADNextLauncherService.shared.openStructuralResult(at: url) }
                 }
                 Spacer()
                 Button(role: .destructive) {

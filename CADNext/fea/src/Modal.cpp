@@ -150,23 +150,8 @@ Result<ModalSolution> solveModal(const ModalProblem& problem, const ModalSetting
     const auto D = isotropicElasticity(problem.material.youngsModulusPa, problem.material.poissonRatio);
     assembleStiffness(mesh, D, map, K, nullptr);
     assembleMass(mesh, problem.material.densityKgPerM3, map, M);
-    for (const auto& attached : problem.attachedMasses) {
-        if (!(attached.massKg > 0.0)) return failure(ErrorCode::InvalidArgument, "присоединённая масса должна быть положительной");
-        std::vector<double> weights(mesh.nodes.size(), 0.0);
-        if (!addFaceNodeWeights(mesh, attached.faceGroup, weights)) {
-            return failure(ErrorCode::NotFound, "нет группы граней для присоединённой массы: " + attached.faceGroup);
-        }
-        const double area = std::accumulate(weights.begin(), weights.end(), 0.0);
-        if (!(area > 0.0)) return failure(ErrorCode::InvalidArgument, "грань присоединённой массы нулевой площади: " + attached.faceGroup);
-        for (std::size_t node = 0; node < weights.size(); ++node) {
-            if (weights[node] == 0.0) continue;
-            const double nodal = attached.massKg * weights[node] / area;
-            for (int c = 0; c < 3; ++c) {
-                const int free = map.reduced[3 * node + c];
-                if (free >= 0) M.at(free, free) += nodal;
-            }
-        }
-        solution.attachedMassKg += attached.massKg;
+    if (const auto message = addAttachedMasses(mesh, problem.attachedMasses, map, M, solution.attachedMassKg)) {
+        return failure(message->find("нет группы") == 0 ? ErrorCode::NotFound : ErrorCode::InvalidArgument, *message);
     }
 
     // Total mass from the full (unreduced) mass: Σ over DOFs of (M r_x)_x.

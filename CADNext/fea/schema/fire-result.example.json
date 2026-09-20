@@ -1,0 +1,252 @@
+{
+  "schema": "cadnext-fire-result/1",
+  "testType": "fireResistance",
+  "outcome": "fail",
+  "solverID": "cadnext.fea.fire-tet10",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 2",
+  "metrics": {
+    "peakTemperatureK": {
+      "value": 823.15,
+      "unit": "K",
+      "numericalUncertainty": 2.4042480314771333e-06
+    },
+    "integrityLossTimeS": {
+      "value": 66.19245559634369,
+      "unit": "s",
+      "numericalUncertainty": 0.0021875360341567784
+    },
+    "hotUtilization": {
+      "value": 0.03566731860450531,
+      "unit": "1",
+      "numericalUncertainty": 0.000558810245100222
+    },
+    "requiredDurationS": {
+      "value": 900,
+      "unit": "s"
+    }
+  },
+  "warnings": [
+    "максимум 550.0 °C выше 500 °C — свойства EN 1999-1-2 там экстраполированы",
+    "пламя ISO 2685:1998: 1100 ± 80 °C, 116 ± 10 kW/m²; расчёт по худшему из двух пределов (конвекция / излучение): излучение",
+    "f₀.₂ при 20 °C — типичное значение базы материалов, не расчётное по EN 1999-1-1",
+    "наблюдаемый порядок сходимости выше теоретического — погрешность оценена по теоретическому"
+  ],
+  "failureReasons": [
+    "целостность: через 66.2 ± 0.0 с деталь нагрелась до 550.0 °C, где прочность по EN 1999-1-2 равна нулю (требуется 900 с)",
+    "avionics: максимум 549.4 °C ± 0.01 K против предела 85.0 °C"
+  ],
+  "settings": {
+    "material": "al_6061_t6",
+    "materialDatabaseVersion": 2,
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.5,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "plate 100 × 100 × 5 mm, ISO 2685 on the top face (test_fea_fire_study)",
+      "supports": [],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    },
+    "fire": {
+      "standard": "iso2685",
+      "durationS": 900,
+      "flameFaces": [
+        "face-5"
+      ],
+      "surfaceEmissivity": 0.7,
+      "stepS": 1,
+      "operating": true,
+      "components": [
+        {
+          "name": "avionics",
+          "face": "face-4",
+          "powerW": 0,
+          "maximumK": 358.15
+        }
+      ]
+    }
+  },
+  "flame": {
+    "source": "ISO 2685:1998: 1100 ± 80 °C, 116 ± 10 kW/m²",
+    "temperatureK": 1373.15,
+    "calibrationFluxWm2": 116000,
+    "convectionWm2K": 107.4074074074074,
+    "emissivity": 0.5766036694358733,
+    "governingModel": "radiative",
+    "models": [
+      {
+        "model": "radiative",
+        "peakK": 823.15,
+        "integrityLossTimeS": 66.19245559634369,
+        "hotUtilization": 0.03566731860450531
+      },
+      {
+        "model": "convective",
+        "peakK": 823.15,
+        "integrityLossTimeS": 89.15281176675184,
+        "hotUtilization": 0.024045322728216523
+      }
+    ]
+  },
+  "integrity": {
+    "lost": true,
+    "timeS": 66.19245559634369,
+    "uncertaintyS": 0.0021875360341567784,
+    "noStrengthK": 823.15,
+    "requiredDurationS": 900
+  },
+  "temperature": {
+    "peakK": 823.15,
+    "uncertaintyK": 2.4042480314771333e-06,
+    "hottestPoint": [
+      0.050750423773505644,
+      0.051683497897492416,
+      0.005
+    ],
+    "dataValidUpToK": 773.15
+  },
+  "strength": {
+    "assessed": true,
+    "utilization": 0.03566731860450531,
+    "uncertainty": 0.000558810245100222,
+    "timeS": 45
+  },
+  "components": [
+    {
+      "name": "avionics",
+      "face": "face-4",
+      "powerW": 0,
+      "maximumK": 822.5033739772267,
+      "maximumTimeS": 89.15281176675184,
+      "minimumK": 293.15,
+      "uncertaintyK": 0.006255725052748555,
+      "outcome": "fail",
+      "checks": [
+        {
+          "limit": "maximum",
+          "valueK": 822.5033739772267,
+          "uncertaintyK": 0.006255725052748555,
+          "limitK": 358.15,
+          "outcome": "fail"
+        }
+      ]
+    }
+  ],
+  "criticalRegion": {
+    "point": [
+      0.05006046593756943,
+      0.1,
+      0.0025
+    ],
+    "face": "face-2",
+    "timeS": 45
+  },
+  "series": {
+    "timeS": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "partMaximumK": [
+      293.15,
+      303.55924204087177,
+      312.9218748377986,
+      322.2420071960169,
+      331.52047276107305
+    ],
+    "partMinimumK": [
+      293.15,
+      302.04429134628197,
+      311.402495847486,
+      320.71567557411794,
+      329.98398773505363
+    ],
+    "components": [
+      {
+        "name": "avionics",
+        "maximumK": [
+          293.15,
+          302.05004102793396,
+          311.4179800316808,
+          320.74396318217043,
+          330.027759303294
+        ]
+      }
+    ],
+    "sampleTimeS": [
+      45
+    ],
+    "utilization": [
+      0.03566731860450531
+    ]
+  },
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.02,
+      "elements": 316,
+      "peakK": 823.15,
+      "integrityLossTimeS": 66.19419408018695,
+      "hotUtilization": 0.03460249513348071
+    },
+    {
+      "maximumElementSizeM": 0.013333333333333334,
+      "elements": 493,
+      "peakK": 823.15,
+      "integrityLossTimeS": 66.19238542794695,
+      "hotUtilization": 0.03545707247965226
+    },
+    {
+      "maximumElementSizeM": 0.008888888888888889,
+      "elements": 879,
+      "peakK": 823.15,
+      "integrityLossTimeS": 66.19245559634369,
+      "hotUtilization": 0.03566731860450531
+    }
+  ],
+  "convergence": {
+    "peakTemperature": {
+      "behaviour": "converged",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 823.15,
+      "gciFineRelative": 0,
+      "asymptoticRatio": 0
+    },
+    "integrityLossTime": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 66.19245559634369,
+      "gciFineRelative": 1.3662072389568951e-05,
+      "asymptoticRatio": 0
+    },
+    "hotUtilization": {
+      "behaviour": "monotonic",
+      "observedOrder": 10.126369254103572,
+      "orderLimitedToFormal": true,
+      "extrapolated": 0.03611429460440988,
+      "gciFineRelative": 0.015664760395252813,
+      "asymptoticRatio": 3.789563014176213
+    }
+  },
+  "material": {
+    "id": "al_6061_t6",
+    "youngsModulusPa": 68900000000,
+    "poissonRatio": 0.33,
+    "densityKgPerM3": 2700,
+    "yieldStrengthPa": 276000000,
+    "ultimateStrengthPa": 310000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables",
+    "hotSource": "EN 1999-1-2:2007 (Eurocode 9, part 1-2): §3.2.2 ρ, §3.3.1 λ(θ), c(θ), Δl/l(θ) (0–500 °C), Table 2 E(θ); Table 1a EN AW-6061 T6 k₀.₂(θ)"
+  },
+  "fieldRef": "plate.fire-field.json"
+}

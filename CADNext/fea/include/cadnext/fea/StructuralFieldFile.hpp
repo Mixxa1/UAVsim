@@ -18,6 +18,17 @@ struct StructuralFieldFile {
     std::vector<Vec3> displacement;
     std::vector<double> vonMisesPa;
     std::vector<std::array<int, 3>> triangles;
+    // Climatic and fire results only: the temperature of every node (the hottest instant; the end of the
+    // exposure or the loss of integrity in a fire); empty otherwise.
+    std::vector<double> temperatureK;
+    // Icing results only: the thickness of the ice at every node, in metres; empty otherwise.
+    std::vector<double> iceThicknessM;
+    // Radiated-susceptibility results only: |E| at every node, in volts per metre, at the frequency
+    // where the enclosure shields least; empty otherwise.
+    std::vector<double> electricFieldVm;
+    // Fire results only: the utilisation σ/(k₀.₂(θ) f₀.₂) against the strength at each node's own
+    // temperature; when present it is what the utilisation colours show, not σ/σ_allowable at 20 °C.
+    std::vector<double> utilization;
 
     double allowableStressPa = 0.0;
     std::string allowableBasis; // "yield" | "ultimateOverFactorOfSafety"

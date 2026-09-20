@@ -89,7 +89,7 @@ std::array<float, 3> StructuralFieldFile::rampColor(double t) const {
 }
 
 std::array<float, 3> StructuralFieldFile::utilizationColor(int node) const {
-    const double u = vonMisesPa[node] / allowableStressPa;
+    const double u = utilization.empty() ? vonMisesPa[node] / allowableStressPa : utilization[node];
     return u > 1.0 ? overflowColor.rgb : rampColor(u);
 }
 
@@ -128,6 +128,27 @@ Result<StructuralFieldFile> parseStructuralField(const std::string& text) {
     std::vector<double> critical;
     if (readNumbers(root.member("criticalPoint"), critical) && critical.size() == 3) {
         field.criticalPoint = {critical[0], critical[1], critical[2]};
+    }
+
+    if (const JsonValue* emc = root.member("emc"); emc != nullptr && emc->isObject()) {
+        if (!readNumbers(emc->member("fieldVm"), field.electricFieldVm) || field.electricFieldVm.size() != count) {
+            return invalid("напряжённость поля не задана для каждого узла");
+        }
+    }
+    if (const JsonValue* icing = root.member("icing"); icing != nullptr && icing->isObject()) {
+        if (!readNumbers(icing->member("iceThicknessM"), field.iceThicknessM) || field.iceThicknessM.size() != count) {
+            return invalid("толщина льда не задана для каждого узла");
+        }
+    }
+    for (const char* block : {"climate", "fire", "lightning"}) {
+        const JsonValue* thermal = root.member(block);
+        if (thermal == nullptr || !thermal->isObject()) continue;
+        if (!readNumbers(thermal->member("temperatureK"), field.temperatureK) || field.temperatureK.size() != count) {
+            return invalid("температура не задана для каждого узла");
+        }
+        if (thermal->member("utilization") && (!readNumbers(thermal->member("utilization"), field.utilization) || field.utilization.size() != count)) {
+            return invalid("использование прочности не задано для каждого узла");
+        }
     }
 
     const JsonValue* presentation = root.member("presentation");

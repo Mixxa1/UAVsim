@@ -92,13 +92,13 @@ struct AbstractModelEditorView: View {
 
     private var validationError: String? {
         if maxAscent < 0.8 || maxDescent < 0.8 {
-            return String(localized: "abstract.validation.vertical")
+            return L10n.s("abstract.validation.vertical")
         }
         if maxSpeed < max(maxAscent, maxDescent) {
-            return String(localized: "abstract.validation.speed")
+            return L10n.s("abstract.validation.speed")
         }
         if collisionRadius > (max(dimX, dimY) / 1000.0) {
-            return String(localized: "abstract.validation.radius")
+            return L10n.s("abstract.validation.radius")
         }
         return nil
     }

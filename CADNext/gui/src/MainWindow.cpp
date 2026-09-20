@@ -1,3 +1,4 @@
+#include "cadnext/gui/AerodynamicsStudyDialog.hpp"
 #include "cadnext/gui/MainWindow.hpp"
 
 #include <algorithm>
@@ -4484,6 +4485,34 @@ void MainWindow::openDocument() {
     updateUndoRedoActions();
 }
 
+void MainWindow::showAerodynamics() {
+    std::vector<WorkbenchExportBody> bodies;
+    for (const auto& object : document_.objects()) {
+        const auto shape = bodyShapes_.find(object.id);
+        if (object.type != ObjectType::Body || shape == bodyShapes_.end()) continue;
+        bodies.push_back({object.id, QString::fromStdString(object.name), shape->second, std::nullopt});
+    }
+    if (bodies.empty()) {
+        QMessageBox::information(this, tr("Аэродинамические испытания"),
+                                 tr("В документе нет тел с точной геометрией: Мастерской нечего считать."));
+        return;
+    }
+    WorkbenchExportDialog dialog(std::move(bodies), windowTitle().section(QStringLiteral(" — "), 0, 0), this);
+    dialog.setWindowTitle(tr("CFD — геометрия и оси аппарата"));
+    if (dialog.exec() != QDialog::Accepted) return;
+    const auto request = dialog.request();
+    if (!request.isOk()) {
+        QMessageBox::warning(this, tr("Аэродинамические испытания"), QString::fromStdString(request.error().message));
+        return;
+    }
+    const auto construction = bridge::buildConstruction(*kernel_, request.value());
+    if (!construction.isOk()) {
+        QMessageBox::warning(this, tr("Аэродинамические испытания"), QString::fromStdString(construction.error().message));
+        return;
+    }
+    showAerodynamicsStudy(construction.value(), this);
+}
+
 void MainWindow::exportToWorkbench() {
     std::vector<WorkbenchExportBody> bodies;
     for (const auto& object : document_.objects()) {
@@ -5013,7 +5042,12 @@ void MainWindow::createMenus() {
     // Results open in their own window (one per result, closed with the window): several load
     // cases or support variants of the same part are compared side by side. The window is chosen
     // by the file's schema — strength or natural modes.
-    QMenu* analysisMenu = menuBar()->addMenu(tr("&Анализ"));
+    QMenu* analysisMenu = menuBar()->addMenu(tr("&Испытания"));
+    analysisMenu->addAction(tr("CFD — обдув и аэродинамика…"), this, [this]() { showAerodynamics(); });
+    auto* testToolbar = new QToolBar(tr("Испытания"), this);
+    addToolBar(Qt::BottomToolBarArea, testToolbar);
+    testToolbar->addAction(tr("🌬 CFD — запустить обдув…"), this, [this]() { showAerodynamics(); });
+    testToolbar->addAction(tr("Прочность и частоты…"), this, [this]() { showStructuralStudy(); });
     analysisMenu->addAction(tr("Прочность и частоты детали…"), this, [this]() { showStructuralStudy(); });
     analysisMenu->addAction(tr("Открыть результат расчёта…"), this, [this]() {
         const QString path = QFileDialog::getOpenFileName(

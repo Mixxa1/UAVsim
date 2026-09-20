@@ -54,6 +54,11 @@ struct Su2RunControl {
 
 // Writes `config` (with MESH_FILENAME pointing at a mesh already in `directory`) and runs
 // `solver` on `threads` OpenMP threads there.
+// Threads worth giving SU2 on this machine: the performance cores. On a hybrid CPU the efficiency
+// cores are several times slower, and every OpenMP barrier waits for the slowest thread, so counting
+// all logical cores makes a run slower, not faster.
+int recommendedSolverThreads();
+
 Result<Su2RunResult> runSu2(const std::string& solver, const std::string& directory, const Su2Config& config, int threads,
                           const Su2RunControl& control = {});
 

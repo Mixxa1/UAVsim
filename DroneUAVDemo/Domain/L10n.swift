@@ -2,10 +2,10 @@ import Foundation
 
 enum L10n {
     static func s(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
+        s(key, language: currentLanguage())
     }
     static func f(_ key: String, _ args: CVarArg...) -> String {
-        String(format: NSLocalizedString(key, comment: ""), arguments: args)
+        String(format: s(key), locale: currentLanguage().locale, arguments: args)
     }
 
     /// Explicit-language lookup for code with no SwiftUI environment to inherit a locale from

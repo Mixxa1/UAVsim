@@ -3,9 +3,13 @@
 add_library(cadnext_cfd
     src/AerodynamicStudy.cpp
     src/FlatPlate.cpp
+    src/FlowVolume.cpp
     src/Joukowski.cpp
+    src/ParticleTracer.cpp
+    src/SectionFrames.cpp
     src/Su2Case.cpp
     src/Su2Mesh.cpp
+    src/WallResolution.cpp
 )
 
 target_include_directories(cadnext_cfd

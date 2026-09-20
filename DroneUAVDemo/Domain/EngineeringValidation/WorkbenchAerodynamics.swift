@@ -1,7 +1,61 @@
 import Foundation
 
+/// Near-wall sizing, the same formulas the solver side states in CADNext/cfd/.../WallResolution.hpp:
+/// a turbulent flat-plate friction correlation used to place the first prism layer inside the regime
+/// the turbulence model needs. It is an estimate; the run measures the y+ it actually got and the
+/// result says whether the coefficients may be used.
+enum WorkbenchWallLayers {
+    /// Threads worth giving SU2 on this machine: the performance cores. On a hybrid CPU the efficiency
+    /// cores are several times slower, and every OpenMP barrier waits for the slowest thread.
+    static var solverThreads: Int {
+        var cores = 0
+        var size = MemoryLayout<Int32>.size
+        var value: Int32 = 0
+        if sysctlbyname("hw.perflevel0.logicalcpu", &value, &size, nil, 0) == 0, value > 0 { cores = Int(value) }
+        return max(1, cores > 0 ? cores : ProcessInfo.processInfo.activeProcessorCount)
+    }
+
+    static func reynolds(speedMps: Double, lengthM: Double, densityKgM3: Double, viscosityPaS: Double) -> Double {
+        viscosityPaS > 0 ? densityKgM3 * speedMps * lengthM / viscosityPaS : 0
+    }
+    static func skinFriction(reynolds: Double) -> Double { reynolds > 0 ? 0.026 * pow(reynolds, -1.0 / 7.0) : 0 }
+    static func boundaryLayerM(reynolds: Double, lengthM: Double) -> Double {
+        reynolds > 0 && lengthM > 0 ? 0.37 * lengthM * pow(reynolds, -0.2) : 0
+    }
+    static func heightForYPlus(_ yPlus: Double, speedMps: Double, lengthM: Double, densityKgM3: Double, viscosityPaS: Double) -> Double {
+        let re = reynolds(speedMps: speedMps, lengthM: lengthM, densityKgM3: densityKgM3, viscosityPaS: viscosityPaS)
+        let friction = skinFriction(reynolds: re)
+        guard friction > 0, densityKgM3 > 0 else { return 0 }
+        let frictionVelocity = speedMps * (friction / 2).squareRoot()
+        guard frictionVelocity > 0 else { return 0 }
+        return yPlus * viscosityPaS / (densityKgM3 * frictionVelocity)
+    }
+    /// Layer heights for the wall treatment: first layer at y+ 1 (resolved) or 50 (wall functions),
+    /// geometric growth, enough layers to reach the boundary layer (at most 60).
+    static func plan(wallTreatment: String, speedMps: Double, lengthM: Double, densityKgM3: Double, viscosityPaS: Double) -> [Double] {
+        let resolved = wallTreatment != "functions"
+        let re = reynolds(speedMps: speedMps, lengthM: lengthM, densityKgM3: densityKgM3, viscosityPaS: viscosityPaS)
+        let thickness = boundaryLayerM(reynolds: re, lengthM: lengthM)
+        var height = heightForYPlus(resolved ? 1 : 50, speedMps: speedMps, lengthM: lengthM, densityKgM3: densityKgM3, viscosityPaS: viscosityPaS)
+        guard height > 0, thickness > 0 else { return [] }
+        let growth = resolved ? 1.2 : 1.3
+        var heights: [Double] = []
+        var total = 0.0
+        while total < thickness, heights.count < 60 {
+            heights.append(height); total += height; height *= growth
+        }
+        return heights
+    }
+}
+
 struct WorkbenchAeroSettings: Codable, Hashable {
     var model = "sst"
+    /// "resolved" (y+ ≈ 1) or "functions" (y+ 30…300, SU2 standard wall function).
+    var wallTreatment = "resolved"
+    /// "none" (SST alone, turbulent from the leading edge) or "lm" (Langtry–Menter γ-Reθ transition).
+    var transition = "none"
+    /// Free-stream turbulence intensity, a fraction; with transition it decides where the layer turns turbulent.
+    var turbulenceIntensity = 0.01
     var alphaDeg: [Double] = [-10, -5, 0, 5, 10, 15, 20]
     var betaDeg: [Double] = [0]
     var speedMps = 20.0
@@ -21,6 +75,37 @@ struct WorkbenchAeroSettings: Codable, Hashable {
     var grading = 0.3
     var layerHeightsM: [Double] = []
 
+    init() {}
+
+    // Settings saved inside a .uavbuild before a field existed must still open: every key is
+    // optional on the way in and falls back to the default above.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        let d = Self()
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? d.model
+        wallTreatment = try c.decodeIfPresent(String.self, forKey: .wallTreatment) ?? d.wallTreatment
+        transition = try c.decodeIfPresent(String.self, forKey: .transition) ?? d.transition
+        turbulenceIntensity = try c.decodeIfPresent(Double.self, forKey: .turbulenceIntensity) ?? d.turbulenceIntensity
+        alphaDeg = try c.decodeIfPresent([Double].self, forKey: .alphaDeg) ?? d.alphaDeg
+        betaDeg = try c.decodeIfPresent([Double].self, forKey: .betaDeg) ?? d.betaDeg
+        speedMps = try c.decodeIfPresent(Double.self, forKey: .speedMps) ?? d.speedMps
+        densityKgM3 = try c.decodeIfPresent(Double.self, forKey: .densityKgM3) ?? d.densityKgM3
+        viscosityPaS = try c.decodeIfPresent(Double.self, forKey: .viscosityPaS) ?? d.viscosityPaS
+        reference = try c.decodeIfPresent(EngineeringAeroTable.Reference.self, forKey: .reference) ?? d.reference
+        iterations = try c.decodeIfPresent(Int.self, forKey: .iterations) ?? d.iterations
+        convergenceWindow = try c.decodeIfPresent(Int.self, forKey: .convergenceWindow) ?? d.convergenceWindow
+        threads = try c.decodeIfPresent(Int.self, forKey: .threads) ?? d.threads
+        residualTarget = try c.decodeIfPresent(Double.self, forKey: .residualTarget) ?? d.residualTarget
+        coefficientAbsoluteTolerance = try c.decodeIfPresent(Double.self, forKey: .coefficientAbsoluteTolerance) ?? d.coefficientAbsoluteTolerance
+        coefficientRelativeTolerance = try c.decodeIfPresent(Double.self, forKey: .coefficientRelativeTolerance) ?? d.coefficientRelativeTolerance
+        timeoutSeconds = try c.decodeIfPresent(Double.self, forKey: .timeoutSeconds) ?? d.timeoutSeconds
+        farfieldLengths = try c.decodeIfPresent(Double.self, forKey: .farfieldLengths) ?? d.farfieldLengths
+        wallSizeM = try c.decodeIfPresent(Double.self, forKey: .wallSizeM) ?? d.wallSizeM
+        farfieldSizeM = try c.decodeIfPresent(Double.self, forKey: .farfieldSizeM) ?? d.farfieldSizeM
+        grading = try c.decodeIfPresent(Double.self, forKey: .grading) ?? d.grading
+        layerHeightsM = try c.decodeIfPresent([Double].self, forKey: .layerHeightsM) ?? d.layerHeightsM
+    }
+
     static func initial(for build: WorkbenchBuild) -> Self {
         var s = Self()
         let frame = build.resolvedFrame
@@ -28,11 +113,14 @@ struct WorkbenchAeroSettings: Codable, Hashable {
         s.reference.spanM = Double(frame.sizeMeters.x)
         s.reference.chordM = s.reference.areaM2 / max(s.reference.spanM, 1e-6)
         let length = max(Double(frame.sizeMeters.x), Double(frame.sizeMeters.z))
-        s.wallSizeM = length / 50
+        // About sixty cells along the chord across the surface, and a prism stack that reaches the
+        // boundary layer this speed actually has. These are editable starting values: the result
+        // remains WARNING until grid and domain sensitivity have been established by the analyst.
+        s.wallSizeM = max(s.reference.chordM / 60, 1e-4)
         s.farfieldSizeM = length
-        // These are editable starting values. The result remains WARNING until grid/domain
-        // sensitivity and wall resolution have been established by the analyst.
-        s.layerHeightsM = (0..<12).map { length * 1e-5 * pow(1.25, Double($0)) }
+        s.layerHeightsM = WorkbenchWallLayers.plan(wallTreatment: s.wallTreatment, speedMps: s.speedMps,
+                                                   lengthM: s.reference.chordM, densityKgM3: s.densityKgM3, viscosityPaS: s.viscosityPaS)
+        s.threads = WorkbenchWallLayers.solverThreads
         return s
     }
 
@@ -51,7 +139,18 @@ struct WorkbenchAeroSettings: Codable, Hashable {
             alphaDeg: alphaDeg, betaDeg: betaDeg,
             points: alphaDeg.flatMap { a in betaDeg.map { b in .init(alphaDeg: a, betaDeg: b, cl: 0, cd: 0, cm: 0, cy: 0, cRoll: 0, cYaw: 0) } })
         if let problem = table.problem { return problem }
-        guard ["euler", "laminar", "sst"].contains(model) else { return "Выберите Euler, laminar или SST." }
+        guard ["euler", "laminar", "sst", "urans_sst"].contains(model) else { return "Выберите Euler, laminar, SST или URANS SST." }
+        guard ["resolved", "functions"].contains(wallTreatment) else { return "Стенка: разрешённый слой или пристеночные функции." }
+        guard wallTreatment == "resolved" || model.hasSuffix("sst") else { return "Пристеночные функции существуют только для турбулентных моделей." }
+        guard ["none", "lm"].contains(transition) else { return "Переход: нет или γ-Reθ." }
+        guard transition == "none" || model.hasSuffix("sst") else { return "Модель перехода γ-Reθ работает поверх SST: выберите SST или URANS SST." }
+        guard transition == "none" || wallTreatment == "resolved" else { return "Модели перехода нужен разрешённый пограничный слой (y+ ≈ 1)." }
+        guard turbulenceIntensity.isFinite, turbulenceIntensity > 0, turbulenceIntensity <= 0.2 else { return "Интенсивность турбулентности — доля от 0 до 0.2." }
+        // Mirrors the solver's refusal: above Re ≈ 5·10^5 a laminar solution is a different flow,
+        // not a coarse one. Caught here so the run is never launched.
+        let reynolds = WorkbenchWallLayers.reynolds(speedMps: speedMps, lengthM: reference.chordM,
+                                                    densityKgM3: densityKgM3, viscosityPaS: viscosityPaS)
+        guard model != "laminar" || reynolds <= 5e5 else { return "Ламинарная модель при Re = \(Int(reynolds)) неприменима: возьмите SST или URANS." }
         guard [wallSizeM, farfieldSizeM, farfieldLengths, grading, timeoutSeconds, coefficientAbsoluteTolerance, coefficientRelativeTolerance].allSatisfy({ $0.isFinite && $0 > 0 }), grading <= 1 else { return "Задайте положительные размеры сетки, время и допуски." }
         guard convergenceWindow >= 5, iterations >= convergenceWindow + 2, iterations <= 1_000_000, (1...256).contains(threads), residualTarget.isFinite, (-15 ... -3).contains(residualTarget) else { return "Некорректные параметры сходимости или число потоков." }
         guard layerHeightsM.count <= 100, layerHeightsM.allSatisfy({ $0.isFinite && $0 > 0 }),
@@ -162,10 +261,15 @@ enum WorkbenchAeroRunner {
                 guard let resultObject = try JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let echo = resultObject["settings"] as? [String: Any] else { throw WorkbenchAeroError.message("Нет подтверждения настроек расчёта.") }
                 let echoed = try JSONDecoder().decode(WorkbenchAeroSettings.self, from: JSONSerialization.data(withJSONObject: echo))
-                guard let table = result.aeroTable, table.reference == settings.reference,
-                      table.model == settings.model, table.alphaDeg == settings.alphaDeg, table.betaDeg == settings.betaDeg,
-                      table.speedMps == settings.speedMps, table.densityKgM3 == settings.densityKgM3,
-                      table.viscosityPaS == settings.viscosityPaS else { throw WorkbenchAeroError.message("Аэротаблица не соответствует настройкам результата.") }
+                // A completed run whose points failed convergence or near-wall resolution carries no
+                // table on purpose: its fields and reasons are kept, its numbers are not flown with.
+                // Everything else about the result is still checked, so the record can be trusted.
+                if let table = result.aeroTable {
+                    guard table.reference == settings.reference,
+                          table.model == settings.model, table.alphaDeg == settings.alphaDeg, table.betaDeg == settings.betaDeg,
+                          table.speedMps == settings.speedMps, table.densityKgM3 == settings.densityKgM3,
+                          table.viscosityPaS == settings.viscosityPaS else { throw WorkbenchAeroError.message("Аэротаблица не соответствует настройкам результата.") }
+                }
                 guard let input = try JSONSerialization.jsonObject(with: prepared.job) as? [String: Any],
                       let axes = input["cadAxes"] as? [String: String],
                       echo["cadForward"] as? String == axes["forward"], echo["cadUp"] as? String == axes["up"] else {
@@ -187,7 +291,7 @@ enum WorkbenchAeroRunner {
                 metrics: [:], solverID: "cadnext-su2", solverVersion: "adapter/1", settings: settings.canonical,
                 failureReasons: [Task.isCancelled ? "Расчёт отменён." : String(describing: error)], consumedUpstream: [])
         }
-        record.reportRef = directory.appendingPathComponent("report.html").path
+        record.reportRef = directory.appendingPathComponent("result.json").path
         let run = WorkbenchAeroRun(record: record, settings: settings, artifactDirectory: directory.path)
         // Durable history also survives switching to another blueprint during a calculation.
         do {

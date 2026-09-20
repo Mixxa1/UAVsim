@@ -10,6 +10,40 @@ struct SettingsView: View {
     /// `AppShell.applyWindowSizePreset` — more reliable than reaching for `NSApp.mainWindow` here).
     var onApplyWindowSize: (WindowSizePreset) -> Void = { _ in }
 
+    @StateObject private var bindings: BindingsViewModel
+    @State private var selected: SettingsPage = .guide
+    private let simulationViewModel: DroneSimulationViewModel?
+
+    init(onClose: @escaping () -> Void, onApplyWindowSize: @escaping (WindowSizePreset) -> Void = { _ in },
+         simulationViewModel: DroneSimulationViewModel? = nil) {
+        self.onClose = onClose
+        self.onApplyWindowSize = onApplyWindowSize
+        self.simulationViewModel = simulationViewModel
+        if let simulationViewModel {
+            _bindings = StateObject(wrappedValue: simulationViewModel.bindingsViewModel)
+        } else {
+            let keyboard = KeyboardInputService()
+            _bindings = StateObject(wrappedValue: BindingsViewModel(store: InputBindingsStore(keyboardInputService: keyboard),
+                captureCoordinator: InputCaptureCoordinator(keyboardInputService: keyboard, inputManager: InputManager())))
+        }
+    }
+    private enum SettingsPage: String, CaseIterable, Identifiable {
+        case guide, keys, controller, video, audio, language, about
+        var id: String { rawValue }
+        var key: String { "settings.page." + rawValue }
+        var icon: String {
+            switch self {
+            case .guide: return "book.closed"
+            case .keys: return "keyboard"
+            case .controller: return "gamecontroller"
+            case .video: return "display"
+            case .audio: return "speaker.wave.2"
+            case .language: return "globe"
+            case .about: return "info.circle"
+            }
+        }
+    }
+
     @AppStorage(AppGraphicsSettings.qualityKey) private var qualityRaw: String = GraphicsQualityPreset.high.rawValue
     @AppStorage(AppGraphicsSettings.renderScaleKey) private var renderScale: Double = 0.0
     @AppStorage(AppGraphicsSettings.windowSizeKey) private var windowSizeRaw: String = WindowSizePreset.native.rawValue
@@ -53,21 +87,43 @@ struct SettingsView: View {
         VStack(alignment: .leading, spacing: 0) {
             header
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    videoSection
-                    controlsSection
-                    resolutionSection
-                    audioSection
-                    languageSection
-                    creditsSection
+            HStack(alignment: .top, spacing: 0) {
+                VStack(spacing: 6) {
+                    ForEach(SettingsPage.allCases) { page in
+                        Button { selected = page } label: {
+                            Label(LocalizedStringKey(page.key), systemImage: page.icon)
+                                .font(.system(size: 13, weight: .medium))
+                                .frame(maxWidth: .infinity, alignment: .leading).padding(12)
+                                .background(selected == page ? GroundControlPalette.accent.opacity(0.3) : Color.clear,
+                                            in: RoundedRectangle(cornerRadius: 9))
+                        }.buttonStyle(.plain)
+                    }
+                    Spacer()
+                }.padding(12).frame(width: 185)
+                Divider()
+                if selected == .keys {
+                    KeyBindingsSettingsView(simulationViewModel: simulationViewModel, bindingsViewModel: bindings)
+                        .padding(18)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            switch selected {
+                            case .guide: guideSection
+                            case .controller: controlsSection
+                            case .video: videoSection; resolutionSection
+                            case .audio: audioSection
+                            case .language: languageSection
+                            case .about: creditsSection
+                            case .keys: EmptyView()
+                            }
+                        }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
-                .padding(20)
-            }
+            }.frame(maxHeight: .infinity)
 
             footer
         }
-        .frame(maxWidth: 760, maxHeight: 760)
+        .frame(minWidth: 720, idealWidth: 980, maxWidth: 1080, minHeight: 560, idealHeight: 720, maxHeight: 820)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
         .overlay(
             RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.18), lineWidth: 1)
@@ -75,6 +131,44 @@ struct SettingsView: View {
         .onAppear {
             if renderScale <= 0.0 {
                 renderScale = quality.defaultRenderScale
+            }
+        }
+    }
+
+    private var guideSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("settings.guide.intro").font(.title3.bold())
+            Text("settings.guide.context").font(.callout).foregroundStyle(.secondary)
+            guideCard("settings.guide.flight", icon: "airplane", detail: "settings.guide.flight.detail",
+                      commands: [.ascend, .descend, .moveForward, .moveBackward, .moveLeft, .moveRight, .yawLeft, .yawRight, .hover])
+            guideCard("settings.guide.camera", icon: "camera", detail: "settings.guide.camera.detail",
+                      commands: [.cycleCameraMode, .toggleFPV, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .zoomIn, .zoomOut, .resetCameraOrientation])
+            guideCard("settings.guide.vtol", icon: "arrow.triangle.2.circlepath", detail: "settings.guide.vtol.detail",
+                      commands: [.vtolTransitionForward, .vtolTransitionBack])
+            guideCard("settings.guide.tools", icon: "slider.horizontal.3", detail: "settings.guide.tools.detail",
+                      commands: [.toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD, .releasePayload, .resetDrone])
+            sectionCard(titleKey: "settings.guide.cfd") {
+                Text("settings.guide.cfd.detail").fixedSize(horizontal: false, vertical: true)
+            }
+            Button("settings.guide.edit") { selected = .keys }.buttonStyle(.borderedProminent)
+        }
+    }
+
+    private func guideCard(_ title: String, icon: String, detail: String, commands: [KeyboardCommand]) -> some View {
+        sectionCard(titleKey: title) {
+            Label(LocalizedStringKey(detail), systemImage: icon).font(.callout)
+                .fixedSize(horizontal: false, vertical: true)
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 210), alignment: .leading)], spacing: 8) {
+                ForEach(commands) { command in
+                    HStack(spacing: 9) {
+                        Text(bindings.sections.flatMap(\.bindings).first { $0.command == command }?.keyLabel ?? "—")
+                            .font(.system(.body, design: .monospaced).bold())
+                            .frame(minWidth: 36).padding(6)
+                            .background(Color.white.opacity(0.12), in: RoundedRectangle(cornerRadius: 6))
+                        Text(LocalizedStringKey(command.titleKey)).font(.caption)
+                        Spacer(minLength: 0)
+                    }
+                }
             }
         }
     }

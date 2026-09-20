@@ -8,11 +8,11 @@ enum PayloadDataQualitySource: String, Hashable {
     var title: String {
         switch self {
         case .verified:
-            return NSLocalizedString("payload.data.verified", comment: "")
+            return L10n.s("payload.data.verified")
         case .estimated:
-            return NSLocalizedString("payload.data.estimated", comment: "")
+            return L10n.s("payload.data.estimated")
         case .custom:
-            return NSLocalizedString("payload.data.custom", comment: "")
+            return L10n.s("payload.data.custom")
         }
     }
 }

@@ -1,5 +1,6 @@
 #include "fea_test_support.hpp"
 #include "cadnext/cfd/AerodynamicStudy.hpp"
+#include "cadnext/cfd/FlowSection.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
 #include "cadnext/bridge/ConstructionBuilder.hpp"
 #include <filesystem>
@@ -33,6 +34,10 @@ int main(int argc,char** argv) {
         s.model=argv[4]; s.viscosityPaS=.6125; s.layerHeightsM={.005,.007,.01,.014,.02};
         s.iterations=1500; s.alphaDeg={-5,0,5}; s.betaDeg={0};
         if (s.model=="sst") { s.alphaDeg={0}; s.betaDeg={-5,0,5}; }
+        if (s.model=="urans_sst") {
+            s.alphaDeg={0};s.betaDeg={0};s.timeSteps=36;s.innerIterations=15;s.averagingSteps=12;s.timeStepSeconds=.005;
+            s.residualTarget=-3;s.coefficientAbsoluteTolerance=.15;s.coefficientRelativeTolerance=.15;
+        }
     }
     auto root=cfd::Json::makeObject(); auto str=[](const std::string& v){return cfd::Json::makeString(v);};
     root.set("schema",str("cadnext-aerodynamics-job/1"));root.set("solverPath",str(fs::absolute(argv[2]).string()));root.set("settings",cfd::aeroSettingsJson(s));
@@ -55,6 +60,33 @@ int main(int argc,char** argv) {
             }
         }
     } else if(parsed) std::printf("result: %s\n",json.c_str());
-    check(fs::exists(run/"report.html") && fs::exists(run/"flow/point-0/surface.csv") && fs::exists(run/"flow/point-0/volume.vtu"),"report and pressure/velocity artifacts exist");
+    check(fs::exists(run/"flow/point-0/surface.csv") && fs::exists(run/"flow/point-0/volume.vtu"),"pressure and velocity artifacts exist");
+    check(!fs::exists(run/"report.html"), "CFD output uses native result windows and does not create HTML");
+    if(s.model=="urans_sst") {
+        std::size_t frames=0;const fs::path frameDirectory=run/"flow/point-0";
+        std::size_t fullFrames=0;
+        if(fs::exists(frameDirectory))for(const auto& file:fs::directory_iterator(frameDirectory)){const auto name=file.path().filename().string();if(name.starts_with("section_")&&name.ends_with(".csv"))++frames;if(name.starts_with("volume_"))++fullFrames;}
+        check(frames>=2,"URANS preserves multiple physical-time frames of the section for native playback");
+        check(fullFrames==0&&fs::exists(frameDirectory/"volume.csv"),"full volume frames are reduced to the section; the last full field is kept");
+        check(fs::exists(run/"flow/section.json"),"the section plane is recorded for the window");
+    }
+    std::ifstream volumeFile(run/"flow/point-0/volume.csv");
+    std::string volume{std::istreambuf_iterator<char>(volumeFile),std::istreambuf_iterator<char>()};
+    const auto field=cfd::parseSu2History(volume);
+    check(field.isOk() && !field.value().empty() && field.value().column("Velocity_x")>=0 && field.value().column("x")>=0,
+          "native airflow viewer receives actual volumetric coordinates and velocity");
+    if(field.isOk()) {
+        const auto& h=field.value();
+        std::vector<cfd::FlowSection::Vector> velocities(h.rows.size(),{NAN,NAN,NAN});
+        for(const auto& row:h.rows){const auto id=std::size_t(row[h.column("PointID")]);if(id<velocities.size())velocities[id]={row[h.column("Velocity_x")],row[h.column("Velocity_y")],row[h.column("Velocity_z")]};}
+        std::ifstream mesh(run/"flow/point-0/mesh.su2");
+        try {
+            const auto section=cfd::FlowSection::read(mesh,velocities,0,{-2,3,-2,2});
+            check(!section.walls.empty(),"viewer uses body boundary from this result's mesh");
+            cfd::FlowSection::Vector v{};
+            check(!section.sample(0,0,v),"actual SU2 sphere section contains no fluid inside the body");
+            check(section.sample(-1,0,v) && std::isfinite(v[0]),"actual SU2 fluid cells provide the upstream section field");
+        } catch(const std::exception& e){check(false,"actual SU2 section loads",e.what());}
+    }
     return fea_test::finish("test_cfd_cli");
 }

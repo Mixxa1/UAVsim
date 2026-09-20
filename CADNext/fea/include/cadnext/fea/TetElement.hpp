@@ -4,6 +4,7 @@
 #include "cadnext/fea/TetMesh.hpp"
 
 #include <array>
+#include <functional>
 #include <vector>
 
 namespace cadnext::fea {
@@ -55,14 +56,38 @@ double tetVolume(const TetMesh& mesh, int element);
 // straight elements (the integrand is degree 4).
 void tetMass(const TetMesh& mesh, int element, double density, std::vector<double>& mass);
 
+// Scalar (heat conduction) element matrices, row-major n×n with n = nodesPerElement:
+// ∫ k ∇Nᵢ·∇Nⱼ dV and ∫ c NᵢNⱼ dV; and the consistent nodal shares ∫ q Nᵢ dV of a uniform source.
+void tetConductivity(const TetMesh& mesh, int element, double conductivity, std::vector<double>& matrix);
+void tetCapacity(const TetMesh& mesh, int element, double capacityPerVolume, std::vector<double>& matrix);
+void tetScalarSource(const TetMesh& mesh, int element, double sourcePerVolume, std::vector<double>& nodal);
+// The same two with the coefficient varying inside the element: evaluated at every quadrature point of
+// the value a nodal field (the temperature) interpolates to there — temperature-dependent conductivity
+// and heat capacity, without flattening them to one value per element.
+void tetConductivity(const TetMesh& mesh, int element, const std::function<double(double)>& conductivityOf,
+                     const std::vector<double>& nodalField, std::vector<double>& matrix);
+void tetCapacity(const TetMesh& mesh, int element, const std::function<double(double)>& capacityPerVolumeOf,
+                 const std::vector<double>& nodalField, std::vector<double>& matrix);
+
+// Volume mean of |∇f|² of a nodal scalar field over one element — what the Joule heat σ|∇φ|² of a
+// potential field is made of.
+double tetMeanSquareGradient(const TetMesh& mesh, int element, const std::vector<double>& nodalField);
+
 // Consistent nodal forces of a uniform body force density (N/m³).
 void tetBodyForce(const TetMesh& mesh, int element, const Vec3& forcePerVolume, std::vector<double>& nodalForces);
 
 // Stress at each of the four points of the degree-2 rule (identical for TET4). Point q is
 // the one nearest corner q, which is what the corner extrapolation relies on.
+// With `nodalThermalStrain` (α ΔT per node) the stress is D(ε − ε_th), ε_th = α ΔT on the diagonal.
 std::vector<Voigt> tetQuadratureStress(const TetMesh& mesh, int element,
                                        const std::array<std::array<double, 6>, 6>& elasticity,
-                                       const std::vector<Vec3>& displacement);
+                                       const std::vector<Vec3>& displacement,
+                                       const std::vector<double>* nodalThermalStrain = nullptr);
+
+// Consistent nodal forces of a thermal strain field, ∫ Bᵀ D ε_th dV (ε_th = α ΔT, interpolated from the
+// nodes), 3·nodesPerElement entries.
+void tetThermalLoad(const TetMesh& mesh, int element, const std::array<std::array<double, 6>, 6>& elasticity,
+                    const std::vector<double>& nodalThermalStrain, std::vector<double>& nodal);
 
 // Degree-4 triangle rule, 6 points (Dunavant): reference coordinates (s, t), weights sum to 1/2.
 struct TriangleQuadraturePoint {

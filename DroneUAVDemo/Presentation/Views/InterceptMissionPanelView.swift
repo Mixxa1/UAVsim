@@ -248,7 +248,7 @@ struct InterceptFeedOverlayView: View {
             VStack(spacing: 10) {
                 statusLine(icon: "video.slash.fill", titleKey: "intercept.feed.no_image", tint: Self.lostTint, pulses: false)
                 Text(String(
-                    format: NSLocalizedString("intercept.feed.lost_from", comment: ""),
+                    format: L10n.s("intercept.feed.lost_from"),
                     state.sourceID
                 ))
                 .font(.caption)
@@ -263,7 +263,7 @@ struct InterceptFeedOverlayView: View {
                             Image(systemName: "arrow.triangle.swap")
                                 .font(.system(size: 11, weight: .semibold))
                             Text(String(
-                                format: NSLocalizedString("intercept.feed.switch_to", comment: ""),
+                                format: L10n.s("intercept.feed.switch_to"),
                                 InterceptCallsign.observer
                             ))
                             .font(.caption.weight(.semibold))
@@ -294,7 +294,7 @@ struct InterceptFeedOverlayView: View {
             VStack(spacing: 8) {
                 statusLine(icon: "arrow.triangle.swap", titleKey: "intercept.feed.handoff", tint: Self.lostTint, pulses: false)
                 Text(String(
-                    format: NSLocalizedString("intercept.feed.handoff_to", comment: ""),
+                    format: L10n.s("intercept.feed.handoff_to"),
                     InterceptCallsign.observer
                 ))
                 .font(.caption)
@@ -342,8 +342,8 @@ struct InterceptFeedOverlayView: View {
 
                 HStack(spacing: 18) {
                     if !state.hidesRanges {
-                        readout(String(format: NSLocalizedString("intercept.feed.altitude", comment: ""), Double(state.sourceAltitude)))
-                        readout(String(format: NSLocalizedString("intercept.feed.range", comment: ""), Double(state.sourceToTargetRange)))
+                        readout(String(format: L10n.s("intercept.feed.altitude"), Double(state.sourceAltitude)))
+                        readout(String(format: L10n.s("intercept.feed.range"), Double(state.sourceToTargetRange)))
                     }
                     Spacer()
                     readout(String(format: "%@ %@", InterceptCallsign.target, NSLocalizedString(state.targetState.targetTitleKey, comment: "")))

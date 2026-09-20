@@ -1,0 +1,206 @@
+{
+  "schema": "cadnext-flutter-result/1",
+  "testType": "flutter",
+  "outcome": "warning",
+  "solverID": "cadnext.fea.flutter-pk",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 3",
+  "metrics": {
+    "flutterSpeedMps": {
+      "value": 291.4710138724891,
+      "unit": "m/s",
+      "numericalUncertainty": 2.265682147986537
+    },
+    "flutterFrequencyHz": {
+      "value": 46.45225250914393,
+      "unit": "Hz"
+    },
+    "divergenceSpeedMps": {
+      "value": 314.9174127084784,
+      "unit": "m/s"
+    },
+    "bendingFrequencyHz": {
+      "value": 20.30399273970835,
+      "unit": "Hz"
+    },
+    "torsionFrequencyHz": {
+      "value": 85.94319384621272,
+      "unit": "Hz"
+    },
+    "requiredSpeedMps": {
+      "value": 229.99999999999997,
+      "unit": "m/s"
+    },
+    "marginFraction": {
+      "value": 0.26726527770647457,
+      "unit": "1"
+    }
+  },
+  "warnings": [
+    "флаттер приходится на M = 0.86: аэродинамика Теодорсена несжимаема, трансзвуковой провал она не видит",
+    "полосовая теория: ни стреловидности, ни удлинения, ни концевых эффектов",
+    "только две моды: руль, груз или третья мода рядом по частоте в модель не входят",
+    "аэродинамика несжимаемая: выше M ≈ 0.6 метод не о том"
+  ],
+  "failureReasons": [],
+  "settings": {
+    "material": "al_6061_t6",
+    "materialDatabaseVersion": 3,
+    "coarseElementSizeM": 0.041666666666666664,
+    "refinementFactor": 1.3,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "пластина, флаттер консоли",
+      "supports": [
+        {
+          "face": "face-0",
+          "fix": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      ],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    },
+    "flutter": {
+      "flowAxis": "x",
+      "spanAxis": "y",
+      "stations": 10,
+      "airDensityKgM3": 1.225,
+      "structuralDamping": 0,
+      "diveSpeedMps": 200,
+      "marginFactor": 1.15,
+      "lowSpeedMps": 10,
+      "highSpeedMps": 600,
+      "speeds": 300
+    }
+  },
+  "surface": {
+    "spanM": 0.5,
+    "referenceSemichordM": 0.12499999999999999,
+    "bendingMode": 0,
+    "torsionMode": 1,
+    "machAtFlutter": 0.8565267725851566,
+    "flutterFound": true,
+    "strips": [
+      {
+        "spanPositionM": 0.025,
+        "chordM": 0.25,
+        "elasticAxis": 0.018216647835387567,
+        "bendingPlunge": 0.00520080754516027,
+        "bendingTwist": 0.0026109590376160183,
+        "torsionPlunge": 6.0171734307979247e-05,
+        "torsionTwist": 0.18453696401350736
+      },
+      {
+        "spanPositionM": 0.275,
+        "chordM": 0.25,
+        "elasticAxis": 0.004040848011399367,
+        "bendingPlunge": 0.5554251213477287,
+        "bendingTwist": -0.004830717388068307,
+        "torsionPlunge": -0.004515848682193922,
+        "torsionTwist": 9.989053337820623
+      },
+      {
+        "spanPositionM": 0.47500000000000003,
+        "chordM": 0.25,
+        "elasticAxis": 0.04178028802617573,
+        "bendingPlunge": 1.338472278159622,
+        "bendingTwist": -0.012582280736478248,
+        "torsionPlunge": -0.07983301777002992,
+        "torsionTwist": 15.011204474089135
+      }
+    ]
+  },
+  "series": {
+    "speedMps": [
+      10,
+      157.9933110367893,
+      305.9866220735786,
+      453.9799331103679,
+      600
+    ],
+    "dampingFirst": [
+      -0.004916948248130663,
+      -0.1474687675317347,
+      0.06829143597529928,
+      0.2705060485088566,
+      0.16470857306299408
+    ],
+    "dampingSecond": [
+      -0.0007882980058930565,
+      -0.02981647246826676,
+      -0.6687885137053272,
+      -0.9996393541945745,
+      -0.9999874065725269
+    ],
+    "frequencyFirst": [
+      20.16689735240613,
+      21.164550027131124,
+      42.878561906103826,
+      23.266666247939586,
+      21.182758852668645
+    ],
+    "frequencySecond": [
+      85.67773350026543,
+      78.27505988785227,
+      31.05216719014982,
+      2.383317885301963,
+      0.6990255801629601
+    ]
+  },
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.041666666666666664,
+      "elements": 713,
+      "bendingHz": 20.738568450166497,
+      "torsionHz": 89.83131552948014,
+      "flutterSpeedMps": 301.0613250683475,
+      "flutterFrequencyHz": 48.385637042022005
+    },
+    {
+      "maximumElementSizeM": 0.03205128205128205,
+      "elements": 990,
+      "bendingHz": 20.415050199260396,
+      "torsionHz": 86.88519153293602,
+      "flutterSpeedMps": 292.0950226207715,
+      "flutterFrequencyHz": 46.95793438686401
+    },
+    {
+      "maximumElementSizeM": 0.024654832347140037,
+      "elements": 1543,
+      "bendingHz": 20.30399273970835,
+      "torsionHz": 85.94319384621272,
+      "flutterSpeedMps": 291.4710138724891,
+      "flutterFrequencyHz": 46.45225250914393
+    }
+  ],
+  "convergence": {
+    "flutterSpeed": {
+      "behaviour": "monotonic",
+      "observedOrder": 24.751671879281677,
+      "orderLimitedToFormal": true,
+      "extrapolated": 289.65846815409986,
+      "gciFineRelative": 0.007773267461092078,
+      "asymptoticRatio": 15.01235179307282
+    }
+  },
+  "material": {
+    "id": "al_6061_t6",
+    "youngsModulusPa": 68900000000,
+    "poissonRatio": 0.33,
+    "densityKgPerM3": 2700,
+    "yieldStrengthPa": 276000000,
+    "ultimateStrengthPa": 310000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "plate.field.json"
+}

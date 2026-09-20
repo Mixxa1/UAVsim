@@ -15,6 +15,8 @@
 #include <Inventor/nodes/SoSeparator.h>
 #include <Inventor/nodes/SoShapeHints.h>
 #include <Inventor/nodes/SoTranslation.h>
+#include <Inventor/nodes/SoSwitch.h>
+#include <Inventor/nodes/SoPolygonOffset.h>
 
 #include <algorithm>
 #include <cmath>
@@ -84,6 +86,11 @@ StructuralFieldScene::StructuralFieldScene(fea::StructuralFieldFile field) : fie
     }
     faces->coordIndex.finishEditing();
     root_->addChild(faces);
+    meshSwitch_=new SoSwitch;meshSwitch_->whichChild=SO_SWITCH_NONE;
+    auto* wire=new SoSeparator;auto* wireBinding=new SoMaterialBinding;wireBinding->value=SoMaterialBinding::OVERALL;wire->addChild(wireBinding);
+    auto* wireMaterial=new SoMaterial;wireMaterial->diffuseColor.setValue(.1f,.1f,.1f);wire->addChild(wireMaterial);
+    auto* wireStyle=new SoDrawStyle;wireStyle->style=SoDrawStyle::LINES;wireStyle->lineWidth=1;wire->addChild(wireStyle);
+    auto* offset=new SoPolygonOffset;offset->styles=SoPolygonOffset::LINES;offset->factor=-1;offset->units=-1;wire->addChild(offset);wire->addChild(faces);meshSwitch_->addChild(wire);root_->addChild(meshSwitch_);
 
     // Critical point: a marker drawn over the part so it is never hidden behind a face.
     auto* marker = new SoSeparator;
@@ -101,7 +108,7 @@ StructuralFieldScene::StructuralFieldScene(fea::StructuralFieldFile field) : fie
     auto* markers = new SoMarkerSet;
     markers->markerIndex = SoMarkerSet::CIRCLE_LINE_9_9;
     marker->addChild(markers);
-    root_->addChild(marker);
+    markerSwitch_=new SoSwitch;markerSwitch_->whichChild=SO_SWITCH_ALL;markerSwitch_->addChild(marker);root_->addChild(markerSwitch_);
 
     updateCoordinates();
     updateColors();
@@ -115,6 +122,8 @@ void StructuralFieldScene::setQuantity(FieldQuantity quantity) {
     quantity_ = quantity;
     updateColors();
 }
+void StructuralFieldScene::setMeshVisible(bool visible){meshSwitch_->whichChild=visible?SO_SWITCH_ALL:SO_SWITCH_NONE;}
+void StructuralFieldScene::setCriticalPointVisible(bool visible){markerSwitch_->whichChild=visible?SO_SWITCH_ALL:SO_SWITCH_NONE;}
 
 void StructuralFieldScene::setDeformationScale(double scale) {
     deformationScale_ = std::max(0.0, scale);
@@ -140,6 +149,21 @@ void StructuralFieldScene::updateColors() {
     double maxStress = field_.maxVonMisesPa();
     double maxDisplacement = 0.0;
     for (const auto& d : field_.displacement) maxDisplacement = std::max(maxDisplacement, fea::length(d));
+    double coldest = 0.0, hottest = 0.0;
+    if (!field_.temperatureK.empty()) {
+        const auto [lo, hi] = std::minmax_element(field_.temperatureK.begin(), field_.temperatureK.end());
+        coldest = *lo, hottest = *hi;
+    }
+    double weakest = 0.0, strongest = 0.0;
+    if (!field_.electricFieldVm.empty()) {
+        const auto [lo, hi] = std::minmax_element(field_.electricFieldVm.begin(), field_.electricFieldVm.end());
+        weakest = *lo, strongest = *hi;
+    }
+    double thinnest = 0.0, thickest = 0.0;
+    if (!field_.iceThicknessM.empty()) {
+        const auto [lo, hi] = std::minmax_element(field_.iceThicknessM.begin(), field_.iceThicknessM.end());
+        thinnest = *lo, thickest = *hi;
+    }
 
     material_->diffuseColor.setNum(count);
     SbColor* diffuse = material_->diffuseColor.startEditing();
@@ -154,6 +178,21 @@ void StructuralFieldScene::updateColors() {
             break;
         case FieldQuantity::Displacement:
             c = field_.rampColor(maxDisplacement > 0.0 ? fea::length(field_.displacement[n]) / maxDisplacement : 0.0);
+            break;
+        case FieldQuantity::Temperature:
+            c = field_.rampColor(hottest > coldest && n < static_cast<int>(field_.temperatureK.size())
+                                     ? (field_.temperatureK[n] - coldest) / (hottest - coldest)
+                                     : 0.0);
+            break;
+        case FieldQuantity::ElectricField:
+            c = field_.rampColor(strongest > weakest && n < static_cast<int>(field_.electricFieldVm.size())
+                                     ? (field_.electricFieldVm[n] - weakest) / (strongest - weakest)
+                                     : 0.0);
+            break;
+        case FieldQuantity::IceThickness:
+            c = field_.rampColor(thickest > thinnest && n < static_cast<int>(field_.iceThicknessM.size())
+                                     ? (field_.iceThicknessM[n] - thinnest) / (thickest - thinnest)
+                                     : 0.0);
             break;
         }
         diffuse[n].setValue(c[0], c[1], c[2]);

@@ -1,5 +1,15 @@
 add_library(cadnext_fea_occt
     src/ModalStudy.cpp
+    src/HarmonicStudy.cpp
+    src/RandomStudy.cpp
+    src/ShockStudy.cpp
+    src/BirdStrikeStudy.cpp
+    src/ClimateStudy.cpp
+    src/FireStudy.cpp
+    src/LightningStudy.cpp
+    src/EmcStudy.cpp
+    src/FlutterStudy.cpp
+    src/IcingStudy.cpp
     src/SolidMesher.cpp
     src/StructuralStudy.cpp
 )
@@ -19,6 +29,7 @@ target_include_directories(cadnext_fea_occt PRIVATE ${OpenCASCADE_INCLUDE_DIR} $
 
 target_link_libraries(cadnext_fea_occt
     PUBLIC
+        cadnext_em
         cadnext_fea
         cadnext_fea_job
         cadnext_kernel

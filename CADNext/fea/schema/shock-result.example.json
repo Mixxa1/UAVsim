@@ -1,0 +1,223 @@
+{
+  "schema": "cadnext-shock-result/1",
+  "testType": "mechanicalShock",
+  "outcome": "warning",
+  "solverID": "cadnext.fea.shock-tet10",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 1",
+  "metrics": {
+    "peakStressPa": {
+      "value": 142867557.79178056,
+      "unit": "Pa"
+    },
+    "peakTimeS": {
+      "value": 0.018138655961761806,
+      "unit": "s"
+    },
+    "reserveFactor": {
+      "value": 3.0447780218514127,
+      "unit": "1"
+    },
+    "ultimateMargin": {
+      "value": 2.1264387350811442,
+      "unit": "1"
+    },
+    "yieldMargin": {
+      "value": 2.0447780218514127,
+      "unit": "1"
+    },
+    "peakProbeAccelerationMps2": {
+      "value": 332.91689406322126,
+      "unit": "m/s2"
+    },
+    "peakProbeDisplacementM": {
+      "value": 0.019607276802285686,
+      "unit": "m"
+    },
+    "peakInputAccelerationMps2": {
+      "value": 196.13267464051756,
+      "unit": "m/s2"
+    },
+    "effectiveMassFraction": {
+      "value": 0.9204671513527941,
+      "unit": "1"
+    },
+    "firstFrequencyHz": {
+      "value": 16.530078639722305,
+      "unit": "Hz"
+    }
+  },
+  "warnings": [
+    "максимум напряжения взят вне заданных зон исключения",
+    "сходимость по сетке немонотонна — погрешность оценена только разбросом"
+  ],
+  "failureReasons": [],
+  "settings": {
+    "material": "steel_4130",
+    "materialDatabaseVersion": 1,
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.6,
+    "factorOfSafety": 1.5,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "drop",
+      "supports": [
+        {
+          "face": "face-0",
+          "fix": [
+            "x",
+            "y",
+            "z"
+          ]
+        }
+      ],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": [
+        {
+          "face": "face-0",
+          "distanceM": 0.03
+        }
+      ]
+    },
+    "shock": {
+      "modeCount": 10,
+      "dampingRatio": 0.02,
+      "direction": [
+        0,
+        0,
+        1
+      ],
+      "pulse": {
+        "shape": "halfSine",
+        "peakMps2": 196.133,
+        "durationS": 0.011
+      },
+      "attachedMasses": [],
+      "probeFace": "face-5"
+    }
+  },
+  "criticalRegion": {
+    "point": [
+      0.03109574301162773,
+      0.022489170093936275,
+      0.02
+    ],
+    "face": "face-2",
+    "timeS": 0.018138655961761806
+  },
+  "history": {
+    "timeS": [
+      2.6992047562145545e-05,
+      0.03298428212094186,
+      0.06604954038457014,
+      0.099033822505512,
+      0.13201810462645386
+    ],
+    "baseAccelerationMps2": [
+      1.5119568181382363,
+      0,
+      0,
+      0,
+      0
+    ],
+    "maxVonMisesPa": [
+      3692.2484218494646,
+      27747125.494123776,
+      7425064.25563411,
+      36114379.88409313,
+      58797071.92027463
+    ],
+    "probeAccelerationMps2": [
+      -0.18722303852341268,
+      147.2763081492034,
+      -67.76714180531258,
+      -14.588219119494982,
+      81.00379831177348
+    ],
+    "probeDisplacementM": [
+      3.0606427497482053e-09,
+      -0.005646698034310038,
+      0.0001273620112102459,
+      0.004574624382537435,
+      -0.008300462819948387
+    ]
+  },
+  "inputSrs": {
+    "frequencyHz": [
+      8.265039319861152,
+      39.02653433404337,
+      184.27866138111156,
+      870.1419590514809,
+      3704.7948944874784
+    ],
+    "accelerationMps2": [
+      65.91724709536375,
+      262.9364342115573,
+      235.77551871379987,
+      198.96143075427614,
+      196.15840996287122
+    ],
+    "dampingRatio": 0.05
+  },
+  "modeFrequenciesHz": [
+    16.530078639722305,
+    24.777211945031503,
+    103.40160999250557,
+    154.6325860221343,
+    288.6821226452219,
+    430.13177276086645,
+    563.3211276037969,
+    680.7475463993793,
+    834.9821362867027,
+    926.1987236218696
+  ],
+  "dampingRatio": 0.02,
+  "totalMassKg": 4.710000000000158,
+  "attachedMassKg": 0,
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.02,
+      "elements": 568,
+      "peakStressPa": 143997495.0357943,
+      "peakTimeS": 0.018114260326844985
+    },
+    {
+      "maximumElementSizeM": 0.012499999999999999,
+      "elements": 1896,
+      "peakStressPa": 142743636.5684988,
+      "peakTimeS": 0.01814022588783177
+    },
+    {
+      "maximumElementSizeM": 0.007812499999999998,
+      "elements": 7938,
+      "peakStressPa": 142867557.79178056,
+      "peakTimeS": 0.018138655961761806
+    }
+  ],
+  "convergence": {
+    "stress": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 142867557.79178056,
+      "gciFineRelative": 0.004388184716935206,
+      "asymptoticRatio": 0
+    }
+  },
+  "material": {
+    "id": "steel_4130",
+    "youngsModulusPa": 205000000000,
+    "poissonRatio": 0.29,
+    "densityKgPerM3": 7850,
+    "yieldStrengthPa": 435000000,
+    "ultimateStrengthPa": 670000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables"
+  },
+  "fieldRef": "beam.shock-field.json"
+}

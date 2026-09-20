@@ -12,15 +12,15 @@ enum UAVVehicleTypeFilter: String, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .all:
-            return NSLocalizedString("uav.filter.vehicle.all", comment: "")
+            return L10n.s("uav.filter.vehicle.all")
         case .multicopters:
-            return NSLocalizedString("uav.filter.vehicle.multicopters", comment: "")
+            return L10n.s("uav.filter.vehicle.multicopters")
         case .helicopters:
-            return NSLocalizedString("uav.filter.vehicle.helicopters", comment: "")
+            return L10n.s("uav.filter.vehicle.helicopters")
         case .fixedWing:
-            return NSLocalizedString("uav.filter.vehicle.fixed_wing", comment: "")
+            return L10n.s("uav.filter.vehicle.fixed_wing")
         case .hybridVTOL:
-            return NSLocalizedString("uav.filter.vehicle.hybrid_vtol", comment: "")
+            return L10n.s("uav.filter.vehicle.hybrid_vtol")
         }
     }
 
@@ -54,19 +54,19 @@ enum UAVMassCategoryFilter: String, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .all:
-            return NSLocalizedString("uav.filter.mass.all", comment: "")
+            return L10n.s("uav.filter.mass.all")
         case .nano:
-            return NSLocalizedString("uav.filter.mass.nano", comment: "")
+            return L10n.s("uav.filter.mass.nano")
         case .micro:
-            return NSLocalizedString("uav.filter.mass.micro", comment: "")
+            return L10n.s("uav.filter.mass.micro")
         case .light:
-            return NSLocalizedString("uav.filter.mass.light", comment: "")
+            return L10n.s("uav.filter.mass.light")
         case .medium:
-            return NSLocalizedString("uav.filter.mass.medium", comment: "")
+            return L10n.s("uav.filter.mass.medium")
         case .heavy:
-            return NSLocalizedString("uav.filter.mass.heavy", comment: "")
+            return L10n.s("uav.filter.mass.heavy")
         case .superheavy:
-            return NSLocalizedString("uav.filter.mass.superheavy", comment: "")
+            return L10n.s("uav.filter.mass.superheavy")
         }
     }
 
@@ -99,15 +99,15 @@ extension UAVVehicleType {
     var catalogTitle: String {
         switch self {
         case .multicopter:
-            return NSLocalizedString("uav.vehicle.multicopter", comment: "")
+            return L10n.s("uav.vehicle.multicopter")
         case .fixedWing:
-            return NSLocalizedString("uav.vehicle.fixed_wing", comment: "")
+            return L10n.s("uav.vehicle.fixed_wing")
         case .hybridVTOL:
-            return NSLocalizedString("uav.vehicle.hybrid_vtol", comment: "")
+            return L10n.s("uav.vehicle.hybrid_vtol")
         case .helicopter:
-            return NSLocalizedString("uav.vehicle.helicopter", comment: "")
+            return L10n.s("uav.vehicle.helicopter")
         case .custom:
-            return NSLocalizedString("uav.vehicle.custom", comment: "")
+            return L10n.s("uav.vehicle.custom")
         }
     }
 }
@@ -116,19 +116,19 @@ extension UAVMassCategory {
     var catalogTitle: String {
         switch self {
         case .nano:
-            return NSLocalizedString("uav.mass.nano", comment: "")
+            return L10n.s("uav.mass.nano")
         case .micro:
-            return NSLocalizedString("uav.mass.micro", comment: "")
+            return L10n.s("uav.mass.micro")
         case .light:
-            return NSLocalizedString("uav.mass.light", comment: "")
+            return L10n.s("uav.mass.light")
         case .medium:
-            return NSLocalizedString("uav.mass.medium", comment: "")
+            return L10n.s("uav.mass.medium")
         case .heavy:
-            return NSLocalizedString("uav.mass.heavy", comment: "")
+            return L10n.s("uav.mass.heavy")
         case .superheavy:
-            return NSLocalizedString("uav.mass.superheavy", comment: "")
+            return L10n.s("uav.mass.superheavy")
         case .custom:
-            return NSLocalizedString("uav.mass.custom", comment: "")
+            return L10n.s("uav.mass.custom")
         }
     }
 }
@@ -137,11 +137,11 @@ extension UAVSpecConfidence {
     var catalogTitle: String {
         switch self {
         case .verified:
-            return NSLocalizedString("uav.spec.verified", comment: "")
+            return L10n.s("uav.spec.verified")
         case .partial:
-            return NSLocalizedString("uav.spec.partial", comment: "")
+            return L10n.s("uav.spec.partial")
         case .custom:
-            return NSLocalizedString("uav.spec.custom", comment: "")
+            return L10n.s("uav.spec.custom")
         }
     }
 }

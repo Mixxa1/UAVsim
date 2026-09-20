@@ -258,6 +258,122 @@ void tetMass(const TetMesh& mesh, int element, double density, std::vector<doubl
     }
 }
 
+void tetConductivity(const TetMesh& mesh, int element, double k, std::vector<double>& matrix) {
+    const int count = mesh.nodesPerElement();
+    matrix.assign(static_cast<std::size_t>(count) * count, 0.0);
+    // The integrand ∇Nᵢ·∇Nⱼ is of degree 2 for a straight TET10, as the stiffness one is.
+    const auto& rule = tetIsCurved(mesh, element) ? tetQuadratureDegree5() : tetQuadratureDegree2();
+    for (const auto& point : rule) {
+        const auto jacobian = physicalGradients(mesh, element, point.xi);
+        const double scale = k * jacobian.determinant * point.weight;
+        for (int m = 0; m < count; ++m)
+            for (int n = 0; n < count; ++n) matrix[static_cast<std::size_t>(m) * count + n] += dot(jacobian.gradients[m], jacobian.gradients[n]) * scale;
+    }
+}
+
+void tetCapacity(const TetMesh& mesh, int element, double c, std::vector<double>& matrix) {
+    const int count = mesh.nodesPerElement();
+    matrix.assign(static_cast<std::size_t>(count) * count, 0.0);
+    for (const auto& point : tetQuadratureDegree5()) {
+        const auto jacobian = physicalGradients(mesh, element, point.xi);
+        double values[10];
+        Vec3 unused[10];
+        tetShapeFunctions(mesh.order, point.xi, values, unused);
+        const double scale = c * jacobian.determinant * point.weight;
+        for (int m = 0; m < count; ++m)
+            for (int n = 0; n < count; ++n) matrix[static_cast<std::size_t>(m) * count + n] += values[m] * values[n] * scale;
+    }
+}
+
+void tetConductivity(const TetMesh& mesh, int element, const std::function<double(double)>& conductivityOf,
+                     const std::vector<double>& nodalField, std::vector<double>& matrix) {
+    const int count = mesh.nodesPerElement();
+    matrix.assign(static_cast<std::size_t>(count) * count, 0.0);
+    // The coefficient is not a polynomial of the element's coordinates: the degree-5 rule throughout.
+    for (const auto& point : tetQuadratureDegree5()) {
+        const auto jacobian = physicalGradients(mesh, element, point.xi);
+        double values[10];
+        Vec3 unused[10];
+        tetShapeFunctions(mesh.order, point.xi, values, unused);
+        double field = 0.0;
+        for (int n = 0; n < count; ++n) field += values[n] * nodalField[mesh.elements[element][n]];
+        const double scale = conductivityOf(field) * jacobian.determinant * point.weight;
+        for (int m = 0; m < count; ++m)
+            for (int n = 0; n < count; ++n) matrix[static_cast<std::size_t>(m) * count + n] += dot(jacobian.gradients[m], jacobian.gradients[n]) * scale;
+    }
+}
+
+void tetCapacity(const TetMesh& mesh, int element, const std::function<double(double)>& capacityPerVolumeOf,
+                 const std::vector<double>& nodalField, std::vector<double>& matrix) {
+    const int count = mesh.nodesPerElement();
+    matrix.assign(static_cast<std::size_t>(count) * count, 0.0);
+    for (const auto& point : tetQuadratureDegree5()) {
+        const auto jacobian = physicalGradients(mesh, element, point.xi);
+        double values[10];
+        Vec3 unused[10];
+        tetShapeFunctions(mesh.order, point.xi, values, unused);
+        double field = 0.0;
+        for (int n = 0; n < count; ++n) field += values[n] * nodalField[mesh.elements[element][n]];
+        const double scale = capacityPerVolumeOf(field) * jacobian.determinant * point.weight;
+        for (int m = 0; m < count; ++m)
+            for (int n = 0; n < count; ++n) matrix[static_cast<std::size_t>(m) * count + n] += values[m] * values[n] * scale;
+    }
+}
+
+void tetScalarSource(const TetMesh& mesh, int element, double q, std::vector<double>& nodal) {
+    const int count = mesh.nodesPerElement();
+    nodal.assign(count, 0.0);
+    for (const auto& point : tetQuadratureDegree5()) {
+        const auto jacobian = physicalGradients(mesh, element, point.xi);
+        double values[10];
+        Vec3 unused[10];
+        tetShapeFunctions(mesh.order, point.xi, values, unused);
+        for (int n = 0; n < count; ++n) nodal[n] += values[n] * q * jacobian.determinant * point.weight;
+    }
+}
+
+void tetThermalLoad(const TetMesh& mesh, int element, const std::array<std::array<double, 6>, 6>& D,
+                    const std::vector<double>& thermal, std::vector<double>& nodal) {
+    const int count = mesh.nodesPerElement();
+    nodal.assign(static_cast<std::size_t>(3 * count), 0.0);
+    // ε_th is linear inside a straight TET10 when ΔT is, so Bᵀ D ε_th is of degree 2: the degree-5 rule
+    // is exact for straight elements and for any ΔT the elements can represent.
+    for (const auto& point : tetQuadratureDegree5()) {
+        const auto jacobian = physicalGradients(mesh, element, point.xi);
+        double values[10];
+        Vec3 unused[10];
+        tetShapeFunctions(mesh.order, point.xi, values, unused);
+        double e = 0.0;
+        for (int n = 0; n < count; ++n) e += values[n] * thermal[mesh.elements[element][n]];
+        double stress[6];
+        for (int r = 0; r < 6; ++r) stress[r] = (D[r][0] + D[r][1] + D[r][2]) * e;
+        const double scale = jacobian.determinant * point.weight;
+        for (int n = 0; n < count; ++n) {
+            double B[6][3];
+            bBlock(jacobian.gradients[n], B);
+            for (int c = 0; c < 3; ++c) {
+                double sum = 0.0;
+                for (int r = 0; r < 6; ++r) sum += B[r][c] * stress[r];
+                nodal[3 * n + c] += sum * scale;
+            }
+        }
+    }
+}
+
+double tetMeanSquareGradient(const TetMesh& mesh, int element, const std::vector<double>& nodalField) {
+    const int count = mesh.nodesPerElement();
+    double integral = 0.0, volume = 0.0;
+    for (const auto& point : tetQuadratureDegree5()) {
+        const auto jacobian = physicalGradients(mesh, element, point.xi);
+        Vec3 gradient;
+        for (int n = 0; n < count; ++n) gradient += jacobian.gradients[n] * nodalField[mesh.elements[element][n]];
+        const double weight = jacobian.determinant * point.weight;
+        integral += dot(gradient, gradient) * weight;
+        volume += weight;
+    }
+    return volume > 0.0 ? integral / volume : 0.0;
+}
+
 void tetBodyForce(const TetMesh& mesh, int element, const Vec3& f, std::vector<double>& nodal) {
     const int count = mesh.nodesPerElement();
     nodal.assign(static_cast<std::size_t>(3 * count), 0.0);
@@ -278,7 +394,7 @@ void tetBodyForce(const TetMesh& mesh, int element, const Vec3& f, std::vector<d
 
 std::vector<Voigt> tetQuadratureStress(const TetMesh& mesh, int element,
                                        const std::array<std::array<double, 6>, 6>& D,
-                                       const std::vector<Vec3>& u) {
+                                       const std::vector<Vec3>& u, const std::vector<double>* thermal) {
     const int count = mesh.nodesPerElement();
     std::vector<Voigt> stresses;
     stresses.reserve(4);
@@ -294,6 +410,14 @@ std::vector<Voigt> tetQuadratureStress(const TetMesh& mesh, int element,
             strain[3] += g.z * d.y + g.y * d.z;
             strain[4] += g.z * d.x + g.x * d.z;
             strain[5] += g.y * d.x + g.x * d.y;
+        }
+        if (thermal != nullptr) {
+            double values[10];
+            Vec3 unused[10];
+            tetShapeFunctions(mesh.order, point.xi, values, unused);
+            double e = 0.0;
+            for (int n = 0; n < count; ++n) e += values[n] * (*thermal)[mesh.elements[element][n]];
+            for (int c = 0; c < 3; ++c) strain[c] -= e;
         }
         Voigt stress{};
         for (int r = 0; r < 6; ++r) {

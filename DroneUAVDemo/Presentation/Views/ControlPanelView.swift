@@ -137,14 +137,14 @@ struct ControlPanelView: View {
                         Button("command.emergency_stop") { viewModel.activateEmergencyStop() }
                             .foregroundStyle(.red)
                         Spacer()
-                        Button(viewModel.isSimulationRunning ? String(localized: "command.stop_animation") : String(localized: "command.start_animation")) {
+                        Button(viewModel.isSimulationRunning ? L10n.s("command.stop_animation") : L10n.s("command.start_animation")) {
                             viewModel.toggleSimulation()
                         }
                         .buttonStyle(.borderedProminent)
                     }
 
                     SliderControlRow(
-                        title: String(localized: "panel.throttle"),
+                        title: L10n.s("panel.throttle"),
                         value: binding(get: { viewModel.controlValues.throttle }, set: viewModel.setThrottle),
                         range: 0.0...1.0,
                         step: 0.01,
@@ -231,7 +231,7 @@ struct ControlPanelView: View {
 
                     if viewModel.supportsDistanceControl {
                         SliderControlRow(
-                            title: String(localized: "camera.distance"),
+                            title: L10n.s("camera.distance"),
                             value: binding(get: { viewModel.activeCameraDistance }, set: viewModel.setActiveCameraDistance),
                             range: viewModel.activeCameraDistanceRange,
                             step: 0.1,
@@ -239,7 +239,7 @@ struct ControlPanelView: View {
                         )
                     }
 
-                    SliderControlRow(title: String(localized: "camera.fov"), value: binding(get: { Double(viewModel.cameraConfiguration.fov) }, set: viewModel.setCameraFov), range: 30.0...110.0, step: 1.0, formatter: Self.angleFormatter)
+                    SliderControlRow(title: L10n.s("camera.fov"), value: binding(get: { Double(viewModel.cameraConfiguration.fov) }, set: viewModel.setCameraFov), range: 30.0...110.0, step: 1.0, formatter: Self.angleFormatter)
 
                     DisclosureGroup(isExpanded: $advancedCameraExpanded) {
                         VStack(spacing: 10) {
@@ -252,10 +252,10 @@ struct ControlPanelView: View {
                                 }
                             }
 
-                            SliderControlRow(title: String(localized: "camera.sensitivity"), value: binding(get: { Double(viewModel.cameraConfiguration.sensitivity) }, set: viewModel.setCameraSensitivity), range: 0.2...2.5, step: 0.05, formatter: Self.throttleFormatter)
-                            SliderControlRow(title: String(localized: "camera.smoothing"), value: binding(get: { Double(viewModel.cameraConfiguration.smoothing) }, set: viewModel.setCameraSmoothing), range: 0.0...0.95, step: 0.01, formatter: Self.throttleFormatter)
-                            SliderControlRow(title: String(localized: "camera.zoom_sensitivity"), value: binding(get: { Double(viewModel.cameraConfiguration.free.zoomSensitivity) }, set: viewModel.setCameraZoomSensitivity), range: 0.2...3.0, step: 0.05, formatter: Self.throttleFormatter)
-                            SliderControlRow(title: String(localized: "camera.free_speed"), value: binding(get: { Double(viewModel.cameraConfiguration.free.moveSpeed) }, set: viewModel.setFreeCameraMoveSpeed), range: 0.5...16.0, step: 0.1, formatter: Self.coordinateFormatter)
+                            SliderControlRow(title: L10n.s("camera.sensitivity"), value: binding(get: { Double(viewModel.cameraConfiguration.sensitivity) }, set: viewModel.setCameraSensitivity), range: 0.2...2.5, step: 0.05, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.smoothing"), value: binding(get: { Double(viewModel.cameraConfiguration.smoothing) }, set: viewModel.setCameraSmoothing), range: 0.0...0.95, step: 0.01, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.zoom_sensitivity"), value: binding(get: { Double(viewModel.cameraConfiguration.free.zoomSensitivity) }, set: viewModel.setCameraZoomSensitivity), range: 0.2...3.0, step: 0.05, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.free_speed"), value: binding(get: { Double(viewModel.cameraConfiguration.free.moveSpeed) }, set: viewModel.setFreeCameraMoveSpeed), range: 0.5...16.0, step: 0.1, formatter: Self.coordinateFormatter)
 
                             Toggle("camera.invert_x", isOn: Binding(
                                 get: { viewModel.cameraConfiguration.invertLookX },
@@ -266,14 +266,14 @@ struct ControlPanelView: View {
                                 set: { viewModel.setCameraInvertY($0) }
                             ))
 
-                            SliderControlRow(title: String(localized: "camera.fpv_yaw_limit"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.yawLimitDeg) }, set: viewModel.setFPVYawLimit), range: 2.0...60.0, step: 1.0, formatter: Self.angleFormatter)
-                            SliderControlRow(title: String(localized: "camera.fpv_pitch_limit"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.pitchLimitDeg) }, set: viewModel.setFPVPitchLimit), range: 2.0...45.0, step: 1.0, formatter: Self.angleFormatter)
-                            SliderControlRow(title: String(localized: "camera.fpv_near_clip"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.nearClip) }, set: viewModel.setFPVNearClip), range: 0.005...0.25, step: 0.005, formatter: Self.throttleFormatter)
-                            SliderControlRow(title: String(localized: "camera.fpv_stabilization"), value: binding(get: { Double(viewModel.cameraConfiguration.fpvStabilization) }, set: viewModel.setFPVStabilization), range: 0.0...1.0, step: 0.01, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.fpv_yaw_limit"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.yawLimitDeg) }, set: viewModel.setFPVYawLimit), range: 2.0...60.0, step: 1.0, formatter: Self.angleFormatter)
+                            SliderControlRow(title: L10n.s("camera.fpv_pitch_limit"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.pitchLimitDeg) }, set: viewModel.setFPVPitchLimit), range: 2.0...45.0, step: 1.0, formatter: Self.angleFormatter)
+                            SliderControlRow(title: L10n.s("camera.fpv_near_clip"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.nearClip) }, set: viewModel.setFPVNearClip), range: 0.005...0.25, step: 0.005, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.fpv_stabilization"), value: binding(get: { Double(viewModel.cameraConfiguration.fpvStabilization) }, set: viewModel.setFPVStabilization), range: 0.0...1.0, step: 0.01, formatter: Self.throttleFormatter)
 
-                            SliderControlRow(title: String(localized: "camera.fpv_mount_x"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.mountOffset.x) }, set: viewModel.setFPVMountOffsetX), range: -0.08...0.08, step: 0.001, formatter: Self.throttleFormatter)
-                            SliderControlRow(title: String(localized: "camera.fpv_mount_y"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.mountOffset.y) }, set: viewModel.setFPVMountOffsetY), range: -0.02...0.12, step: 0.001, formatter: Self.throttleFormatter)
-                            SliderControlRow(title: String(localized: "camera.fpv_mount_z"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.mountOffset.z) }, set: viewModel.setFPVMountOffsetZ), range: -0.20...0.08, step: 0.001, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.fpv_mount_x"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.mountOffset.x) }, set: viewModel.setFPVMountOffsetX), range: -0.08...0.08, step: 0.001, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.fpv_mount_y"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.mountOffset.y) }, set: viewModel.setFPVMountOffsetY), range: -0.02...0.12, step: 0.001, formatter: Self.throttleFormatter)
+                            SliderControlRow(title: L10n.s("camera.fpv_mount_z"), value: binding(get: { Double(viewModel.cameraConfiguration.fpv.mountOffset.z) }, set: viewModel.setFPVMountOffsetZ), range: -0.20...0.08, step: 0.001, formatter: Self.throttleFormatter)
 
                             Toggle("camera.fpv_hide_obstructing", isOn: Binding(
                                 get: { viewModel.cameraConfiguration.fpv.hideObstructingParts },
@@ -307,10 +307,10 @@ struct ControlPanelView: View {
                         }
                     }
 
-                    SliderControlRow(title: String(localized: "weather.intensity"), value: binding(get: { Double(viewModel.weather.intensity) }, set: viewModel.setWeatherIntensity), range: 0.0...1.0, step: 0.01, formatter: Self.throttleFormatter)
-                    SliderControlRow(title: String(localized: "weather.wind_direction"), value: binding(get: { Double(viewModel.weather.windDirectionDeg) }, set: viewModel.setWindDirection), range: -180.0...180.0, step: 1.0, formatter: Self.angleFormatter)
-                    SliderControlRow(title: String(localized: "weather.wind_speed"), value: binding(get: { Double(viewModel.weather.windSpeedMps) }, set: viewModel.setWindSpeed), range: 0.0...30.0, step: 0.1, formatter: Self.coordinateFormatter)
-                    SliderControlRow(title: String(localized: "weather.gusts"), value: binding(get: { Double(viewModel.weather.gusts) }, set: viewModel.setWindGusts), range: 0.0...1.0, step: 0.01, formatter: Self.throttleFormatter)
+                    SliderControlRow(title: L10n.s("weather.intensity"), value: binding(get: { Double(viewModel.weather.intensity) }, set: viewModel.setWeatherIntensity), range: 0.0...1.0, step: 0.01, formatter: Self.throttleFormatter)
+                    SliderControlRow(title: L10n.s("weather.wind_direction"), value: binding(get: { Double(viewModel.weather.windDirectionDeg) }, set: viewModel.setWindDirection), range: -180.0...180.0, step: 1.0, formatter: Self.angleFormatter)
+                    SliderControlRow(title: L10n.s("weather.wind_speed"), value: binding(get: { Double(viewModel.weather.windSpeedMps) }, set: viewModel.setWindSpeed), range: 0.0...30.0, step: 0.1, formatter: Self.coordinateFormatter)
+                    SliderControlRow(title: L10n.s("weather.gusts"), value: binding(get: { Double(viewModel.weather.gusts) }, set: viewModel.setWindGusts), range: 0.0...1.0, step: 0.01, formatter: Self.throttleFormatter)
 
                     Divider()
 
@@ -335,7 +335,7 @@ struct ControlPanelView: View {
                     .pickerStyle(.menu)
 
                     SliderControlRow(
-                        title: String(localized: "terrain.density"),
+                        title: L10n.s("terrain.density"),
                         value: binding(get: { Double(viewModel.terrain.density) }, set: viewModel.setTerrainDensity),
                         range: 0.0...1.0,
                         step: 0.01,
@@ -439,7 +439,7 @@ struct ControlPanelView: View {
                 }
             }
 
-            SliderControlRow(title: String(localized: "fleet.separation"), value: binding(get: { Double(viewModel.fleetStatus.separationDistance) }, set: viewModel.setSeparationDistance), range: 1.0...20.0, step: 0.1, formatter: Self.coordinateFormatter)
+            SliderControlRow(title: L10n.s("fleet.separation"), value: binding(get: { Double(viewModel.fleetStatus.separationDistance) }, set: viewModel.setSeparationDistance), range: 1.0...20.0, step: 0.1, formatter: Self.coordinateFormatter)
         }
     }
 

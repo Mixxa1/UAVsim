@@ -35,7 +35,7 @@ struct MissionMapOverlayView: View {
 
     private var mapSummaryText: String {
         let home = snapshot.dockPosition
-        let format = NSLocalizedString("mission.map.summary.format", comment: "")
+        let format = L10n.s("mission.map.summary.format")
         return String.localizedStringWithFormat(
             format,
             snapshot.dronePosition.x,
@@ -200,7 +200,7 @@ struct MissionMapOverlayView: View {
                     )
                     Text(
                         String.localizedStringWithFormat(
-                            NSLocalizedString("mission.map.zone_radius.value", comment: ""),
+                            L10n.s("mission.map.zone_radius.value"),
                             draftPlan.dropZone?.radius ?? 0.0
                         )
                     )
@@ -234,8 +234,8 @@ struct MissionMapOverlayView: View {
 
                 Text(
                     payloadState == .attached
-                        ? String(localized: "mission.map.payload_ready")
-                        : String(localized: "mission.map.payload_unavailable")
+                        ? L10n.s("mission.map.payload_ready")
+                        : L10n.s("mission.map.payload_unavailable")
                 )
                     .font(.system(size: 10, weight: .medium, design: .monospaced))
                     .foregroundStyle(payloadState == .attached ? GroundControlPalette.success : GroundControlPalette.textSecondary)
@@ -275,10 +275,10 @@ struct MissionMapOverlayView: View {
 
     private var routeValue: String {
         guard let routeTarget = draftPlan.routeTarget else {
-            return String(localized: "mission.map.no_route_target")
+            return L10n.s("mission.map.no_route_target")
         }
         return String.localizedStringWithFormat(
-            NSLocalizedString("mission.map.route.value.format", comment: ""),
+            L10n.s("mission.map.route.value.format"),
             routeTarget.position.x,
             routeTarget.position.y
         )
@@ -286,10 +286,10 @@ struct MissionMapOverlayView: View {
 
     private var dropZoneValue: String {
         guard let dropZone = draftPlan.dropZone else {
-            return String(localized: "mission.map.no_drop_zone_value")
+            return L10n.s("mission.map.no_drop_zone_value")
         }
         return String.localizedStringWithFormat(
-            NSLocalizedString("mission.map.drop_zone.value.format", comment: ""),
+            L10n.s("mission.map.drop_zone.value.format"),
             dropZone.center.x,
             dropZone.center.y,
             dropZone.radius

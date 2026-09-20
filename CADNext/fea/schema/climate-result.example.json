@@ -1,0 +1,312 @@
+{
+  "schema": "cadnext-climate-result/1",
+  "testType": "climatic",
+  "outcome": "fail",
+  "solverID": "cadnext.fea.climate-tet10",
+  "solverVersion": "fea 2 / netgen 6.2.2607 / materials 2",
+  "metrics": {
+    "peakTemperatureK": {
+      "value": 364.77893487216824,
+      "unit": "K",
+      "numericalUncertainty": 0.0011971943677243266
+    },
+    "lowTemperatureK": {
+      "value": 320.6155136212574,
+      "unit": "K",
+      "numericalUncertainty": 0.0007066327021357432
+    },
+    "peakThermalStressPa": {
+      "value": 169943.72805592435,
+      "unit": "Pa",
+      "numericalUncertainty": 5514.001268382172
+    },
+    "reserveFactor": {
+      "value": 1216.0888138140508,
+      "unit": "1",
+      "numericalUncertainty": 38.21726912606937
+    },
+    "ultimateMargin": {
+      "value": 1215.0888138140508,
+      "unit": "1"
+    },
+    "yieldMargin": {
+      "value": 1623.0669965129582,
+      "unit": "1"
+    },
+    "convectionCoefficientWm2K": {
+      "value": 15.155055675733674,
+      "unit": "W/(m2 K)"
+    },
+    "cycles": {
+      "value": 3,
+      "unit": "1"
+    }
+  },
+  "warnings": [
+    "нет данных о допустимой температуре материала «Алюминий 6061-T6» — задайте её по паспорту материала (максимум 91.6 °C)",
+    "прочность взята при комнатной температуре; при 91.6 °C она ниже — нет данных",
+    "естественная конвекция не учтена (консервативно): её оценка 11.8 Вт/(м²·К) против вынужденной 11.4–18.9"
+  ],
+  "failureReasons": [
+    "avionics: максимум 91.6 °C ± 0.001 K против предела 85.0 °C"
+  ],
+  "settings": {
+    "material": "al_6061_t6",
+    "materialDatabaseVersion": 2,
+    "coarseElementSizeM": 0.02,
+    "refinementFactor": 1.5,
+    "factorOfSafety": 1.5,
+    "mesher": "netgen 6.2.2607",
+    "loadCase": {
+      "name": "plate 100 × 100 × 10 mm, A1 with sun (test_fea_climate_study)",
+      "supports": [],
+      "forces": [],
+      "pressures": [],
+      "bodyAccelerationMps2": [
+        0,
+        0,
+        0
+      ],
+      "stressExclusions": []
+    },
+    "climate": {
+      "environment": "hot",
+      "category": "A1",
+      "exposure": "sun",
+      "airflow": "chamber",
+      "airSpeedMps": 1.5,
+      "upDirection": [
+        0,
+        0,
+        1
+      ],
+      "flowDirection": [
+        1,
+        0,
+        0
+      ],
+      "solarAbsorptance": 0.6,
+      "emissivity": 0.8,
+      "stressFreeK": 293.15,
+      "operating": true,
+      "components": [
+        {
+          "name": "avionics",
+          "face": "face-4",
+          "powerW": 5,
+          "minimumK": 233.15,
+          "maximumK": 358.15
+        }
+      ],
+      "convectionBand": 0.25,
+      "stepS": 300
+    }
+  },
+  "environment": {
+    "source": "MIL-STD-810H, Method 505.7, Figure 505.7-1 (Procedure I), category A1",
+    "airPeakK": 322.15,
+    "airLowK": 305.15,
+    "irradiancePeakWm2": 1120,
+    "pressurePa": 101325
+  },
+  "heatExchange": {
+    "characteristicLengthM": 0.1,
+    "convectionWm2K": 15.155055675733674,
+    "convectionLowWm2K": 11.366291756800255,
+    "convectionHighWm2K": 18.943819594667094,
+    "reynolds": 8851.189124526732,
+    "laminar": true,
+    "recoveryRiseK": 0,
+    "naturalConvectionWm2K": 11.781786348572531,
+    "sunlitProjectedAreaM2": 0.010000000000000012,
+    "shadedAreaM2": 0,
+    "absorbedSolarPeakW": 6.720000000000009,
+    "exposedAreaM2": 0.014000000000000004,
+    "coveredAreaM2": 0.010000000000000026
+  },
+  "time": {
+    "transient": true,
+    "stepS": 300,
+    "cycles": 3,
+    "lastCycleChangeK": 4.755747795570642e-09,
+    "periodic": true,
+    "timeStepErrorK": 0.0007063317311425029
+  },
+  "temperature": {
+    "peakK": 364.77893487216824,
+    "peakTimeS": 48000,
+    "peakUncertaintyK": 0.0011971943677243266,
+    "peakOtherEdgeK": 352.5088148067593,
+    "hottestPoint": [
+      0.048787304637118396,
+      0.048666846926386884,
+      0
+    ],
+    "lowK": 320.6155136212574,
+    "lowTimeS": 21600,
+    "lowUncertaintyK": 0.0007066327021357432,
+    "materialChecks": []
+  },
+  "components": [
+    {
+      "name": "avionics",
+      "face": "face-4",
+      "powerW": 5,
+      "maximumK": 364.77893487216824,
+      "maximumTimeS": 48000,
+      "minimumK": 320.64289540352104,
+      "uncertaintyK": 0.0011971943677243266,
+      "outcome": "fail",
+      "checks": [
+        {
+          "limit": "maximum",
+          "valueK": 364.77893487216824,
+          "uncertaintyK": 0.0011971943677243266,
+          "limitK": 358.15,
+          "outcome": "fail"
+        },
+        {
+          "limit": "minimum",
+          "valueK": 320.64289540352104,
+          "uncertaintyK": 0.0011971943677243266,
+          "limitK": 233.15,
+          "outcome": "pass"
+        }
+      ],
+      "convergence": {
+        "behaviour": "oscillatory",
+        "observedOrder": 0,
+        "orderLimitedToFormal": false,
+        "extrapolated": 364.77893487216824,
+        "gciFineRelative": 6.728220706519685e-07,
+        "asymptoticRatio": 0
+      }
+    }
+  ],
+  "criticalRegion": {
+    "point": [
+      0.04999999999999999,
+      0.1,
+      0.005
+    ],
+    "face": "face-2",
+    "timeS": 47700,
+    "otherEdgeStressPa": 169790.03244189877
+  },
+  "series": {
+    "timeS": [
+      0,
+      1800,
+      3600,
+      5400,
+      7200
+    ],
+    "airK": [
+      310.15,
+      309.15,
+      308.15,
+      307.65,
+      307.15
+    ],
+    "irradianceWm2": [
+      0,
+      0,
+      0,
+      0,
+      0
+    ],
+    "partMaximumK": [
+      331.0802844644243,
+      330.3652366049102,
+      329.4677791020866,
+      328.7863374171176,
+      328.28264612019285
+    ],
+    "partMinimumK": [
+      330.9357892895501,
+      330.21934574939047,
+      329.3216544981508,
+      328.64156505660736,
+      328.1381010983734
+    ],
+    "components": [
+      {
+        "name": "avionics",
+        "maximumK": [
+          331.0802844644243,
+          330.3652366049102,
+          329.4677791020866,
+          328.7863374171176,
+          328.28264612019285
+        ]
+      }
+    ]
+  },
+  "meshStudy": [
+    {
+      "maximumElementSizeM": 0.02,
+      "elements": 187,
+      "peakK": 364.77882508808165,
+      "lowK": 326.93768515819806,
+      "peakStressPa": 164494.32804743343,
+      "cycles": 3
+    },
+    {
+      "maximumElementSizeM": 0.013333333333333334,
+      "elements": 393,
+      "peakK": 364.77844400953165,
+      "lowK": 326.93768578533707,
+      "peakStressPa": 167646.40859307593,
+      "cycles": 3
+    },
+    {
+      "maximumElementSizeM": 0.008888888888888889,
+      "elements": 882,
+      "peakK": 364.77893487216824,
+      "lowK": 326.93768608492957,
+      "peakStressPa": 169943.72805592435,
+      "cycles": 3
+    }
+  ],
+  "convergence": {
+    "peakTemperature": {
+      "behaviour": "oscillatory",
+      "observedOrder": 0,
+      "orderLimitedToFormal": false,
+      "extrapolated": 364.77893487216824,
+      "gciFineRelative": 6.728220706519685e-07,
+      "asymptoticRatio": 0
+    },
+    "lowTemperature": {
+      "behaviour": "monotonic",
+      "observedOrder": 3.203982109548546,
+      "orderLimitedToFormal": true,
+      "extrapolated": 326.93768632570635,
+      "gciFineRelative": 9.205760181531039e-10,
+      "asymptoticRatio": 1.0535315208818445
+    },
+    "stress": {
+      "behaviour": "monotonic",
+      "observedOrder": 1.5558159751467069,
+      "orderLimitedToFormal": false,
+      "extrapolated": 174354.92907063008,
+      "gciFineRelative": 0.03244604158952926,
+      "asymptoticRatio": 1.0137033622260607
+    }
+  },
+  "material": {
+    "id": "al_6061_t6",
+    "youngsModulusPa": 68900000000,
+    "poissonRatio": 0.33,
+    "densityKgPerM3": 2700,
+    "yieldStrengthPa": 276000000,
+    "ultimateStrengthPa": 310000000,
+    "isotropicApproximation": false,
+    "source": "typical room-temperature values (ASM Handbook / supplier datasheets); not MMPDS allowables",
+    "thermalExpansionPerK": 2.264e-05,
+    "thermalConductivityWmK": 154.4,
+    "specificHeatJkgK": 943.1,
+    "thermalSource": "NIST cryogenic properties, 6061-T6 (UNS A96061): k and cp fits (±0.5 %, ±5 %), linear expansion fit (±4 %), at 293 K"
+  },
+  "fieldRef": "plate.climate-field.json"
+}

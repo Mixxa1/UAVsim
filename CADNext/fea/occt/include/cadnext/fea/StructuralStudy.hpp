@@ -5,6 +5,7 @@
 #include "cadnext/fea/FeaTypes.hpp"
 #include "cadnext/fea/Material.hpp"
 #include "cadnext/fea/StrengthAssessment.hpp"
+#include "cadnext/fea/TetMesh.hpp"
 #include "cadnext/kernel/ShapeHandle.hpp"
 
 #include <array>
@@ -103,6 +104,10 @@ struct StructuralStudyResult {
     std::vector<std::string> warnings;
     StructuralSurfaceField field;
 };
+
+// Nodes within `distanceM` of any of `faceNodes` (a uniform grid of that cell size). Used for stress
+// exclusion zones and for "is the maximum at a clamp".
+std::vector<bool> nodesNear(const TetMesh& mesh, const std::vector<int>& faceNodes, double distanceM);
 
 inline constexpr const char* kStructuralSolverID = "cadnext.fea.linear-static-tet10";
 // 2: modal jobs accept attached equipment masses (older solvers ignore the key silently, so the

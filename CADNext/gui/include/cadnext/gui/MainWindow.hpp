@@ -289,6 +289,7 @@ private:
     void showStructuralStudy();
     // Файл → «Экспорт в Мастерскую»: every body with exact geometry, as a version-2 .uavframe.
     void exportToWorkbench();
+    void showAerodynamics();
 
     // Dirty-state.
     void markDirty();

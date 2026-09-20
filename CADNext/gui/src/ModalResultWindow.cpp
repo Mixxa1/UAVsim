@@ -3,7 +3,6 @@
 #include "ViewerSnapshot.hpp"
 
 #include "cadnext/fea/FeaJson.hpp"
-#include "cadnext/fea/StructuralReport.hpp"
 #include "cadnext/viewer/ModalFieldScene.hpp"
 #include "cadnext/viewer/StructuralFieldScene.hpp"
 
@@ -13,10 +12,8 @@
 #include <Inventor/nodes/SoPerspectiveCamera.h>
 #include <Inventor/nodes/SoSeparator.h>
 
-#include <QDesktopServices>
 #include <QDir>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QHeaderView>
@@ -31,7 +28,6 @@
 #include <QSplitter>
 #include <QTableWidget>
 #include <QTimer>
-#include <QUrl>
 #include <QVBoxLayout>
 
 #include <algorithm>
@@ -126,7 +122,7 @@ protected:
             painter.drawText(rect(), Qt::AlignCenter, QStringLiteral("нет частот"));
             return;
         }
-        // Log axis when the picture spans more than a decade, as in the HTML report.
+        // A logarithmic axis keeps widely separated frequencies readable.
         log_ = hi / lo > 10.0;
         if (log_) {
             lo /= 1.25;
@@ -332,7 +328,6 @@ void ModalResultWindow::buildInterface() {
     study_ = new QLabel;
     study_->setTextFormat(Qt::RichText);
     study_->setWordWrap(true);
-    auto* report = new QPushButton(tr("Сохранить HTML-отчёт…"));
 
     layout->addWidget(title_);
     layout->addWidget(verdict_);
@@ -349,7 +344,6 @@ void ModalResultWindow::buildInterface() {
     layout->addWidget(conditions_);
     layout->addWidget(study_);
     layout->addStretch(1);
-    layout->addWidget(report);
 
     auto* scroll = new QScrollArea(splitter);
     scroll->setWidgetResizable(true);
@@ -385,7 +379,6 @@ void ModalResultWindow::buildInterface() {
         if (!rows.isEmpty()) selectMode(rows.front().row());
     });
     spectrum_->onModeClicked = [this](int index) { selectMode(index); };
-    connect(report, &QPushButton::clicked, this, [this]() { saveReport(); });
 }
 
 bool ModalResultWindow::openResult(const QString& resultPath) {
@@ -631,23 +624,6 @@ QImage ModalResultWindow::snapshot() {
     QImage image = detail::snapshotWithViewer(*this, *viewer_, viewerRoot_);
     scene_->setPhase(phase_);
     return image;
-}
-
-void ModalResultWindow::saveReport() {
-    if (resultPath_.isEmpty()) return;
-    QString suggested = resultPath_;
-    suggested.replace(".result.json", ".report.html");
-    if (suggested == resultPath_) suggested += ".report.html";
-    const QString path = QFileDialog::getSaveFileName(this, tr("HTML-отчёт"), suggested, tr("HTML (*.html)"));
-    if (path.isEmpty()) return;
-    QFile file(path);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        QMessageBox::warning(this, tr("HTML-отчёт"), tr("Не удалось записать %1").arg(path));
-        return;
-    }
-    file.write(QByteArray::fromStdString(fea::modalReportHtml(resultJson_.toStdString(), fieldJson_.toStdString())));
-    file.close();
-    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 } // namespace cadnext::gui

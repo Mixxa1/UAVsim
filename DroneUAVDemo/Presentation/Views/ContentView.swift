@@ -366,7 +366,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         activeSimulation = DroneSimulationViewModel(
             projectStorage: projectStorage,
             initialProjectID: projectStorage.createProjectID(),
-            initialProjectName: NSLocalizedString("mission.project.name", comment: ""),
+            initialProjectName: L10n.s("mission.project.name"),
             initialDroneProfile: selectedProfile,
             missionScenarioContext: config
         )
@@ -650,7 +650,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         guard let runtimeProfile = repository.allProfiles.first(where: { $0.id == canonicalID }) else {
             globalAlert = TelemetryExportAlert(
                 titleKey: "cad.mount_editor.launch_failed",
-                message: NSLocalizedString("payload.message.select_uav", comment: "")
+                message: L10n.s("payload.message.select_uav")
             )
             return
         }
@@ -664,7 +664,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         }
 
         let projectID = projectStorage.createProjectID()
-        let payloadName = configuration.mountedCADPayload?.partName ?? NSLocalizedString("cad.payload.runtime.name", comment: "")
+        let payloadName = configuration.mountedCADPayload?.partName ?? L10n.s("cad.payload.runtime.name")
         activeSimulation = DroneSimulationViewModel(
             projectStorage: projectStorage,
             initialProjectID: projectID,
@@ -1114,12 +1114,10 @@ private struct KeyBindingsSheetHost: View {
                         simulationViewModel.setBindingsPanelVisible(false)
                     }
                 ) {
-                    KeyBindingsSettingsView(
-                        simulationViewModel: simulationViewModel,
-                        bindingsViewModel: bindingsViewModel
-                    )
+                    SettingsView(onClose: { simulationViewModel.setBindingsPanelVisible(false) }, simulationViewModel: simulationViewModel)
                 }
-                .frame(width: 760, height: 720)
+                .frame(width: min(1040, (NSScreen.main?.visibleFrame.width ?? 1200) - 80),
+                       height: min(800, (NSScreen.main?.visibleFrame.height ?? 900) - 100))
             }
     }
 }
@@ -1246,7 +1244,7 @@ struct ContentView: View {
         .alert(item: $deleteCandidate) { candidate in
             Alert(
                 title: Text("project.delete.confirm.title"),
-                message: Text(String(format: NSLocalizedString("project.delete.confirm.message", comment: ""), candidate.name)),
+                message: Text(String(format: L10n.s("project.delete.confirm.message"), candidate.name)),
                 primaryButton: .destructive(Text("project.delete.action")) {
                     appShell.deleteProject(candidate)
                 },
@@ -1279,7 +1277,7 @@ struct ContentView: View {
     private func unsavedMessage() -> String {
         let projectName = appShell.activeSimulation?.currentProjectName ?? "Project"
         return String(
-            format: NSLocalizedString("project.unsaved.message", comment: ""),
+            format: L10n.s("project.unsaved.message"),
             projectName
         )
     }
@@ -1292,7 +1290,7 @@ struct ContentView: View {
                     .padding(.bottom, 2)
 
                 VStack(alignment: .leading, spacing: 8) {
-                    TextField(String(localized: "menu.search"), text: $appShell.searchQuery)
+                    TextField(L10n.s("menu.search"), text: $appShell.searchQuery)
                         .textFieldStyle(.roundedBorder)
 
                     Picker("menu.sort", selection: $appShell.sortOrder) {
@@ -1369,7 +1367,7 @@ struct ContentView: View {
                         startScreenActions
                     }
                 }
-                .frame(maxWidth: 760)
+                .frame(maxWidth: isSettingsPresented ? 1080 : 760)
                 .padding(.horizontal, 20)
             }
         }
@@ -1426,11 +1424,11 @@ struct ContentView: View {
 
             VStack(spacing: 12) {
                 HStack(spacing: 12) {
-                    startMenuButton(title: NSLocalizedString("mission.menu.entry", comment: ""), systemImage: "target") {
+                    startMenuButton(title: L10n.s("mission.menu.entry"), systemImage: "target") {
                         isMissionSetupPresented = true
                     }
 
-                    startMenuButton(title: "Мульти-испытания", systemImage: "network") {
+                    startMenuButton(title: L10n.s("menu.online_trials"), systemImage: "network") {
                         // v1.5.1: when no project is active the simulation defaults to
                         // UAVReferenceCatalog.defaultProfileID; pass the same fallback so
                         // remote replica assignments match the local UAV that will be used.
@@ -1443,20 +1441,20 @@ struct ContentView: View {
                 }
 
                 HStack(spacing: 12) {
-                    startMenuButton(title: "Самописец", systemImage: "archivebox") {
+                    startMenuButton(title: L10n.s("menu.recorder"), systemImage: "archivebox") {
                         startScreenReplayLibrary.refresh()
                         isReplayCenterPresented = true
                     }
 
                     startMenuButton(
-                        title: NSLocalizedString("settings.menu.entry", comment: ""),
+                        title: L10n.s("settings.menu.entry"),
                         systemImage: "gearshape"
                     ) {
                         isSettingsPresented = true
                     }
                 }
 
-                startMenuButton(title: "Workbench — сборка дрона", systemImage: "wrench.and.screwdriver.fill") {
+                startMenuButton(title: L10n.s("menu.workbench"), systemImage: "wrench.and.screwdriver.fill") {
                     isWorkbenchPresented = true
                 }
             }
@@ -1938,7 +1936,7 @@ struct ContentView: View {
                 headerUtilityButtonLabel(systemImage: "folder.badge.gearshape")
             }
             .menuStyle(.borderlessButton)
-            .help(String(localized: "toolbar.header.project"))
+            .help(L10n.s("toolbar.header.project"))
 
             Menu {
                 ForEach(SimulationTimeScale.allCases) { scale in
@@ -1965,7 +1963,7 @@ struct ContentView: View {
             }
             .menuStyle(.borderlessButton)
             .fixedSize()
-            .help(String(localized: "hud.time_scale"))
+            .help(L10n.s("hud.time_scale"))
 
             Button {
                 viewModel.replayLibraryViewModel.refresh()
@@ -1990,7 +1988,7 @@ struct ContentView: View {
                 headerUtilityButtonLabel(systemImage: "keyboard")
             }
             .buttonStyle(.plain)
-            .help(String(localized: "keybind.open"))
+            .help(L10n.s("keybind.open"))
             .controllerButtonTarget(id: "header.keybindings") {
                 viewModel.setBindingsPanelVisible(true)
             }
@@ -2001,7 +1999,7 @@ struct ContentView: View {
                 headerUtilityButtonLabel(systemImage: "map")
             }
             .buttonStyle(.plain)
-            .help(String(localized: "mission.map.open_help"))
+            .help(L10n.s("mission.map.open_help"))
             .controllerButtonTarget(id: "header.missionMap") {
                 viewModel.toggleMissionMap()
             }
@@ -2013,7 +2011,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .disabled(!viewModel.isToolPanelVisible)
-            .help(String(localized: "panel.hide"))
+            .help(L10n.s("panel.hide"))
             .controllerButtonTarget(id: "header.hideTools") {
                 viewModel.setToolPanelVisible(false)
             }
@@ -2025,7 +2023,7 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .disabled(viewModel.isToolPanelVisible)
-            .help(String(localized: "panel.show"))
+            .help(L10n.s("panel.show"))
             .controllerButtonTarget(id: "header.showTools") {
                 viewModel.setToolPanelVisible(true)
             }
@@ -2258,12 +2256,12 @@ struct ContentView: View {
             Text(LocalizedStringKey(mode.titleKey))
                 .font(.headline)
 
-            TextField(String(localized: "project.name"), text: $nameDraft)
+            TextField(L10n.s("project.name"), text: $nameDraft)
                 .textFieldStyle(.roundedBorder)
                 .controllerTextInputTarget(
                     id: "project.name.input",
-                    title: String(localized: "project.name"),
-                    placeholder: String(localized: "project.name"),
+                    title: L10n.s("project.name"),
+                    placeholder: L10n.s("project.name"),
                     currentText: { nameDraft },
                     onCommit: { nameDraft = $0 }
                 )
@@ -2323,6 +2321,7 @@ struct ContentView: View {
 
     private func formattedDate(_ date: Date) -> String {
         let formatter = DateFormatter()
+        formatter.locale = selectedLanguage.locale
         formatter.dateStyle = .medium
         formatter.timeStyle = .short
         return formatter.string(from: date)
@@ -2332,7 +2331,7 @@ struct ContentView: View {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return String(
-            format: NSLocalizedString("project.default_name", comment: ""),
+            format: L10n.s("project.default_name"),
             formatter.string(from: Date())
         )
     }

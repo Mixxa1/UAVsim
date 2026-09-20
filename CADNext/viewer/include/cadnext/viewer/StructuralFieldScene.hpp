@@ -7,6 +7,7 @@ class SoCoordinate3;
 class SoMaterial;
 class SoSeparator;
 class SoTranslation;
+class SoSwitch;
 
 // Coin3D scene of a structural result's surface field: the part coloured by the chosen
 // quantity on its deformed shape, with the critical point marked. No Qt — the CADNext result
@@ -19,6 +20,9 @@ enum class FieldQuantity {
     Utilization,  // σ/σ_allowable, absolute, overflow colour above 1
     VonMises,     // auto-ranged over this field
     Displacement, // auto-ranged over this field
+    Temperature,  // climatic results: auto-ranged between the field's coldest and hottest node
+    ElectricField, // radiated susceptibility: |E| in V/m, auto-ranged over this field
+    IceThickness,  // icing: the ice on the surface in metres, auto-ranged over this field
 };
 
 class StructuralFieldScene {
@@ -38,6 +42,8 @@ public:
     // Display magnification of the displacement; 1 is true scale.
     void setDeformationScale(double scale);
     double deformationScale() const { return deformationScale_; }
+    void setMeshVisible(bool visible);
+    void setCriticalPointVisible(bool visible);
 
     // Places a perspective camera, keeping its orientation, so the whole deformed part fits a
     // viewport of the given width/height with `margin` around it. Uses the narrower of the two
@@ -56,6 +62,7 @@ private:
     SoCoordinate3* coordinates_ = nullptr;
     SoMaterial* material_ = nullptr;
     SoTranslation* markerPosition_ = nullptr;
+    SoSwitch *meshSwitch_=nullptr,*markerSwitch_=nullptr;
 };
 
 // Axonometric view with +Z up (the CAD convention; Coin viewers default to looking down −Z with

@@ -19,29 +19,29 @@ enum PayloadType: String, CaseIterable, Identifiable, Hashable {
     var title: String {
         switch self {
         case .cargoBox:
-            return NSLocalizedString("payload.type.cargo_box", comment: "")
+            return L10n.s("payload.type.cargo_box")
         case .cameraGimbal:
-            return NSLocalizedString("payload.type.camera_gimbal", comment: "")
+            return L10n.s("payload.type.camera_gimbal")
         case .thermalCamera:
-            return NSLocalizedString("payload.type.thermal_camera", comment: "")
+            return L10n.s("payload.type.thermal_camera")
         case .lidarModule:
-            return NSLocalizedString("payload.type.lidar_module", comment: "")
+            return L10n.s("payload.type.lidar_module")
         case .laserRangefinder:
-            return NSLocalizedString("payload.type.laser_rangefinder", comment: "")
+            return L10n.s("payload.type.laser_rangefinder")
         case .fireHose:
-            return NSLocalizedString("payload.type.fire_hose", comment: "")
+            return L10n.s("payload.type.fire_hose")
         case .fireCapsuleLauncher:
-            return NSLocalizedString("payload.type.fire_capsule_launcher", comment: "")
+            return L10n.s("payload.type.fire_capsule_launcher")
         case .agriculturalSprayer:
-            return NSLocalizedString("payload.type.agricultural_sprayer", comment: "")
+            return L10n.s("payload.type.agricultural_sprayer")
         case .rescuePack:
-            return NSLocalizedString("payload.type.rescue_pack", comment: "")
+            return L10n.s("payload.type.rescue_pack")
         case .sensorModule:
-            return NSLocalizedString("payload.type.sensor_module", comment: "")
+            return L10n.s("payload.type.sensor_module")
         case .radioRelay:
-            return NSLocalizedString("payload.type.radio_relay", comment: "")
+            return L10n.s("payload.type.radio_relay")
         case .custom:
-            return NSLocalizedString("payload.type.custom", comment: "")
+            return L10n.s("payload.type.custom")
         }
     }
 

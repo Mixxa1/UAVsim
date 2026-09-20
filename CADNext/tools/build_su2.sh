@@ -30,6 +30,23 @@ fi
   || { echo "SU2 source is not at $SU2_TAG"; exit 1; }
 
 cd "$SRC"
+
+# Upstream defect in SU2 8.5.0 (incompressible RANS only): CIncNSSolver::Preprocessing calls
+# SetTau_Wall_WF inside SU2_OMP_SAFE_GLOBAL_ACCESS, a master-only region, while that routine contains
+# an `omp for`. With more than one thread the other threads never reach the work-sharing construct:
+# libomp asserts in kmp_dispatch on a 2D case and the run stalls on a 3D one (measured: four threads,
+# no iteration in forty minutes). The compressible solver calls the same routine directly; this patch
+# makes the incompressible path match it. Verified: identical cf on one and four threads.
+PATCH="$(cd "$(dirname "$0")" && pwd)/su2-patches/incns-wall-function-omp.patch"
+if git apply --check "$PATCH" 2>/dev/null; then
+  git apply "$PATCH"
+  echo "applied $(basename "$PATCH")"
+elif git apply --reverse --check "$PATCH" 2>/dev/null; then
+  echo "$(basename "$PATCH") already applied"
+else
+  echo "cannot apply $(basename "$PATCH") to this SU2 source"; exit 1
+fi
+
 python3 preconfigure.py --with-own-meson --no-codi --no-medi --no-opdi --no-mpp --no-coolprop --no-fado --no-mlpcpp
 
 # Apple clang ships without an OpenMP runtime; libomp from Homebrew provides it.

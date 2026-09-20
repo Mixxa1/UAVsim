@@ -101,7 +101,7 @@ struct PayloadView<StationsContent: View>: View {
                         .font(.system(size: 9, weight: .bold))
                         .tracking(0.6)
                         .foregroundStyle(.white.opacity(0.38))
-                    Text(activeUAVProfile?.localizedDisplayName ?? String(localized: "common.not_specified"))
+                    Text(activeUAVProfile?.localizedDisplayName ?? L10n.s("common.not_specified"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.88))
                         .lineLimit(1)
@@ -119,7 +119,7 @@ struct PayloadView<StationsContent: View>: View {
                             )
                     }
                     .buttonStyle(.plain)
-                    .help(String(localized: "payload.toolbar.close"))
+                    .help(L10n.s("payload.toolbar.close"))
                     .controllerButtonTarget(id: "payload.close", action: onClose)
                 }
             }
@@ -246,7 +246,7 @@ struct PayloadView<StationsContent: View>: View {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
                     sectionHeader(titleKey: "payload.catalog.title")
-                    Text(String(format: String(localized: "payload.catalog.count_format"), PayloadType.allCases.count))
+                    Text(String(format: L10n.s("payload.catalog.count_format"), PayloadType.allCases.count))
                         .font(.caption2)
                         .foregroundStyle(.white.opacity(0.42))
                 }
@@ -365,7 +365,7 @@ struct PayloadView<StationsContent: View>: View {
             HStack(spacing: 8) {
                 HStack(spacing: 8) {
                     TextField(
-                        String(localized: "payload.mass"),
+                        L10n.s("payload.mass"),
                         value: Binding(
                             get: { Double(configuration.payloadMass) },
                             set: onMassChange
@@ -379,7 +379,7 @@ struct PayloadView<StationsContent: View>: View {
                     .disabled(!isMassEditable)
                     .controllerTextInputTarget(
                         id: "payload.mass.input",
-                        title: String(localized: "payload.mass"),
+                        title: L10n.s("payload.mass"),
                         currentText: {
                             payloadMassFormatter.string(from: NSNumber(value: configuration.payloadMass)) ?? ""
                         },
@@ -467,7 +467,7 @@ struct PayloadView<StationsContent: View>: View {
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white.opacity(0.52))
                 Spacer()
-                Text(String(format: String(localized: "payload.capsule.count_format"), configuration.fireCapsuleCount))
+                Text(String(format: L10n.s("payload.capsule.count_format"), configuration.fireCapsuleCount))
                     .font(.caption.monospacedDigit().weight(.semibold))
                     .foregroundStyle(.white.opacity(0.82))
             }
@@ -501,7 +501,7 @@ struct PayloadView<StationsContent: View>: View {
                 .foregroundStyle(.white.opacity(0.52))
 
             TextField(
-                String(localized: "payload.custom_name"),
+                L10n.s("payload.custom_name"),
                 text: Binding(
                     get: { configuration.customName },
                     set: onCustomNameChange
@@ -516,7 +516,7 @@ struct PayloadView<StationsContent: View>: View {
             .background(valueFieldBackground(isFocused: isCustomNameFieldFocused))
             .controllerTextInputTarget(
                 id: "payload.customName.input",
-                title: String(localized: "payload.custom_name"),
+                title: L10n.s("payload.custom_name"),
                 currentText: { configuration.customName },
                 onCommit: onCustomNameChange
             )
@@ -684,7 +684,7 @@ struct PayloadView<StationsContent: View>: View {
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.white.opacity(0.88))
                 .lineLimit(1)
-            Text("\(String(localized: "cad.payload.runtime.mass")): \(massText(Float(payload.massKg)))")
+            Text("\(L10n.s("cad.payload.runtime.mass")): \(massText(Float(payload.massKg)))")
                 .font(.caption2)
                 .foregroundStyle(.white.opacity(0.56))
         }
@@ -716,7 +716,7 @@ struct PayloadView<StationsContent: View>: View {
 
     private var capacityPercentageText: String {
         guard payloadDataResolution?.maxPayloadMass != nil else {
-            return String(localized: "common.not_specified")
+            return L10n.s("common.not_specified")
         }
         return String(format: "%.0f%%", payloadCapacityRatio * 100)
     }
@@ -1010,8 +1010,8 @@ struct PayloadView<StationsContent: View>: View {
     }
 
     private func massText(_ value: Float?) -> String {
-        guard let value else { return String(localized: "common.not_specified") }
-        return String(format: NSLocalizedString("payload.mass_value", comment: ""), value)
+        guard let value else { return L10n.s("common.not_specified") }
+        return String(format: L10n.s("payload.mass_value"), value)
     }
 
     private func messageColor(for key: String) -> Color {

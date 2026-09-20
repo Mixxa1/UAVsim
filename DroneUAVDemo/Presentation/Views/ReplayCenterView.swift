@@ -175,7 +175,7 @@ struct ReplayCenterView: View {
         .alert(item: $deleteCandidate) { candidate in
             Alert(
                 title: Text("replay.delete.title"),
-                message: Text(String(format: NSLocalizedString("replay.delete.message", comment: ""), candidate.title)),
+                message: Text(String(format: L10n.s("replay.delete.message"), candidate.title)),
                 primaryButton: .destructive(Text("replay.delete.confirm")) {
                     replayPlayer.unload()
                     viewModel.delete(id: candidate.id)

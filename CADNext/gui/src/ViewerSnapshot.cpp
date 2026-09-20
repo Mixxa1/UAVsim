@@ -3,7 +3,7 @@
 #include "cadnext/viewer/OffscreenGL.hpp"
 #include "cadnext/viewer/StructuralFieldScene.hpp"
 
-#include <Inventor/Qt/viewers/SoQtExaminerViewer.h>
+#include <Inventor/Qt/viewers/SoQtViewer.h>
 #include <Inventor/SoOffscreenRenderer.h>
 #include <Inventor/nodes/SoCamera.h>
 #include <Inventor/nodes/SoDirectionalLight.h>
@@ -15,7 +15,7 @@
 
 namespace cadnext::gui::detail {
 
-QImage snapshotWithViewer(QWidget& window, SoQtExaminerViewer& viewer, SoNode* sceneGraph) {
+QImage snapshotWithViewer(QWidget& window, SoQtViewer& viewer, SoNode* sceneGraph) {
     QPixmap pixmap = window.grab();
     const QWidget* area = viewer.getWidget();
     if (area == nullptr || sceneGraph == nullptr) return pixmap.toImage();

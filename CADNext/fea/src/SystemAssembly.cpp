@@ -215,10 +215,12 @@ SymmetricCsc reducedSparsity(const TetMesh& mesh, const DofMap& map) {
 }
 
 void assembleStiffness(const TetMesh& mesh, const std::array<std::array<double, 6>, 6>& elasticity, const DofMap& map,
-                       SymmetricCsc& K, std::vector<double>* rhs) {
+                       SymmetricCsc& K, std::vector<double>* rhs, const std::vector<double>* elementScale) {
     std::vector<double> local;
     for (int e = 0; e < static_cast<int>(mesh.elements.size()); ++e) {
         tetStiffness(mesh, e, elasticity, local);
+        if (elementScale)
+            for (double& value : local) value *= (*elementScale)[e];
         scatter(mesh, e, local, map, K, rhs);
     }
 }
@@ -252,11 +254,120 @@ bool addFaceNodeWeights(const TetMesh& mesh, const std::string& group, std::vect
     return true;
 }
 
+std::optional<std::string> addAttachedMasses(const TetMesh& mesh, const std::vector<AttachedMass>& masses, const DofMap& map,
+                                             SymmetricCsc& M, double& total) {
+    total = 0.0;
+    for (const auto& attached : masses) {
+        if (!(attached.massKg > 0.0)) return std::string("присоединённая масса должна быть положительной");
+        std::vector<double> weights(mesh.nodes.size(), 0.0);
+        if (!addFaceNodeWeights(mesh, attached.faceGroup, weights)) {
+            return "нет группы граней для присоединённой массы: " + attached.faceGroup;
+        }
+        double area = 0.0;
+        for (double w : weights) area += w;
+        if (!(area > 0.0)) return "грань присоединённой массы нулевой площади: " + attached.faceGroup;
+        for (std::size_t node = 0; node < weights.size(); ++node) {
+            if (weights[node] == 0.0) continue;
+            const double nodal = attached.massKg * weights[node] / area;
+            for (int c = 0; c < 3; ++c) {
+                const int free = map.reduced[3 * node + c];
+                if (free >= 0) M.at(free, free) += nodal;
+            }
+        }
+        total += attached.massKg;
+    }
+    return std::nullopt;
+}
+
+std::vector<double> baseInertiaLoad(const TetMesh& mesh, double density, const std::vector<AttachedMass>& masses,
+                                    const DofMap& map, const Vec3& direction) {
+    std::vector<double> load(map.freeCount, 0.0);
+    std::vector<double> local;
+    const int size = 3 * mesh.nodesPerElement();
+    for (int e = 0; e < static_cast<int>(mesh.elements.size()); ++e) {
+        tetMass(mesh, e, density, local);
+        const auto& element = mesh.elements[e];
+        for (int a = 0; a < size; ++a) {
+            const int free = map.reduced[3 * element[a / 3] + a % 3];
+            if (free < 0) continue;
+            double sum = 0.0;
+            for (int b = 0; b < size; ++b) sum += local[static_cast<std::size_t>(a) * size + b] * direction[b % 3];
+            load[free] += sum;
+        }
+    }
+    for (const auto& attached : masses) {
+        std::vector<double> weights(mesh.nodes.size(), 0.0);
+        if (!addFaceNodeWeights(mesh, attached.faceGroup, weights)) continue;
+        double area = 0.0;
+        for (double w : weights) area += w;
+        if (!(area > 0.0)) continue;
+        for (std::size_t node = 0; node < weights.size(); ++node) {
+            if (weights[node] == 0.0) continue;
+            for (int c = 0; c < 3; ++c) {
+                const int free = map.reduced[3 * node + c];
+                if (free >= 0) load[free] += attached.massKg * weights[node] / area * direction[c];
+            }
+        }
+    }
+    return load;
+}
+
+std::vector<Voigt> averagedNodalStress(const TetMesh& mesh, const std::array<std::array<double, 6>, 6>& elasticity,
+                                       const std::vector<Vec3>& displacement, double* maxQuadratureVonMises,
+                                       int* maxQuadratureElement, const std::vector<double>* thermal, const std::vector<double>* elementScale) {
+    const int nodeCount = static_cast<int>(mesh.nodes.size());
+    const int perElement = mesh.nodesPerElement();
+    std::vector<Voigt> sum(nodeCount, Voigt{});
+    std::vector<int> count(nodeCount, 0);
+    // Corner values from the four quadrature points of degree 2 (barycentric a, b, b, b).
+    const double a = 0.5854101966249685;
+    const double b = 0.1381966011250105;
+    double maximum = 0.0;
+    int maximumElement = -1;
+    for (int e = 0; e < static_cast<int>(mesh.elements.size()); ++e) {
+        auto quadrature = tetQuadratureStress(mesh, e, elasticity, displacement, thermal);
+        if (elementScale)
+            for (auto& point : quadrature)
+                for (double& component : point) component *= (*elementScale)[e];
+        std::array<Voigt, 4> corner{};
+        for (int c = 0; c < 6; ++c) {
+            double total = 0.0;
+            for (int q = 0; q < 4; ++q) total += quadrature[q][c];
+            for (int q = 0; q < 4; ++q) corner[q][c] = (quadrature[q][c] - b * total) / (a - b);
+        }
+        for (int q = 0; q < 4; ++q) {
+            const double vm = vonMises(quadrature[q]);
+            if (vm > maximum) {
+                maximum = vm;
+                maximumElement = e;
+            }
+        }
+        const auto& element = mesh.elements[e];
+        for (int n = 0; n < perElement; ++n) {
+            Voigt value{};
+            if (n < 4) {
+                value = corner[n];
+            } else {
+                const auto& edge = kTetEdges[n - 4];
+                for (int c = 0; c < 6; ++c) value[c] = 0.5 * (corner[edge[0]][c] + corner[edge[1]][c]);
+            }
+            for (int c = 0; c < 6; ++c) sum[element[n]][c] += value[c];
+            count[element[n]] += 1;
+        }
+    }
+    for (int n = 0; n < nodeCount; ++n)
+        if (count[n] > 0)
+            for (int c = 0; c < 6; ++c) sum[n][c] /= count[n];
+    if (maxQuadratureVonMises) *maxQuadratureVonMises = maximum;
+    if (maxQuadratureElement) *maxQuadratureElement = maximumElement;
+    return sum;
+}
+
 SparseCholesky::~SparseCholesky() {
     if (valid_) SparseCleanup(factor_);
 }
 
-bool SparseCholesky::factor(SymmetricCsc& matrix) {
+bool SparseCholesky::factor(SymmetricCsc& matrix, bool indefinite) {
     if (valid_) {
         SparseCleanup(factor_);
         valid_ = false;
@@ -272,7 +383,7 @@ bool SparseCholesky::factor(SymmetricCsc& matrix) {
     SparseMatrix_Double A{};
     A.structure = structure;
     A.data = matrix.values.data();
-    factor_ = SparseFactor(SparseFactorizationCholesky, A);
+    factor_ = SparseFactor(indefinite ? SparseFactorizationLDLT : SparseFactorizationCholesky, A);
     if (factor_.status != SparseStatusOK) {
         SparseCleanup(factor_);
         return false;

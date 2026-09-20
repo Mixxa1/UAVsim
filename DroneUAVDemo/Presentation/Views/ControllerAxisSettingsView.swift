@@ -45,11 +45,11 @@ struct ControllerAxisSettingsView: View {
 
     private var stickModeSummary: String {
         switch store.axisMap.stickMode {
-        case .mode1: return NSLocalizedString("controls.mode1.summary", comment: "")
-        case .mode2: return NSLocalizedString("controls.mode2.summary", comment: "")
-        case .mode3: return NSLocalizedString("controls.mode3.summary", comment: "")
-        case .mode4: return NSLocalizedString("controls.mode4.summary", comment: "")
-        case .custom: return NSLocalizedString("controls.mode.custom.summary", comment: "")
+        case .mode1: return L10n.s("controls.mode1.summary")
+        case .mode2: return L10n.s("controls.mode2.summary")
+        case .mode3: return L10n.s("controls.mode3.summary")
+        case .mode4: return L10n.s("controls.mode4.summary")
+        case .custom: return L10n.s("controls.mode.custom.summary")
         }
     }
 
