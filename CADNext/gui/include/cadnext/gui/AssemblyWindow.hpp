@@ -7,6 +7,8 @@
 
 #include <QMainWindow>
 
+#include <functional>
+
 #include "cadnext/assembly/AssemblyModel.hpp"
 #include "cadnext/assembly/AssemblyRecomputeEngine.hpp"
 #include "cadnext/gui/AssemblyPartLoader.hpp"
@@ -44,9 +46,20 @@ public:
     // (the main window does it at startup).
     void initializeViewport();
 
-    // Starts a fresh assembly / opens a .cadasm through a file dialog.
+    // Starts a fresh assembly / opens one through a file dialog: a .cadasm, or another system's
+    // assembly (STEP, Parasolid, SOLIDWORKS), which is imported first.
     void newAssembly();
     void openAssembly();
+
+    // STEP with its product structure: another CAD's assembly becomes CADNext parts and assemblies in
+    // a folder, and a CADNext assembly leaves as one STEP file that SOLIDWORKS, KOMPAS-3D, FreeCAD and
+    // AutoCAD open as an assembly.
+    void importStepAssembly();
+    // The same, for a file already chosen (the main window's CAD import hands one over when the
+    // STEP it was given turns out to be an assembly): STEP, Parasolid or a SOLIDWORKS .SLDASM.
+    // `askToSave` false when the caller has already offered to save the open assembly.
+    void importStepAssemblyFrom(const QString& stepPath, bool askToSave = true);
+    void exportStepAssembly();
 
 protected:
     void closeEvent(QCloseEvent* event) override;
@@ -68,6 +81,15 @@ private:
     bool saveAssemblyAs();
     bool saveToPath(const QString& path);
     void loadFromPath(const QString& path);
+    // Another system's file (STEP, Parasolid, SOLIDWORKS) as CADNext files in a new folder next to it,
+    // read on a thread of its own with a progress window. `then` gets the top .cadasm on the UI thread;
+    // it is not called when the import is refused, stopped or fails (the window says why).
+    void importAsCadnextFiles(const QString& path, std::function<void(const QString& top)> then);
+    // Inserts a CADNext part, part document or subassembly file as a new component (`bodyId` picks
+    // one body of a part document; empty, the last).
+    void insertPartFrom(const QString& path, const std::string& bodyId = {});
+    // The second half of loadFromPath, once every part is loaded: the document shown and recomputed.
+    void showLoadedDocument(const assembly::AssemblyDocument& loaded, const QString& path);
     void markDirty();
     void setClean();
     void updateWindowTitle();

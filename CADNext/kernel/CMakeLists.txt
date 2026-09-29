@@ -3,6 +3,10 @@ add_library(cadnext_kernel
     src/KernelFactory.cpp
     src/StubKernel.cpp
     src/OcctKernel.cpp
+    src/OcctRollingBall.cpp
+    src/OcctThread.cpp
+    src/StepProductStructure.cpp
+    src/ExactBRepDescription.cpp
     src/GeometryEvaluator.cpp
     src/EdgeAnalyzer.cpp
     src/FaceAnalyzer.cpp
@@ -52,5 +56,13 @@ if(CADNEXT_WITH_OCCT)
             TKMesh
             TKBO
             TKFillet
+            TKOffset
+            TKDESTEP
+            TKXCAF
+            TKCAF
+            TKLCAF
+            TKCDF
+            TKDEIGES
+            TKXSBase
     )
 endif()

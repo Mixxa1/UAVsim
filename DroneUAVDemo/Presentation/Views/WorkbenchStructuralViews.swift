@@ -18,6 +18,14 @@ struct WorkbenchStructuralPanel: View {
     @State private var bandName = ""
     @State private var bandMinimum: Double?
     @State private var bandMaximum: Double?
+    @State private var spectrumHz: Double?
+    @State private var spectrumValue: Double?
+    @State private var componentName = ""
+    @State private var componentPowerW: Double?
+    @State private var componentMinimumC: Double?
+    @State private var componentMaximumC: Double?
+    @State private var probeOffsetMM: Double?
+    @State private var probeImmunityVm: Double?
 
     private let raised = GroundControlPalette.panelRaised
     private let inset = GroundControlPalette.inset
@@ -128,6 +136,56 @@ struct WorkbenchStructuralPanel: View {
                 if case let .modal(modal) = loadCase.analysis {
                     modalItems(loadCase, modal: modal)
                     modalControls(loadCase, modal: modal)
+                    meshFields(loadCase)
+                } else if case let .shock(shock) = loadCase.analysis {
+                    dynamicItems(loadCase, equipment: shock.equipment, probe: shock.probeFaceID, excitation: nil,
+                                 removeEquipment: { index in editShock(loadCase) { $0.equipment.remove(at: index) } },
+                                 clearProbe: { editShock(loadCase) { $0.probeFaceID = nil } }, clearExcitation: {})
+                    shockControls(loadCase, shock: shock)
+                    meshFields(loadCase)
+                } else if case let .sine(sine) = loadCase.analysis {
+                    dynamicItems(loadCase, equipment: sine.equipment, probe: sine.probeFaceID, excitation: sine.faceID,
+                                 removeEquipment: { index in editSine(loadCase) { $0.equipment.remove(at: index) } },
+                                 clearProbe: { editSine(loadCase) { $0.probeFaceID = nil } },
+                                 clearExcitation: { editSine(loadCase) { $0.faceID = nil } })
+                    sineControls(loadCase, sine: sine)
+                    meshFields(loadCase)
+                } else if case let .random(random) = loadCase.analysis {
+                    dynamicItems(loadCase, equipment: random.equipment, probe: random.probeFaceID, excitation: nil,
+                                 removeEquipment: { index in editRandom(loadCase) { $0.equipment.remove(at: index) } },
+                                 clearProbe: { editRandom(loadCase) { $0.probeFaceID = nil } }, clearExcitation: {})
+                    randomControls(loadCase, random: random)
+                    meshFields(loadCase)
+                } else if case let .climate(climate) = loadCase.analysis {
+                    climateItems(loadCase, climate: climate)
+                    climateControls(loadCase, climate: climate)
+                    meshFields(loadCase)
+                } else if case let .fire(fire) = loadCase.analysis {
+                    fireItems(loadCase, fire: fire)
+                    fireControls(loadCase, fire: fire)
+                    // A fire case is loaded mechanically while it burns: the static editors apply.
+                    addControls(loadCase)
+                    numbers(loadCase)
+                } else if case let .lightning(lightning) = loadCase.analysis {
+                    lightningItems(loadCase, lightning: lightning)
+                    lightningControls(loadCase, lightning: lightning)
+                    meshFields(loadCase)
+                } else if case let .emc(emc) = loadCase.analysis {
+                    emcItems(loadCase, emc: emc)
+                    emcControls(loadCase, emc: emc)
+                    meshFields(loadCase)
+                } else if case let .icing(icing) = loadCase.analysis {
+                    icingControls(loadCase, icing: icing)
+                    meshFields(loadCase)
+                } else if case let .flutter(flutter) = loadCase.analysis {
+                    flutterItems(loadCase)
+                    flutterControls(loadCase, flutter: flutter)
+                    meshFields(loadCase)
+                } else if case let .bird(bird) = loadCase.analysis {
+                    dynamicItems(loadCase, equipment: bird.equipment, probe: nil, excitation: bird.impactFaceID,
+                                 removeEquipment: { index in editBird(loadCase) { $0.equipment.remove(at: index) } },
+                                 clearProbe: {}, clearExcitation: { editBird(loadCase) { $0.impactFaceID = nil } })
+                    birdControls(loadCase, bird: bird)
                     meshFields(loadCase)
                 } else {
                     itemsList(loadCase)
@@ -352,21 +410,34 @@ struct WorkbenchStructuralPanel: View {
     // MARK: Modal case
 
     private func analysisPicker(_ loadCase: WorkbenchStructuralCase) -> some View {
+        // A menu, not segments: the kinds are five now and will be twelve, and their names do not
+        // fit a side panel as segments.
         Picker("", selection: Binding(
-            get: { loadCase.testType == .modalVibration },
-            set: { modal in
+            get: { loadCase.kind },
+            set: { kind in
+                guard kind != loadCase.kind else { return }
                 viewModel.updateStructuralCase(loadCase.id) { edited in
-                    if modal, edited.testType != .modalVibration {
-                        edited.analysis = .modal(WorkbenchStructuralCase.ModalSettings())
-                    } else if !modal {
-                        edited.analysis = .strength
+                    switch kind {
+                    case .strength: edited.analysis = .strength
+                    case .modal: edited.analysis = .modal(WorkbenchStructuralCase.ModalSettings())
+                    case .sine: edited.analysis = .sine(WorkbenchStructuralCase.SineSettings())
+                    case .random: edited.analysis = .random(WorkbenchStructuralCase.RandomSettings())
+                    case .shock: edited.analysis = .shock(WorkbenchStructuralCase.ShockSettings())
+                    case .climate: edited.analysis = .climate(WorkbenchStructuralCase.ClimateSettings())
+                    case .fire: edited.analysis = .fire(WorkbenchStructuralCase.FireSettings())
+                    case .lightning: edited.analysis = .lightning(WorkbenchStructuralCase.LightningSettings())
+                    case .emc: edited.analysis = .emc(WorkbenchStructuralCase.EmcSettings())
+                    case .icing: edited.analysis = .icing(WorkbenchStructuralCase.IcingSettings())
+                    case .flutter: edited.analysis = .flutter(WorkbenchStructuralCase.FlutterSettings())
+                    case .bird: edited.analysis = .bird(WorkbenchStructuralCase.BirdSettings())
                     }
                 }
             })) {
-            Text("Прочность").tag(false)
-            Text("Частоты и резонанс").tag(true)
+            ForEach(WorkbenchStructuralCase.Kind.allCases) { kind in
+                Text(kind.displayName).tag(kind)
+            }
         }
-        .pickerStyle(.segmented)
+        .pickerStyle(.menu)
         .labelsHidden()
         .controlSize(.small)
     }
@@ -462,6 +533,981 @@ struct WorkbenchStructuralPanel: View {
                 .disabled(bandName.trimmingCharacters(in: .whitespaces).isEmpty || bandMinimum == nil || bandMaximum == nil)
             }
             .controlSize(.small)
+        }
+    }
+
+    // MARK: Shock case
+
+    /// Faces a dynamic case has assigned: supports, equipment riding along, exclusion zones, the
+    /// sensor face and (sine only) the face the excitation acts on. One list for every kind, because
+    /// a user reads them the same way.
+    private func dynamicItems(
+        _ loadCase: WorkbenchStructuralCase,
+        equipment: [WorkbenchStructuralCase.Equipment],
+        probe: String?,
+        excitation: String?,
+        removeEquipment: @escaping (Int) -> Void,
+        clearProbe: @escaping () -> Void,
+        clearExcitation: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(loadCase.supports.enumerated()), id: \.offset) { index, support in
+                itemRow(support.fixed.count == 3 ? "Заделка · \(support.faceID)"
+                        : "Опора \(support.fixed.map(\.rawValue).sorted().joined().uppercased()) · \(support.faceID)",
+                        color: GroundControlPalette.accent) {
+                    viewModel.updateStructuralCase(loadCase.id) { $0.supports.remove(at: index) }
+                }
+            }
+            ForEach(Array(equipment.enumerated()), id: \.offset) { index, item in
+                itemRow(String(format: "Оборудование %.0f × %@ · %@", item.count, item.kind.displayName, item.faceID),
+                        color: GroundControlPalette.textSecondary) { removeEquipment(index) }
+            }
+            ForEach(Array(loadCase.exclusions.enumerated()), id: \.offset) { index, item in
+                itemRow(String(format: "Исключение %.0f мм · %@", item.distanceM * 1e3, item.faceID),
+                        color: GroundControlPalette.textSecondary) {
+                    viewModel.updateStructuralCase(loadCase.id) { $0.exclusions.remove(at: index) }
+                }
+            }
+            if let excitation {
+                itemRow("Возбуждение · \(excitation)", color: GroundControlPalette.warning) { clearExcitation() }
+            }
+            if let probe {
+                itemRow("Датчик · \(probe)", color: GroundControlPalette.textSecondary) { clearProbe() }
+            }
+        }
+    }
+
+    /// Supports, exclusion zones and equipment: the same three things every dynamic case assigns.
+    private func dynamicAddControls(_ loadCase: WorkbenchStructuralCase, equipmentHelp: String) -> some View {
+        let equipment = WorkbenchBuild.slotKinds.filter { viewModel.build.spec(for: $0) != nil && $0 != .propeller }
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Заделка") { viewModel.beginFacePick(.support([.x, .y, .z]), for: loadCase.id) }
+                Menu("По оси") {
+                    ForEach(WorkbenchModelAxis.allCases, id: \.self) { axis in
+                        Button(axis.displayName) { viewModel.beginFacePick(.support([axis]), for: loadCase.id) }
+                    }
+                }
+                numberField("мм", value: $exclusionMM, width: 44)
+                Button("Исключить") {
+                    guard let mm = exclusionMM, mm > 0 else { return }
+                    viewModel.beginFacePick(.exclusion(mm / 1e3), for: loadCase.id)
+                }
+                .disabled((exclusionMM ?? 0) <= 0)
+                .help("Зона у заделки, где напряжение — особенность идеализированного крепления, а не деталь")
+            }
+            .controlSize(.small)
+            HStack(spacing: 6) {
+                numberField("шт.", value: $equipmentCount, width: 44)
+                Menu("Масса оборудования на грань") {
+                    ForEach(equipment, id: \.self) { kind in
+                        Button(kind.displayName) {
+                            guard let count = equipmentCount, count > 0 else { return }
+                            viewModel.beginFacePick(.equipment(kind: kind, count: count), for: loadCase.id)
+                        }
+                    }
+                }
+                .disabled((equipmentCount ?? 0) <= 0)
+                .help(equipmentHelp)
+            }
+            .controlSize(.small)
+        }
+    }
+
+    /// Modes, damping and the sensor face: asked by every dynamic case in the same words.
+    private func dynamicModeFields(
+        modeCount: Binding<Double?>, dampingPercent: Binding<Double?>, pickProbe: @escaping () -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                fieldRow("Число мод") { numberField("не задано", value: modeCount, width: 56) }
+                fieldRow("ζ, %") { numberField("не задано", value: dampingPercent, width: 56) }
+            }
+            HStack(spacing: 6) {
+                Button("Грань датчика") { pickProbe() }
+                    .help("Ускорение и перемещение этой грани записываются, как их видел бы датчик на оснастке")
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+        }
+    }
+
+    /// One (frequency, value) list: a sine amplitude curve or a PSD, entered as the schedules write them.
+    private func spectrumEditor(
+        _ points: [WorkbenchStructuralCase.SpectrumPoint], unit: String,
+        add: @escaping (WorkbenchStructuralCase.SpectrumPoint) -> Void, remove: @escaping (Int) -> Void
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(points.enumerated()), id: \.offset) { index, point in
+                itemRow(String(format: "%.4g Гц · %.4g %@", point.frequencyHz, point.value, unit),
+                        color: GroundControlPalette.textSecondary) { remove(index) }
+            }
+            HStack(spacing: 4) {
+                numberField("Гц", value: $spectrumHz, width: 56)
+                numberField(unit, value: $spectrumValue, width: 56)
+                Button("+ Точка") {
+                    guard let hz = spectrumHz, let value = spectrumValue else { return }
+                    add(.init(frequencyHz: hz, value: value))
+                    spectrumHz = nil
+                    spectrumValue = nil
+                }
+                .disabled(spectrumHz == nil || spectrumValue == nil)
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private func sineControls(_ loadCase: WorkbenchStructuralCase, sine: WorkbenchStructuralCase.SineSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            dynamicAddControls(loadCase, equipmentHelp: "Оборудование трясётся вместе с деталью: его масса берётся из результата масс")
+            fieldRow("Возбуждение") {
+                Menu(sine.excitation.displayName) {
+                    ForEach(WorkbenchStructuralCase.SineSettings.Excitation.allCases, id: \.self) { kind in
+                        Button(kind.displayName) { editSine(loadCase) { $0.excitation = kind } }
+                    }
+                }
+                .controlSize(.small)
+                .frame(width: 150)
+            }
+            fieldRow("Направление") {
+                Menu(axisName(sine.direction)) {
+                    ForEach(directions, id: \.0) { name, vector in
+                        Button(name) { editSine(loadCase) { $0.direction = vector } }
+                    }
+                }
+                .controlSize(.small)
+                .frame(width: 110)
+            }
+            if sine.excitation != .base {
+                HStack(spacing: 6) {
+                    Button("Грань возбуждения") { viewModel.beginFacePick(.excitationFace, for: loadCase.id) }
+                    Spacer(minLength: 0)
+                }
+                .controlSize(.small)
+            }
+            if sine.excitation == .imbalance {
+                fieldRow("Дисбаланс, г·мм") {
+                    numberField("не задан", value: Binding(
+                        get: { sine.imbalanceGmm },
+                        set: { value in editSine(loadCase) { $0.imbalanceGmm = value } }), width: 62)
+                }
+            } else {
+                spectrumEditor(sine.amplitude, unit: sine.excitation == .base ? "g" : "Н",
+                               add: { point in editSine(loadCase) { $0.amplitude.append(point); $0.amplitude.sort { $0.frequencyHz < $1.frequencyHz } } },
+                               remove: { index in editSine(loadCase) { $0.amplitude.remove(at: index) } })
+                note("Одна точка — постоянная амплитуда на всём диапазоне; несколько задают кривую.")
+            }
+            HStack(spacing: 4) {
+                fieldRow("Развёртка от, Гц") {
+                    numberField("не задана", value: Binding(
+                        get: { sine.fromHz },
+                        set: { value in editSine(loadCase) { $0.fromHz = value } }), width: 56)
+                }
+                fieldRow("до, Гц") {
+                    numberField("не задана", value: Binding(
+                        get: { sine.toHz },
+                        set: { value in editSine(loadCase) { $0.toHz = value } }), width: 56)
+                }
+            }
+            dynamicModeFields(
+                modeCount: Binding(get: { sine.modeCount.map(Double.init) },
+                                   set: { value in editSine(loadCase) { $0.modeCount = value.map { Int($0.rounded()) } } }),
+                dampingPercent: Binding(get: { sine.dampingRatio.map { $0 * 100 } },
+                                        set: { value in editSine(loadCase) { $0.dampingRatio = value.map { $0 / 100 } } }),
+                pickProbe: { viewModel.beginFacePick(.probe, for: loadCase.id) })
+            note("Синус ищет резонанс на развёртке: вердикт по напряжению на худшей частоте. "
+                 + "Усталость этим расчётом не оценивается.")
+        }
+    }
+
+    private func randomControls(_ loadCase: WorkbenchStructuralCase, random: WorkbenchStructuralCase.RandomSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            dynamicAddControls(loadCase, equipmentHelp: "Оборудование трясётся вместе с деталью: его масса берётся из результата масс")
+            fieldRow("Направление") {
+                Menu(axisName(random.direction)) {
+                    ForEach(directions, id: \.0) { name, vector in
+                        Button(name) { editRandom(loadCase) { $0.direction = vector } }
+                    }
+                }
+                .controlSize(.small)
+                .frame(width: 110)
+            }
+            spectrumEditor(random.psd, unit: "g²/Гц",
+                           add: { point in editRandom(loadCase) { $0.psd.append(point); $0.psd.sort { $0.frequencyHz < $1.frequencyHz } } },
+                           remove: { index in editRandom(loadCase) { $0.psd.remove(at: index) } })
+            note("Спектр как в расписании вибраций: не меньше двух точек, между ними лог-лог, вне — ноль.")
+            dynamicModeFields(
+                modeCount: Binding(get: { random.modeCount.map(Double.init) },
+                                   set: { value in editRandom(loadCase) { $0.modeCount = value.map { Int($0.rounded()) } } }),
+                dampingPercent: Binding(get: { random.dampingRatio.map { $0 * 100 } },
+                                        set: { value in editRandom(loadCase) { $0.dampingRatio = value.map { $0 / 100 } } }),
+                pickProbe: { viewModel.beginFacePick(.probe, for: loadCase.id) })
+            note("Вердикт по 3σ напряжения (Сегалман): случайный отклик не имеет одного положения.")
+        }
+    }
+
+    private func editSine(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.SineSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .sine(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .sine(settings)
+        }
+    }
+
+    private func editRandom(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.RandomSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .random(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .random(settings)
+        }
+    }
+
+    private func shockControls(_ loadCase: WorkbenchStructuralCase, shock: WorkbenchStructuralCase.ShockSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            dynamicAddControls(loadCase, equipmentHelp: "Оборудование едет через удар вместе с деталью: его масса берётся из результата масс")
+            fieldRow("Удар направлен") {
+                Menu(axisName(shock.direction)) {
+                    ForEach(directions, id: \.0) { name, vector in
+                        Button(name) { editShock(loadCase) { $0.direction = vector } }
+                    }
+                }
+                .controlSize(.small)
+                .frame(width: 110)
+            }
+            fieldRow("Форма импульса") {
+                Menu(shock.shape.displayName) {
+                    ForEach(WorkbenchStructuralCase.PulseShape.allCases, id: \.self) { shape in
+                        Button(shape.displayName) { editShock(loadCase) { $0.shape = shape } }
+                    }
+                }
+                .controlSize(.small)
+                .frame(width: 110)
+            }
+            HStack(spacing: 4) {
+                fieldRow("Амплитуда, g") {
+                    numberField("не задана", value: Binding(
+                        get: { shock.peakG },
+                        set: { value in editShock(loadCase) { $0.peakG = value } }), width: 56)
+                }
+                fieldRow("Длительность, мс") {
+                    numberField("не задана", value: Binding(
+                        get: { shock.durationMs },
+                        set: { value in editShock(loadCase) { $0.durationMs = value } }), width: 56)
+                }
+            }
+            if shock.shape == .trapezoid {
+                HStack(spacing: 4) {
+                    fieldRow("Фронт, мс") {
+                        numberField("0", value: Binding(
+                            get: { shock.riseMs },
+                            set: { value in editShock(loadCase) { $0.riseMs = value ?? 0 } }), width: 56)
+                    }
+                    fieldRow("Спад, мс") {
+                        numberField("0", value: Binding(
+                            get: { shock.fallMs },
+                            set: { value in editShock(loadCase) { $0.fallMs = value ?? 0 } }), width: 56)
+                    }
+                }
+            }
+            dynamicModeFields(
+                modeCount: Binding(get: { shock.modeCount.map(Double.init) },
+                                   set: { value in editShock(loadCase) { $0.modeCount = value.map { Int($0.rounded()) } } }),
+                dampingPercent: Binding(get: { shock.dampingRatio.map { $0 * 100 } },
+                                        set: { value in editShock(loadCase) { $0.dampingRatio = value.map { $0 / 100 } } }),
+                pickProbe: { viewModel.beginFacePick(.probe, for: loadCase.id) })
+            note("Удар — одно событие: вердикт выносится по правилам эксплуатационной и расчётной нагрузки, "
+                 + "усталость не оценивается. Демпфирование и число мод умолчаний не имеют.")
+        }
+    }
+
+    // MARK: Thermal cases (climate, fire, lightning)
+
+    /// Equipment rows of a thermal case, with what it survives.
+    private func componentRows(_ components: [WorkbenchStructuralCase.ThermalComponent], remove: @escaping (Int) -> Void) -> some View {
+        ForEach(Array(components.enumerated()), id: \.offset) { index, item in
+            itemRow(item.name + " · " + item.faceID + " · "
+                    + String(format: "%.1f Вт", item.powerW)
+                    + (item.minimumC.map { String(format: ", от %.0f °C", $0) } ?? "")
+                    + (item.maximumC.map { String(format: ", до %.0f °C", $0) } ?? ""),
+                    color: GroundControlPalette.textSecondary) { remove(index) }
+        }
+    }
+
+    /// Entering a piece of equipment: its name, heat and limits, then a face to put it on.
+    private func componentEditor(_ loadCase: WorkbenchStructuralCase) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 4) {
+                TextField("оборудование", text: $componentName).textFieldStyle(.plain).font(.system(size: 10))
+                    .padding(.horizontal, 5).padding(.vertical, 3).frame(width: 96)
+                    .background(GroundControlPalette.panel, in: RoundedRectangle(cornerRadius: 4))
+                numberField("Вт", value: $componentPowerW, width: 44)
+                numberField("от °C", value: $componentMinimumC, width: 50)
+                numberField("до °C", value: $componentMaximumC, width: 50)
+            }
+            HStack(spacing: 6) {
+                Button("+ На грань") {
+                    let name = componentName.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty, componentMinimumC != nil || componentMaximumC != nil else { return }
+                    viewModel.beginFacePick(.thermalComponent(name: name, powerW: componentPowerW ?? 0,
+                                                              minimumC: componentMinimumC, maximumC: componentMaximumC),
+                                            for: loadCase.id)
+                    componentName = ""
+                    componentPowerW = nil
+                    componentMinimumC = nil
+                    componentMaximumC = nil
+                }
+                .disabled(componentName.trimmingCharacters(in: .whitespaces).isEmpty
+                          || (componentMinimumC == nil && componentMaximumC == nil))
+                .help("Пределы температуры берутся из паспорта прибора: библиотека их не хранит, а придуманный предел хуже отсутствующего")
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+        }
+    }
+
+    private func climateItems(_ loadCase: WorkbenchStructuralCase, climate: WorkbenchStructuralCase.ClimateSettings) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(loadCase.supports.enumerated()), id: \.offset) { index, support in
+                itemRow("Опора · \(support.faceID)", color: GroundControlPalette.accent) {
+                    viewModel.updateStructuralCase(loadCase.id) { $0.supports.remove(at: index) }
+                }
+            }
+            componentRows(climate.components) { index in editClimate(loadCase) { $0.components.remove(at: index) } }
+        }
+    }
+
+    private func climateControls(_ loadCase: WorkbenchStructuralCase, climate: WorkbenchStructuralCase.ClimateSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Опора") { viewModel.beginFacePick(.support([.x, .y, .z]), for: loadCase.id) }
+                    .help("Без опор деталь расширяется свободно: тепловых напряжений тогда почти нет, и это законный вариант")
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+            fieldRow("Среда") {
+                Menu(climate.environment.displayName) {
+                    ForEach(WorkbenchStructuralCase.ClimateSettings.Environment.allCases, id: \.self) { value in
+                        Button(value.displayName) { editClimate(loadCase) { $0.environment = value } }
+                    }
+                }
+                .controlSize(.small).frame(width: 110)
+            }
+            if climate.environment == .hot {
+                fieldRow("Категория") {
+                    Menu(climate.hotCategory.displayName) {
+                        ForEach(WorkbenchStructuralCase.ClimateSettings.HotCategory.allCases, id: \.self) { value in
+                            Button(value.displayName) { editClimate(loadCase) { $0.hotCategory = value } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 175)
+                }
+                fieldRow("Выдержка") {
+                    Menu(climate.hotExposure.displayName) {
+                        ForEach(WorkbenchStructuralCase.ClimateSettings.HotExposure.allCases, id: \.self) { value in
+                            Button(value.displayName) { editClimate(loadCase) { $0.hotExposure = value } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 175)
+                }
+            } else {
+                fieldRow("Категория") {
+                    Menu(climate.coldCategory.displayName) {
+                        ForEach(WorkbenchStructuralCase.ClimateSettings.ColdCategory.allCases, id: \.self) { value in
+                            Button(value.displayName) { editClimate(loadCase) { $0.coldCategory = value } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 175)
+                }
+                fieldRow("Выдержка") {
+                    Menu(climate.coldExposure.displayName) {
+                        ForEach(WorkbenchStructuralCase.ClimateSettings.ColdExposure.allCases, id: \.self) { value in
+                            Button(value.displayName) { editClimate(loadCase) { $0.coldExposure = value } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 175)
+                }
+            }
+            fieldRow("Обдув") {
+                Menu(climate.airflow.displayName) {
+                    ForEach(WorkbenchStructuralCase.ClimateSettings.Airflow.allCases, id: \.self) { value in
+                        Button(value.displayName) { editClimate(loadCase) { $0.airflow = value } }
+                    }
+                }
+                .controlSize(.small).frame(width: 150)
+            }
+            HStack(spacing: 4) {
+                fieldRow("Скорость, м/с") {
+                    numberField("не задана", value: Binding(
+                        get: { climate.airSpeedMps },
+                        set: { value in editClimate(loadCase) { $0.airSpeedMps = value } }), width: 56)
+                }
+                fieldRow("Высота, м") {
+                    numberField("0", value: Binding(
+                        get: { climate.altitudeM },
+                        set: { value in editClimate(loadCase) { $0.altitudeM = value } }), width: 56)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Верх") {
+                    Menu(axisName(climate.up)) {
+                        ForEach(directions, id: \.0) { name, vector in
+                            Button(name) { editClimate(loadCase) { $0.up = vector } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 96)
+                }
+                fieldRow("Поток") {
+                    Menu(axisName(climate.flow)) {
+                        ForEach(directions, id: \.0) { name, vector in
+                            Button(name) { editClimate(loadCase) { $0.flow = vector } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 96)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("α солнца") {
+                    numberField("не задано", value: Binding(
+                        get: { climate.solarAbsorptance },
+                        set: { value in editClimate(loadCase) { $0.solarAbsorptance = value } }), width: 50)
+                }
+                fieldRow("ε") {
+                    numberField("не задано", value: Binding(
+                        get: { climate.emissivity },
+                        set: { value in editClimate(loadCase) { $0.emissivity = value } }), width: 50)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Сборка, °C") {
+                    numberField("не задана", value: Binding(
+                        get: { climate.assemblyC },
+                        set: { value in editClimate(loadCase) { $0.assemblyC = value } }), width: 56)
+                }
+                fieldRow("Шаг, с") {
+                    numberField("не задан", value: Binding(
+                        get: { climate.stepS },
+                        set: { value in editClimate(loadCase) { $0.stepS = value } }), width: 56)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Материал от, °C") {
+                    numberField("нет", value: Binding(
+                        get: { climate.materialMinimumC },
+                        set: { value in editClimate(loadCase) { $0.materialMinimumC = value } }), width: 56)
+                }
+                fieldRow("до, °C") {
+                    numberField("нет", value: Binding(
+                        get: { climate.materialMaximumC },
+                        set: { value in editClimate(loadCase) { $0.materialMaximumC = value } }), width: 56)
+                }
+            }
+            Toggle("Оборудование работает", isOn: Binding(
+                get: { climate.operating },
+                set: { value in editClimate(loadCase) { $0.operating = value } }))
+                .controlSize(.small).font(.system(size: 10))
+            componentEditor(loadCase)
+            note("Условия и температуры — из MIL-STD-810H по выбранной категории. Тепловые напряжения считаются от температуры сборки.")
+        }
+    }
+
+    private func fireItems(_ loadCase: WorkbenchStructuralCase, fire: WorkbenchStructuralCase.FireSettings) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            itemsList(loadCase)
+            ForEach(Array(fire.flameFaceIDs.enumerated()), id: \.offset) { index, face in
+                itemRow("Пламя · \(face)", color: GroundControlPalette.warning) {
+                    editFire(loadCase) { $0.flameFaceIDs.remove(at: index) }
+                }
+            }
+            componentRows(fire.components) { index in editFire(loadCase) { $0.components.remove(at: index) } }
+        }
+    }
+
+    private func fireControls(_ loadCase: WorkbenchStructuralCase, fire: WorkbenchStructuralCase.FireSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Грань под пламенем") { viewModel.beginFacePick(.flameFace, for: loadCase.id) }
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+            fieldRow("Стандарт") {
+                Menu(fire.standard.displayName) {
+                    ForEach(WorkbenchStructuralCase.FireSettings.Standard.allCases, id: \.self) { value in
+                        Button(value.displayName) { editFire(loadCase) { $0.standard = value } }
+                    }
+                }
+                .controlSize(.small).frame(width: 110)
+            }
+            fieldRow("Длительность") {
+                Menu(fire.durationS.map { String(format: "%.0f с", $0) } ?? "не задана") {
+                    Button("300 с — огнестойкость") { editFire(loadCase) { $0.durationS = 300 } }
+                    Button("900 с — огнепрочность") { editFire(loadCase) { $0.durationS = 900 } }
+                }
+                .controlSize(.small).frame(width: 150)
+            }
+            HStack(spacing: 4) {
+                fieldRow("ε поверхности") {
+                    numberField("не задано", value: Binding(
+                        get: { fire.surfaceEmissivity },
+                        set: { value in editFire(loadCase) { $0.surfaceEmissivity = value } }), width: 50)
+                }
+                fieldRow("Шаг, с") {
+                    numberField("не задан", value: Binding(
+                        get: { fire.stepS },
+                        set: { value in editFire(loadCase) { $0.stepS = value } }), width: 50)
+                }
+            }
+            note("EN 1999-1-2 §2.2: ε ≈ 0.3 для чистого металла, 0.7 для окрашенной поверхности.")
+            Toggle("Оборудование работает", isOn: Binding(
+                get: { fire.operating },
+                set: { value in editFire(loadCase) { $0.operating = value } }))
+                .controlSize(.small).font(.system(size: 10))
+            componentEditor(loadCase)
+            note("Пожарный вариант нагружает деталь механически: силы, давления и перегрузка ниже — это нагрузки пожарной ситуации.")
+        }
+    }
+
+    private func lightningItems(_ loadCase: WorkbenchStructuralCase, lightning: WorkbenchStructuralCase.LightningSettings) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(lightning.attachmentFaceIDs.enumerated()), id: \.offset) { index, face in
+                itemRow("Привязка дуги · \(face)", color: GroundControlPalette.warning) {
+                    editLightning(loadCase) { $0.attachmentFaceIDs.remove(at: index) }
+                }
+            }
+            ForEach(Array(lightning.groundFaceIDs.enumerated()), id: \.offset) { index, face in
+                itemRow("Связь с конструкцией · \(face)", color: GroundControlPalette.accent) {
+                    editLightning(loadCase) { $0.groundFaceIDs.remove(at: index) }
+                }
+            }
+            componentRows(lightning.equipment) { index in editLightning(loadCase) { $0.equipment.remove(at: index) } }
+        }
+    }
+
+    private func lightningControls(_ loadCase: WorkbenchStructuralCase, lightning: WorkbenchStructuralCase.LightningSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Привязка дуги") { viewModel.beginFacePick(.attachmentFace, for: loadCase.id) }
+                Button("Связь с конструкцией") { viewModel.beginFacePick(.groundFace, for: loadCase.id) }
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Компоненты тока").font(.system(size: 10)).foregroundStyle(GroundControlPalette.textSecondary)
+                ForEach(WorkbenchStructuralCase.LightningSettings.Component.allCases, id: \.self) { component in
+                    Toggle(component.displayName, isOn: Binding(
+                        get: { lightning.components.contains(component) },
+                        set: { on in
+                            editLightning(loadCase) { settings in
+                                if on {
+                                    if !settings.components.contains(component) { settings.components.append(component) }
+                                } else {
+                                    settings.components.removeAll { $0 == component }
+                                }
+                            }
+                        }))
+                        .controlSize(.small).font(.system(size: 10))
+                }
+            }
+            fieldRow("Полярность") {
+                Menu(lightning.polarity.displayName) {
+                    ForEach(WorkbenchStructuralCase.LightningSettings.Polarity.allCases, id: \.self) { value in
+                        Button(value.displayName) { editLightning(loadCase) { $0.polarity = value } }
+                    }
+                }
+                .controlSize(.small).frame(width: 175)
+            }
+            HStack(spacing: 4) {
+                fieldRow("Ток C, А") {
+                    numberField("400", value: Binding(
+                        get: { lightning.continuingCurrentA },
+                        set: { value in editLightning(loadCase) { $0.continuingCurrentA = value ?? 400 } }), width: 56)
+                }
+                fieldRow("ε поверхности") {
+                    numberField("не задано", value: Binding(
+                        get: { lightning.surfaceEmissivity },
+                        set: { value in editLightning(loadCase) { $0.surfaceEmissivity = value } }), width: 50)
+                }
+            }
+            fieldRow("Шагов на компонент") {
+                numberField("400", value: Binding(
+                    get: { Double(lightning.stepsPerComponent) },
+                    set: { value in editLightning(loadCase) { $0.stepsPerComponent = Int((value ?? 400).rounded()) } }), width: 56)
+            }
+            componentEditor(loadCase)
+            note("SAE ARP5412: продолжающийся ток компонента C по стандарту 200…800 А. Опоры здесь не нужны — считается растекание тока и нагрев.")
+        }
+    }
+
+    // MARK: EMC, icing, flutter, bird
+
+    private func emcItems(_ loadCase: WorkbenchStructuralCase, emc: WorkbenchStructuralCase.EmcSettings) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(emc.equipment.enumerated()), id: \.offset) { index, point in
+                itemRow(String(format: "%@ · [%.3f, %.3f, %.3f] м · %.0f В/м", point.name, point.x, point.y, point.z, point.immunityVm),
+                        color: GroundControlPalette.textSecondary) {
+                    editEmc(loadCase) { $0.equipment.remove(at: index) }
+                }
+            }
+        }
+    }
+
+    private func emcControls(_ loadCase: WorkbenchStructuralCase, emc: WorkbenchStructuralCase.EmcSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            fieldRow("Уровень") {
+                Menu(emc.levelID.map { id in
+                    id.hasSuffix("20") ? "RS103, 20 В/м" : id.hasSuffix("50") ? "RS103, 50 В/м" : "RS103, 200 В/м"
+                } ?? "своё поле") {
+                    Button("RS103, 20 В/м — внутренние отсеки") { editEmc(loadCase) { $0.levelID = "mil461g-rs103-20"; $0.fieldVm = nil } }
+                    Button("RS103, 50 В/м — наземная техника") { editEmc(loadCase) { $0.levelID = "mil461g-rs103-50"; $0.fieldVm = nil } }
+                    Button("RS103, 200 В/м — внешние поверхности") { editEmc(loadCase) { $0.levelID = "mil461g-rs103-200"; $0.fieldVm = nil } }
+                    Button("Своё поле") { editEmc(loadCase) { $0.levelID = nil } }
+                }
+                .controlSize(.small).frame(width: 175)
+            }
+            if emc.levelID == nil {
+                fieldRow("Поле, В/м") {
+                    numberField("не задано", value: Binding(
+                        get: { emc.fieldVm },
+                        set: { value in editEmc(loadCase) { $0.fieldVm = value } }), width: 56)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Приход волны") {
+                    Menu(emc.incidence.displayName) {
+                        ForEach(WorkbenchStructuralCase.EmcSettings.Incidence.allCases, id: \.self) { value in
+                            Button(value.displayName) { editEmc(loadCase) { $0.incidence = value } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 70)
+                }
+                fieldRow("Поляризация") {
+                    Menu(emc.polarization.displayName) {
+                        ForEach(WorkbenchStructuralCase.EmcSettings.Polarization.allCases, id: \.self) { value in
+                            Button(value.displayName) { editEmc(loadCase) { $0.polarization = value } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 60)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("от, МГц") {
+                    numberField("не задано", value: Binding(
+                        get: { emc.lowMHz },
+                        set: { value in editEmc(loadCase) { $0.lowMHz = value } }), width: 56)
+                }
+                fieldRow("до, МГц") {
+                    numberField("не задано", value: Binding(
+                        get: { emc.highMHz },
+                        set: { value in editEmc(loadCase) { $0.highMHz = value } }), width: 56)
+                }
+                fieldRow("точек") {
+                    numberField("8", value: Binding(
+                        get: { Double(emc.points) },
+                        set: { value in editEmc(loadCase) { $0.points = Int((value ?? 8).rounded()) } }), width: 40)
+                }
+            }
+            fieldRow("Элемент поверхности, мм") {
+                numberField("не задан", value: Binding(
+                    get: { emc.surfaceElementSizeM.map { $0 * 1e3 } },
+                    set: { value in editEmc(loadCase) { $0.surfaceElementSizeM = value.map { $0 / 1e3 } } }), width: 56)
+            }
+            HStack(spacing: 4) {
+                numberField("вглубь, мм", value: $probeOffsetMM, width: 70)
+                numberField("В/м", value: $probeImmunityVm, width: 50)
+                TextField("прибор", text: $componentName).textFieldStyle(.plain).font(.system(size: 10))
+                    .padding(.horizontal, 5).padding(.vertical, 3).frame(width: 76)
+                    .background(GroundControlPalette.panel, in: RoundedRectangle(cornerRadius: 4))
+            }
+            .controlSize(.small)
+            HStack(spacing: 6) {
+                Button("+ Точка от грани") {
+                    let name = componentName.trimmingCharacters(in: .whitespaces)
+                    guard !name.isEmpty, let offset = probeOffsetMM, let immunity = probeImmunityVm, immunity > 0 else { return }
+                    viewModel.beginFacePick(.emcProbe(name: name, offsetMm: offset, immunityVm: immunity), for: loadCase.id)
+                    componentName = ""
+                    probeOffsetMM = nil
+                    probeImmunityVm = nil
+                }
+                .disabled(componentName.trimmingCharacters(in: .whitespaces).isEmpty || probeOffsetMM == nil || (probeImmunityVm ?? 0) <= 0)
+                .help("Точка ставится в центре выбранной грани и уводится внутрь корпуса на заданное расстояние")
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+            note("MIL-STD-461G RS103. Опоры и нагрузки здесь не нужны: считается, сколько поля доходит внутрь корпуса. "
+                 + "«Размер грубой сетки» ниже — это шаг ячейки FDTD, а не конечного элемента.")
+        }
+    }
+
+    private func icingControls(_ loadCase: WorkbenchStructuralCase, icing: WorkbenchStructuralCase.IcingSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 4) {
+                fieldRow("Поток вдоль") {
+                    Menu(icing.flowAxis.displayName) {
+                        ForEach(WorkbenchModelAxis.allCases, id: \.self) { axis in
+                            Button(axis.displayName) { editIcing(loadCase) { $0.flowAxis = axis } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 96)
+                }
+                fieldRow("Размах вдоль") {
+                    Menu(icing.spanAxis.displayName) {
+                        ForEach(WorkbenchModelAxis.allCases, id: \.self) { axis in
+                            Button(axis.displayName) { editIcing(loadCase) { $0.spanAxis = axis } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 96)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Угол атаки, °") {
+                    numberField("0", value: Binding(
+                        get: { icing.angleOfAttackDeg },
+                        set: { value in editIcing(loadCase) { $0.angleOfAttackDeg = value ?? 0 } }), width: 50)
+                }
+                fieldRow("Сечений") {
+                    numberField("3", value: Binding(
+                        get: { Double(icing.stations) },
+                        set: { value in editIcing(loadCase) { $0.stations = Int((value ?? 3).rounded()) } }), width: 40)
+                }
+                fieldRow("Элемент, мм") {
+                    numberField("не задан", value: Binding(
+                        get: { icing.surfaceElementSizeM.map { $0 * 1e3 } },
+                        set: { value in editIcing(loadCase) { $0.surfaceElementSizeM = value.map { $0 / 1e3 } } }), width: 56)
+                }
+            }
+            Toggle("Взлётное обледенение (14 CFR 25 Прил. C)", isOn: Binding(
+                get: { icing.useTakeoffMaximum },
+                set: { value in editIcing(loadCase) { $0.useTakeoffMaximum = value } }))
+                .controlSize(.small).font(.system(size: 10))
+            HStack(spacing: 4) {
+                fieldRow("Скорость, м/с") {
+                    numberField("не задана", value: Binding(
+                        get: { icing.airspeedMps },
+                        set: { value in editIcing(loadCase) { $0.airspeedMps = value } }), width: 56)
+                }
+                fieldRow("Время, мин") {
+                    numberField("не задано", value: Binding(
+                        get: { icing.durationMin },
+                        set: { value in editIcing(loadCase) { $0.durationMin = value } }), width: 56)
+                }
+            }
+            if !icing.useTakeoffMaximum {
+                HStack(spacing: 4) {
+                    fieldRow("t, °C") {
+                        numberField("не задано", value: Binding(
+                            get: { icing.temperatureC },
+                            set: { value in editIcing(loadCase) { $0.temperatureC = value } }), width: 50)
+                    }
+                    fieldRow("вода, г/м³") {
+                        numberField("не задано", value: Binding(
+                            get: { icing.lwcGm3 },
+                            set: { value in editIcing(loadCase) { $0.lwcGm3 = value } }), width: 50)
+                    }
+                    fieldRow("капли, мкм") {
+                        numberField("не задано", value: Binding(
+                            get: { icing.dropletMicrons },
+                            set: { value in editIcing(loadCase) { $0.dropletMicrons = value } }), width: 50)
+                    }
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Обогрев до, °C") {
+                    numberField("нет", value: Binding(
+                        get: { icing.antiIceTargetC },
+                        set: { value in editIcing(loadCase) { $0.antiIceTargetC = value } }), width: 50)
+                }
+                fieldRow("бюджет, Вт") {
+                    numberField("нет", value: Binding(
+                        get: { icing.antiIceBudgetW },
+                        set: { value in editIcing(loadCase) { $0.antiIceBudgetW = value } }), width: 50)
+                }
+                fieldRow("лёд до, мм") {
+                    numberField("нет", value: Binding(
+                        get: { icing.maximumIceThicknessMm },
+                        set: { value in editIcing(loadCase) { $0.maximumIceThicknessMm = value } }), width: 50)
+                }
+            }
+            note("Лёд растёт на внешней обшивке: опоры и нагрузки не нужны. Без допустимой толщины вердикт не выше WARNING.")
+        }
+    }
+
+    private func flutterItems(_ loadCase: WorkbenchStructuralCase) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            ForEach(Array(loadCase.supports.enumerated()), id: \.offset) { index, support in
+                itemRow("Корень · \(support.faceID)", color: GroundControlPalette.accent) {
+                    viewModel.updateStructuralCase(loadCase.id) { $0.supports.remove(at: index) }
+                }
+            }
+        }
+    }
+
+    private func flutterControls(_ loadCase: WorkbenchStructuralCase, flutter: WorkbenchStructuralCase.FlutterSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
+                Button("Корень (заделка)") { viewModel.beginFacePick(.support([.x, .y, .z]), for: loadCase.id) }
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+            HStack(spacing: 4) {
+                fieldRow("Поток вдоль") {
+                    Menu(flutter.flowAxis.displayName) {
+                        ForEach(WorkbenchModelAxis.allCases, id: \.self) { axis in
+                            Button(axis.displayName) { editFlutter(loadCase) { $0.flowAxis = axis } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 96)
+                }
+                fieldRow("Размах вдоль") {
+                    Menu(flutter.spanAxis.displayName) {
+                        ForEach(WorkbenchModelAxis.allCases, id: \.self) { axis in
+                            Button(axis.displayName) { editFlutter(loadCase) { $0.spanAxis = axis } }
+                        }
+                    }
+                    .controlSize(.small).frame(width: 96)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Плотность, кг/м³") {
+                    numberField("1.225", value: Binding(
+                        get: { flutter.airDensityKgM3 },
+                        set: { value in editFlutter(loadCase) { $0.airDensityKgM3 = value ?? 1.225 } }), width: 56)
+                }
+                fieldRow("V_D, м/с") {
+                    numberField("не задана", value: Binding(
+                        get: { flutter.diveSpeedMps },
+                        set: { value in editFlutter(loadCase) { $0.diveSpeedMps = value } }), width: 56)
+                }
+            }
+            HStack(spacing: 4) {
+                fieldRow("Развёртка от") {
+                    numberField("10", value: Binding(
+                        get: { flutter.lowSpeedMps },
+                        set: { value in editFlutter(loadCase) { $0.lowSpeedMps = value ?? 10 } }), width: 50)
+                }
+                fieldRow("до, м/с") {
+                    numberField("400", value: Binding(
+                        get: { flutter.highSpeedMps },
+                        set: { value in editFlutter(loadCase) { $0.highSpeedMps = value ?? 400 } }), width: 50)
+                }
+                fieldRow("полос") {
+                    numberField("12", value: Binding(
+                        get: { Double(flutter.stations) },
+                        set: { value in editFlutter(loadCase) { $0.stations = Int((value ?? 12).rounded()) } }), width: 40)
+                }
+            }
+            fieldRow("Конструкционное g") {
+                numberField("0", value: Binding(
+                    get: { flutter.structuralDamping },
+                    set: { value in editFlutter(loadCase) { $0.structuralDamping = value ?? 0 } }), width: 50)
+            }
+            note("25.629: аппарат должен быть свободен от флаттера до 1.15·V_D. Нужна пара мод изгиб + кручение: на бруске без них расчёт откажется.")
+        }
+    }
+
+    private func birdControls(_ loadCase: WorkbenchStructuralCase, bird: WorkbenchStructuralCase.BirdSettings) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            dynamicAddControls(loadCase, equipmentHelp: "Оборудование едет через удар вместе с деталью: его масса берётся из результата масс")
+            HStack(spacing: 6) {
+                Button("Грань удара") { viewModel.beginFacePick(.impactFace, for: loadCase.id) }
+                    .help("Давление птицы распределяется по всей этой грани: грань заметно больше птицы занижает местное напряжение, и расчёт об этом скажет")
+                Spacer(minLength: 0)
+            }
+            .controlSize(.small)
+            fieldRow("Направление удара") {
+                Menu(axisName(bird.direction)) {
+                    ForEach(directions, id: \.0) { name, vector in
+                        Button(name) { editBird(loadCase) { $0.direction = vector } }
+                    }
+                }
+                .controlSize(.small).frame(width: 110)
+            }
+            HStack(spacing: 4) {
+                fieldRow("Масса, кг") {
+                    numberField("1.81", value: Binding(
+                        get: { bird.massKg },
+                        set: { value in editBird(loadCase) { $0.massKg = value ?? 1.81 } }), width: 50)
+                }
+                fieldRow("Скорость, м/с") {
+                    numberField("не задана", value: Binding(
+                        get: { bird.speedMps },
+                        set: { value in editBird(loadCase) { $0.speedMps = value } }), width: 56)
+                }
+                fieldRow("Угол, °") {
+                    numberField("90", value: Binding(
+                        get: { bird.obliquityDeg },
+                        set: { value in editBird(loadCase) { $0.obliquityDeg = value ?? 90 } }), width: 44)
+                }
+            }
+            dynamicModeFields(
+                modeCount: Binding(get: { bird.modeCount.map(Double.init) },
+                                   set: { value in editBird(loadCase) { $0.modeCount = value.map { Int($0.rounded()) } } }),
+                dampingPercent: Binding(get: { bird.dampingRatio.map { $0 * 100 } },
+                                        set: { value in editBird(loadCase) { $0.dampingRatio = value.map { $0 / 100 } } }),
+                pickProbe: {})
+            note("25.571(e): 1.81 кг (4 фунта) на планер, 3.63 кг (8 фунтов) на оперение. Модель линейно-упругая: за пределом текучести она говорит о необходимости испытания, а не о величине напряжения.")
+        }
+    }
+
+    private func editEmc(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.EmcSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .emc(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .emc(settings)
+        }
+    }
+
+    private func editIcing(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.IcingSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .icing(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .icing(settings)
+        }
+    }
+
+    private func editFlutter(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.FlutterSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .flutter(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .flutter(settings)
+        }
+    }
+
+    private func editBird(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.BirdSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .bird(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .bird(settings)
+        }
+    }
+
+    private func editClimate(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.ClimateSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .climate(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .climate(settings)
+        }
+    }
+
+    private func editFire(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.FireSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .fire(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .fire(settings)
+        }
+    }
+
+    private func editLightning(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.LightningSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .lightning(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .lightning(settings)
+        }
+    }
+
+    private func editShock(_ loadCase: WorkbenchStructuralCase, _ mutation: @escaping (inout WorkbenchStructuralCase.ShockSettings) -> Void) {
+        viewModel.updateStructuralCase(loadCase.id) { edited in
+            guard case var .shock(settings) = edited.analysis else { return }
+            mutation(&settings)
+            edited.analysis = .shock(settings)
         }
     }
 

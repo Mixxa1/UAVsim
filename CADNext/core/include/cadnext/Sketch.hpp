@@ -27,7 +27,8 @@ struct SketchPoint2D {
 enum class SketchEntityType {
     Line,
     Rectangle,
-    Circle
+    Circle,
+    Arc
 };
 
 struct SketchLine {
@@ -46,6 +47,17 @@ struct SketchCircle {
     double radius = 0.5;
 };
 
+struct SketchArc {
+    SketchPoint2D center;
+    double radius = 0.5;
+    double startAngleDegrees = 0.0;
+    double sweepDegrees = 90.0; // Counterclockwise, strictly between 0 and 360.
+};
+
+SketchPoint2D sketchArcPoint(const SketchArc& arc, double angleDegrees);
+SketchPoint2D sketchArcStart(const SketchArc& arc);
+SketchPoint2D sketchArcEnd(const SketchArc& arc);
+
 // One sketch element. Only the member matching `type` is meaningful; this
 // is intentionally a plain tagged struct (not std::variant) to keep the
 // 0.5 model and its serialization simple.
@@ -57,6 +69,7 @@ struct SketchEntity {
     SketchLine line;
     SketchRectangle rectangle;
     SketchCircle circle;
+    SketchArc arc;
 };
 
 // What a sketch is attached to. Canonical planes cover XY/XZ/YZ; WorkPlane

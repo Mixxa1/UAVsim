@@ -71,6 +71,22 @@ enum WorkbenchValidationText {
             return "Считается в Мастерской по точной геометрии рамы: варианты нагрузок задаются в панели «Прочность по точной геометрии»."
         case .modalVibration:
             return "Считается в Мастерской по точной геометрии: откройте «Прочность», добавьте вариант и выберите «Частоты и резонанс». В CADNext тот же расчёт находится в «Испытания → Прочность и частоты детали»."
+        case .mechanicalShock:
+            return "Считается в Мастерской по точной геометрии: откройте «Прочность», добавьте вариант и выберите «Удар». Импульс задаётся формой, амплитудой в g и длительностью; в CADNext тот же расчёт находится в «Испытания → Прочность и частоты детали»."
+        case .climatic:
+            return "Считается в Мастерской по точной геометрии: откройте «Прочность», добавьте вариант и выберите «Климат». Задаются условие стандарта, обдув, α и ε поверхности, температура сборки и оборудование с его пределами."
+        case .fireResistance:
+            return "Считается в Мастерской по точной геометрии: вариант «Огонь». Выбираются стандарт, длительность, грани под пламенем и излучательная способность поверхности."
+        case .lightningDirect:
+            return "Считается в Мастерской по точной геометрии: вариант «Молния». Задаются компоненты тока, грань привязки дуги и грани, связанные с конструкцией."
+        case .radiatedSusceptibility:
+            return "Считается в Мастерской по точной геометрии: вариант «ЭМС». Задаются уровень стандарта, направление и поляризация волны, диапазон частот и точки, где стоит оборудование."
+        case .icing:
+            return "Считается в Мастерской по точной геометрии: вариант «Обледенение». Задаются оси потока и размаха, условие Приложения C или свои числа облака, и допустимая толщина льда."
+        case .flutter:
+            return "Считается в Мастерской по точной геометрии: вариант «Флаттер». Нужны оси потока и размаха, плотность воздуха и скорость пикирования — без неё вердикт не выше WARNING."
+        case .birdStrike:
+            return "Считается в Мастерской по точной геометрии: вариант «Удар птицы». Задаются масса и скорость птицы, грань удара и направление."
         case .aerodynamics:
             return "Одиночная точка и серии α/β доступны в панели «CFD». После расчёта откройте запуск: отчёт появится в отдельном окне, поля и линии тока — в CADNext. Нужна точная рама .uavframe v2 или готовая аэротаблица."
         case .geometryAssembly, .massProperties, .propulsionBench:
@@ -101,6 +117,43 @@ enum WorkbenchValidationText {
             "yieldMargin": "Запас по текучести",
             "firstFrequencyHz": "Первая частота",
             "minimumBandSeparation": "Мин. отстройка от полос",
+            "peakStressPa": "Пиковое σ Мизеса",
+            "peakTimeS": "Момент пика",
+            "peakProbeAccelerationMps2": "Датчик, пик ускорения",
+            "peakProbeDisplacementM": "Датчик, пик перемещения",
+            "peakInputAccelerationMps2": "Вход, пик ускорения",
+            "effectiveMassFraction": "Масса в модах вдоль удара",
+            "peakTemperatureK": "Макс. температура",
+            "lowTemperatureK": "Мин. температура",
+            "peakThermalStressPa": "Макс. тепловое σ",
+            "convectionCoefficientWm2K": "Коэффициент теплоотдачи",
+            "cycles": "Суток в расчёте",
+            "hotUtilization": "Использование допуска в горячем виде",
+            "integrityLossTimeS": "Потеря целостности",
+            "requiredDurationS": "Требуемая длительность",
+            "burnThroughTimeS": "Время прожога",
+            "arcEnergyJ": "Энергия дуги",
+            "jouleEnergyJ": "Джоулево тепло",
+            "peakCurrentDensityAm2": "Макс. плотность тока",
+            "resistanceOhm": "Сопротивление пути",
+            "shieldingEffectivenessDb": "Экранирование",
+            "interiorFieldVm": "Поле внутри",
+            "worstFrequencyHz": "Худшая частота",
+            "cellsPerWavelength": "Ячеек на длину волны",
+            "iceThicknessM": "Толщина льда",
+            "iceMassKg": "Масса льда",
+            "collectionEfficiency": "Коэффициент захвата",
+            "inertiaParameter": "Параметр инерции капель",
+            "flutterSpeedMps": "Скорость флаттера",
+            "flutterFrequencyHz": "Частота флаттера",
+            "divergenceSpeedMps": "Скорость дивергенции",
+            "requiredSpeedMps": "Требуется по 25.629",
+            "marginFraction": "Запас по скорости",
+            "bendingFrequencyHz": "Частота изгиба",
+            "torsionFrequencyHz": "Частота кручения",
+            "patchRatio": "Грань / мидель птицы",
+            "impulseNs": "Импульс птицы",
+            "peakForceN": "Пиковая сила",
             "checkedBodies": "Проверено деталей",
             "totalBodies": "Деталей в раме",
         ][key] ?? key
@@ -109,7 +162,7 @@ enum WorkbenchValidationText {
     /// Metrics in the order an engineer reads them: the verdict-carrying number first.
     static func orderedMetricKeys(_ metrics: [String: EngineeringMetric]) -> [String] {
         let priority = [
-            "reserveFactor", "maxVonMisesPa", "firstFrequencyHz", "minimumBandSeparation",
+            "reserveFactor", "maxVonMisesPa", "peakStressPa", "firstFrequencyHz", "minimumBandSeparation",
             "massKg", "maxThrustN", "maxElectricalPowerW", "maxRPM",
             "compatibilityErrors", "compatibilityWarnings",
             "centerOfMassX", "centerOfMassY", "centerOfMassZ",

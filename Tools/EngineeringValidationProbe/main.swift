@@ -153,8 +153,11 @@ cyclic[massIndex] = EngineeringTestDefinition(
     upstream: [.init(test: .systemEndurance, requiredFor: [])],
     appliesTo: [.multicopter], requiredForReadinessOn: [], rationale: "")
 check(EngineeringTestCatalog.topologicalOrder(cyclic) == nil, "an injected cycle is detected")
+// mechanicalShock joins the mass edge: a shock case reads the mass of the equipment a face carries,
+// so a record that carried equipment depends on that result (a case without equipment stamps nothing
+// and stays current — the edge is optional, `requiredFor: []`).
 check(EngineeringTestCatalog.downstream(of: .massProperties)
-      == [.structuralStatic, .modalVibration, .controlAuthority, .systemEndurance],
+      == [.structuralStatic, .modalVibration, .mechanicalShock, .flutter, .birdStrike, .controlAuthority, .systemEndurance],
       "downstream(massProperties)", names(EngineeringTestCatalog.downstream(of: .massProperties)))
 check(EngineeringFrameConvention.workbenchModel.isRightHanded, "workbench model axes are right-handed")
 check(EngineeringFrameConvention.flightBody.isRightHanded, "flight body axes are right-handed")
@@ -203,6 +206,15 @@ for base in [WorkbenchBuild.defaultQuad(), .defaultFixedWing(), .defaultVTOL()] 
 
 // MARK: - 3. Spec §10 change table
 
+// The last four follow from their declarations the same way: EMC reads where the equipment sits; the
+// bird and flutter carry the optional mass edge (a case with equipment stamps it); icing reads only the
+// outer shape and the material, so it goes stale with an external payload or a material change and
+// with nothing internal. Icing and flutter apply to lifting surfaces, so the quad never lists them.
+//
+// The three environment tests (climate, fire, lightning) read where the equipment sits: the layout
+// decides what stands next to what, what the flame reaches and where the current passes. So every
+// scenario that moves or swaps a component outdates them too. Their own typed-in numbers (a
+// component's power and limits) are part of the case and outdate it through the settings fingerprint.
 section("3. Spec §10 change table — fixed wing (clean-airframe CFD)")
 let wing = WorkbenchBuild.defaultFixedWing()
 
@@ -213,7 +225,7 @@ let wing = WorkbenchBuild.defaultFixedWing()
 //   controlAuthority — the same moment now turns a different inertia about a different CG.
 scenario("battery moved inside the bay", base: wing,
          expected: [.geometryAssembly, .massProperties, .structuralStatic, .modalVibration,
-                    .controlAuthority, .systemEndurance]) { build in
+                    .mechanicalShock, .climatic, .fireResistance, .lightningDirect, .radiatedSusceptibility, .birdStrike, .flutter, .controlAuthority, .systemEndurance]) { build in
     build.componentPlacements[WorkbenchComponentKind.battery.rawValue] = WorkbenchComponentPlacement(
         surface: .internalBay, offset: CodableVector3D(x: 0, y: 0, z: -0.02))
     build.revision += 1
@@ -241,7 +253,7 @@ let (hvSnapshot, hvRecords) = scenario(
 // mass and disc), and through them structuralStatic and controlAuthority.
 scenario("propeller changed", base: wing,
          expected: [.geometryAssembly, .massProperties, .propulsionBench, .structuralStatic,
-                    .modalVibration, .thermalLimits, .controlAuthority, .systemEndurance]) { build in
+                    .modalVibration, .mechanicalShock, .climatic, .fireResistance, .lightningDirect, .radiatedSusceptibility, .birdStrike, .flutter, .thermalLimits, .controlAuthority, .systemEndurance]) { build in
     let current = build.propSpecID
     build.setSpec(library(.propeller, otherThan: current).id, for: .propeller)
 }
@@ -250,7 +262,7 @@ scenario("propeller changed", base: wing,
 // Also outdated: mass/geometry (servo mass and envelope) and what reads mass.
 scenario("servo changed", base: wing,
          expected: [.geometryAssembly, .massProperties, .mechanism, .structuralStatic,
-                    .modalVibration, .controlAuthority, .systemEndurance]) { build in
+                    .modalVibration, .mechanicalShock, .climatic, .fireResistance, .lightningDirect, .radiatedSusceptibility, .birdStrike, .flutter, .controlAuthority, .systemEndurance]) { build in
     let current = build.servoSpecID
     build.setSpec(library(.servo, otherThan: current).id, for: .servo)
 }
@@ -263,7 +275,7 @@ wingWithPayload.componentPlacements[WorkbenchComponentKind.payload.rawValue] =
     WorkbenchComponentPlacement(surface: .internalBay)
 scenario("internal payload moved", base: wingWithPayload,
          expected: [.geometryAssembly, .massProperties, .structuralStatic, .modalVibration,
-                    .controlAuthority, .systemEndurance]) { build in
+                    .mechanicalShock, .climatic, .fireResistance, .lightningDirect, .radiatedSusceptibility, .birdStrike, .flutter, .controlAuthority, .systemEndurance]) { build in
     build.componentPlacements[WorkbenchComponentKind.payload.rawValue] = WorkbenchComponentPlacement(
         surface: .internalBay, offset: CodableVector3D(x: 0, y: 0, z: 0.03))
 }
@@ -272,7 +284,7 @@ wingWithPodPayload.componentPlacements[WorkbenchComponentKind.payload.rawValue] 
     WorkbenchComponentPlacement(surface: .bottom)
 scenario("external payload moved", base: wingWithPodPayload,
          expected: [.geometryAssembly, .massProperties, .structuralStatic, .modalVibration,
-                    .controlAuthority, .systemEndurance, .aerodynamics, .mechanism]) { build in
+                    .mechanicalShock, .climatic, .fireResistance, .lightningDirect, .radiatedSusceptibility, .birdStrike, .flutter, .icing, .controlAuthority, .systemEndurance, .aerodynamics, .mechanism]) { build in
     build.componentPlacements[WorkbenchComponentKind.payload.rawValue] = WorkbenchComponentPlacement(
         surface: .bottom, offset: CodableVector3D(x: 0, y: 0, z: 0.05))
 }
@@ -285,8 +297,9 @@ do {
     var after = before
     after.categories[EngineeringInputCategory.materials.rawValue]?["frame.skin"] = .string("titanium")
     let result = outdated(after, records)
+    // A material change reaches the thermal tests too: they read the material's own properties.
     let expected: Set<EngineeringTestType> = [.massProperties, .structuralStatic, .modalVibration,
-                                              .controlAuthority, .systemEndurance]
+                                              .mechanicalShock, .climatic, .fireResistance, .lightningDirect, .radiatedSusceptibility, .birdStrike, .flutter, .icing, .controlAuthority, .systemEndurance]
     check(result == expected, "material changed: outdated set", "got [\(names(result))]")
     // Two independent reasons, both true: it reads materials itself, and it reads mass.
     check(reasons(after, records, .structuralStatic)
@@ -319,7 +332,7 @@ section("3b. Multicopter: an open frame has no closed bay")
 // there changes what the air sees. Contrast with the fixed-wing scenario above.
 scenario("quad: battery moved between the plates", base: .defaultQuad(),
          expected: [.geometryAssembly, .massProperties, .structuralStatic, .modalVibration,
-                    .controlAuthority, .systemEndurance, .aerodynamics]) { build in
+                    .mechanicalShock, .climatic, .fireResistance, .lightningDirect, .radiatedSusceptibility, .birdStrike, .controlAuthority, .systemEndurance, .aerodynamics]) { build in
     build.componentPlacements[WorkbenchComponentKind.battery.rawValue] = WorkbenchComponentPlacement(
         surface: .internalBay, offset: CodableVector3D(x: 0, y: 0, z: 0.012))
 }
@@ -1201,6 +1214,869 @@ do {
         let decoded = try JSONDecoder().decode(WorkbenchAeroRun.self, from: Data(contentsOf: url))
         check(decoded == saved, "completed/cancelled run survives local history reload")
     }
+}
+
+// MARK: - 16. One shock event from the Workbench
+
+// The Swift half of the shock test: what the panel collects must arrive at cadnext_structural in the
+// units the schema declares, along the axis the user pointed at, and the answer must come back as a
+// mechanicalShock record.
+//
+// Criteria, fixed before the first run:
+//   1. Refusals first: no damping, no pulse and an impossible trapezoid are each named before any
+//      mesh is built. A shock with a default ζ would be the quietest wrong verdict here.
+//   2. Units and axis: the job carries peak × g in m/s² and the duration in seconds, and its
+//      direction is the CAD axis the frame declares as "up" — the fixture's is +z.
+//   3. The quasi-static limit, end to end: a half-sine fifty first periods long cannot be told from
+//      a static load of the same g. The shock run's peak stress must match the static run's maximum
+//      von Mises within 5 % — far above the +0.29 % the C++ core measures for this limit on a plate,
+//      far below the 9.8× a g ↔ m/s² mix-up would give, which is the mistake this checks for.
+//   4. Bookkeeping: a case without equipment reads no upstream, the result files under
+//      mechanicalShock, and the aircraft's record carries the peak stress of the governing case.
+
+section("16. A Workbench shock case: the pulse as entered, the response against the static limit")
+do {
+    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("probe-frame-16.uavframe")
+    try? FileManager.default.removeItem(at: temporary)
+    try? FileManager.default.copyItem(at: URL(fileURLWithPath: "CADNext/bridge/schema/uavframe-v2.example.json"), to: temporary)
+    guard let construction = try? WorkbenchConstruction.load(from: temporary).construction,
+          let arm = construction.bodies?.first(where: { $0.id == "arm" }),
+          let axes = construction.cadAxes,
+          let tool = WorkbenchStructuralToolLocator.locate() else {
+        check(false, "fixture frame and cadnext_structural available")
+        exit(1)
+    }
+    func forwardOf(_ face: WorkbenchConstruction.Body.FaceRange) -> Double {
+        var sum = 0.0
+        for t in face.firstTriangle..<(face.firstTriangle + face.triangleCount) {
+            for k in 0..<3 { sum -= Double(construction.mesh.vertices[3 * Int(construction.mesh.indices[3 * t + k]) + 1]) }
+        }
+        return sum / Double(3 * face.triangleCount)
+    }
+    let root = arm.faces.min { forwardOf($0) < forwardOf($1) }!
+    let tip = arm.faces.max { forwardOf($0) < forwardOf($1) }!
+
+    var build = WorkbenchBuild.defaultQuad()
+    build.frame = .imported(construction)
+    let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+    let builtIn = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
+    let state = EngineeringValidationEngine.evaluate(snapshot: snapshot, records: builtIn)
+
+    let loadFactorG = 20.0
+    var base = WorkbenchStructuralCase(name: "луч, удар вверх", bodyID: arm.id, analysis: .shock(.init()))
+    base.supports = [.init(faceID: root.id, fixed: [.x, .y, .z])]
+    base.coarseElementSizeM = 0.02
+
+    // --- 1. Refusals, each for its own reason.
+    func refusal(_ mutate: (inout WorkbenchStructuralCase.ShockSettings) -> Void) -> String {
+        var settings = WorkbenchStructuralCase.ShockSettings()
+        mutate(&settings)
+        var probeCase = base
+        probeCase.analysis = .shock(settings)
+        if case let .failure(error) = WorkbenchStructuralJob.prepare(probeCase, build: build, state: state) { return error.description }
+        return "приняли без отказа"
+    }
+    let noModes = refusal { _ in }
+    let noDamping = refusal { $0.modeCount = 3 }
+    let noPulse = refusal { $0.modeCount = 3; $0.dampingRatio = 0.02 }
+    let badTrapezoid = refusal {
+        $0.modeCount = 3; $0.dampingRatio = 0.02; $0.peakG = loadFactorG; $0.durationMs = 10
+        $0.shape = .trapezoid; $0.riseMs = 7; $0.fallMs = 7
+    }
+    check(noModes.contains("мод") && noDamping.contains("демпфирование") && noPulse.contains("импульс")
+            && badTrapezoid.contains("Трапеция"),
+          "no modes, no damping, no pulse and an impossible trapezoid are each refused by name",
+          [noModes, noDamping, noPulse, badTrapezoid].joined(separator: " | "))
+
+    // --- The first period decides how long a pulse counts as slow, so it is measured, not assumed.
+    let storeRoot = FileManager.default.temporaryDirectory.appendingPathComponent("probe-shock-runs")
+    try? FileManager.default.removeItem(at: storeRoot)
+    let store = WorkbenchStructuralRunStore(root: storeRoot)
+    func run(_ loadCase: WorkbenchStructuralCase) -> WorkbenchStructuralRun? {
+        final class Box: @unchecked Sendable { var run: WorkbenchStructuralRun?; var error: String = "" }
+        let box = Box()
+        let semaphore = DispatchSemaphore(value: 0)
+        let buildToRun = build
+        Task.detached {
+            switch await WorkbenchStructuralRunner.run(loadCase, build: buildToRun, snapshot: snapshot, state: state, store: store, tool: tool) {
+            case let .success(value): box.run = value
+            case let .failure(error): box.error = error.description
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if box.run == nil { print("  не выполнено: \(box.error)") }
+        return box.run
+    }
+
+    var modalSettings = WorkbenchStructuralCase.ModalSettings()
+    modalSettings.modeCount = 3
+    var modalCase = WorkbenchStructuralCase(name: "луч, частоты", bodyID: arm.id, analysis: .modal(modalSettings))
+    modalCase.supports = base.supports
+    modalCase.coarseElementSizeM = base.coarseElementSizeM
+    guard let modalRun = run(modalCase), let firstHz = modalRun.record.metrics["firstFrequencyHz"]?.value, firstHz > 0 else {
+        check(false, "the arm's first frequency is measured for the pulse length")
+        exit(1)
+    }
+
+    var settings = WorkbenchStructuralCase.ShockSettings()
+    settings.modeCount = 3
+    settings.dampingRatio = 0.02
+    settings.peakG = loadFactorG
+    settings.durationMs = 50 * 1e3 / firstHz   // fifty first periods: as static as a pulse gets
+    settings.direction = CodableVector3D(x: 0, y: 1, z: 0)
+    settings.probeFaceID = tip.id
+    var shockCase = base
+    shockCase.analysis = .shock(settings)
+
+    // --- 2. Units and axis, in the job itself.
+    guard case let .success(job) = WorkbenchStructuralJob.prepare(shockCase, build: build, state: state) else {
+        check(false, "shock case prepares", String(describing: WorkbenchStructuralJob.prepare(shockCase, build: build, state: state)))
+        exit(1)
+    }
+    let jobObject = try! JSONSerialization.jsonObject(with: job.jobJSON) as! [String: Any]
+    let shockBlock = jobObject["shock"] as! [String: Any]
+    let pulse = shockBlock["pulse"] as! [String: Any]
+    let direction = shockBlock["direction"] as! [Double]
+    let expected: [Double] = axes.up == "+z" ? [0, 0, 1] : []
+    check(jobObject["analysis"] as? String == "shock"
+            && abs((pulse["peakMps2"] as! Double) - loadFactorG * 9.80665) < 1e-9
+            && abs((pulse["durationS"] as! Double) - settings.durationMs! / 1e3) < 1e-12
+            && pulse["shape"] as? String == "halfSine"
+            && direction.count == 3 && zip(direction, expected).allSatisfy({ abs($0 - $1) < 1e-12 }),
+          "the job carries peak × g in m/s², the duration in seconds and «вверх» as the frame's own up axis",
+          "direction \(direction), up \(axes.up)")
+    check(job.testType == .mechanicalShock && job.consumedUpstream.isEmpty,
+          "a shock case without equipment reads no upstream result")
+    let example = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/shock-job.example.json"))) as! [String: Any]
+    check(Set(jobObject.keys) == Set(example.keys)
+            && Set(shockBlock.keys) == Set((example["shock"] as! [String: Any]).keys),
+          "shock job keys match the C++ shock job example",
+          "наши \(Set(jobObject.keys).sorted()) | пример \(Set(example.keys).sorted())")
+
+    // --- 3, 4. The run, against the same load applied statically.
+    var staticCase = WorkbenchStructuralCase(name: "луч, те же g статикой", bodyID: arm.id)
+    staticCase.supports = base.supports
+    staticCase.coarseElementSizeM = base.coarseElementSizeM
+    staticCase.ownLoadFactorG = CodableVector3D(x: 0, y: loadFactorG, z: 0)
+    guard let shockRun = run(shockCase), let staticRun = run(staticCase),
+          let peak = shockRun.record.metrics["peakStressPa"]?.value,
+          let statically = staticRun.record.metrics["maxVonMisesPa"]?.value, statically > 0 else {
+        check(false, "the shock case and the static case both run")
+        exit(1)
+    }
+    print(String(format: "  arm: f1 %.2f Hz → полусинус %.0f мс при %.0f g; пик %.4f МПа против статики %.4f МПа (%+.3f %%)",
+                 firstHz, settings.durationMs!, loadFactorG, peak / 1e6, statically / 1e6, 100 * (peak / statically - 1)))
+    check(shockRun.record.testType == .mechanicalShock, "the result files under mechanicalShock")
+    check(abs((shockRun.record.metrics["peakInputAccelerationMps2"]?.value ?? 0) - loadFactorG * 9.80665) <= 1e-6 * loadFactorG * 9.80665,
+          "the solver echoes the input peak as the g the user entered, in m/s²")
+    check(abs(peak / statically - 1) <= 0.05,
+          "a pulse fifty first periods long gives the static answer, so the units survived the whole path",
+          String(format: "%.4f МПа против %.4f МПа", peak / 1e6, statically / 1e6))
+
+    // The aircraft's record is assembled from the cases the blueprint carries, so they go in it —
+    // the load cases are not part of the snapshot, which is why this can happen after the runs.
+    build.structuralCases = [modalCase, shockCase, staticCase]
+    let record = WorkbenchStructuralAggregate.record(
+        .mechanicalShock, build: build, snapshot: snapshot, upstreamRecords: builtIn, runs: store.runs(vehicleID: snapshot.vehicleID))
+    let evaluated = record.map { EngineeringValidationEngine.evaluate(snapshot: snapshot, records: builtIn + [$0]) }
+    check(record != nil && evaluated?.evaluation(.mechanicalShock)?.status.isCurrent == true
+            && record!.metrics["peakStressPa"] != nil && record!.warnings.contains { $0.contains("определяющий вариант") },
+          "the aircraft's shock record is current, carries the peak stress and names the governing case",
+          record.map { $0.metrics.keys.sorted().joined(separator: ", ") } ?? "nil")
+    check(WorkbenchStructuralAggregate.record(.structuralStatic, build: build, snapshot: snapshot, upstreamRecords: builtIn,
+                                              runs: store.runs(vehicleID: snapshot.vehicleID))?.metrics["peakStressPa"] == nil,
+          "the shock run does not leak into the static strength record")
+
+    let fixture = try! Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/shock-result.example.json"))
+    let decoded = try? EngineeringSolverResult.decode(fixture, expecting: .mechanicalShock)
+    check(decoded?.schema == "cadnext-shock-result/1" && decoded?.metrics["peakStressPa"] != nil,
+          "schema/shock-result.example.json decodes as a mechanicalShock result")
+}
+
+// MARK: - 17. Sine and random vibration from the Workbench
+
+// The two remaining vibration kinds. They share the modes' test, so the point here is that each
+// arrives at the solver in its own units and that one verdict on vibration can hold all three kinds.
+//
+// Criteria, fixed before the first run:
+//   1. Units: a shaker entered in g arrives as m/s², a schedule in g²/Hz arrives as (m/s²)²/Hz, and
+//      an imbalance in g·mm arrives as kg·m. The solver echoes the input, so a mix-up shows up as a
+//      factor of 9.8 (or 9.8² = 96) and not as something plausible.
+//   2. Refusals: no spectrum, a spectrum that does not rise in frequency, no sweep range, and a force
+//      without a face are each named. A single-point amplitude is legal (flat) — two-point PSD is the
+//      minimum, because one point is a number, not a spectrum.
+//   3. A flat shaker spectrum through the sweep must give a peak stress near the resonance of the
+//      part: the reported frequency of the peak must sit within 10 % of the first natural frequency
+//      the modal case measured. Ten percent is the half-power width at ζ = 2 % with room to spare,
+//      so this catches a sweep that missed the mode, not a solver that is slightly off.
+//   4. All three kinds file under one test, and the aircraft's vibration record is governed by a
+//      stressed case (a reserve factor) rather than by the modal case that has none.
+
+section("17. Sine and random vibration: units, refusals, resonance and one verdict for three kinds")
+do {
+    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("probe-frame-17.uavframe")
+    try? FileManager.default.removeItem(at: temporary)
+    try? FileManager.default.copyItem(at: URL(fileURLWithPath: "CADNext/bridge/schema/uavframe-v2.example.json"), to: temporary)
+    guard let construction = try? WorkbenchConstruction.load(from: temporary).construction,
+          let arm = construction.bodies?.first(where: { $0.id == "arm" }),
+          let tool = WorkbenchStructuralToolLocator.locate() else {
+        check(false, "fixture frame and cadnext_structural available")
+        exit(1)
+    }
+    func forwardOf(_ face: WorkbenchConstruction.Body.FaceRange) -> Double {
+        var sum = 0.0
+        for t in face.firstTriangle..<(face.firstTriangle + face.triangleCount) {
+            for k in 0..<3 { sum -= Double(construction.mesh.vertices[3 * Int(construction.mesh.indices[3 * t + k]) + 1]) }
+        }
+        return sum / Double(3 * face.triangleCount)
+    }
+    let root = arm.faces.min { forwardOf($0) < forwardOf($1) }!
+    let tip = arm.faces.max { forwardOf($0) < forwardOf($1) }!
+
+    var build = WorkbenchBuild.defaultQuad()
+    build.frame = .imported(construction)
+    let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+    let builtIn = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
+    let state = EngineeringValidationEngine.evaluate(snapshot: snapshot, records: builtIn)
+
+    var base = WorkbenchStructuralCase(name: "луч", bodyID: arm.id)
+    base.supports = [.init(faceID: root.id, fixed: [.x, .y, .z])]
+    base.coarseElementSizeM = 0.02
+
+    // --- 2. Refusals.
+    func refusal(_ analysis: WorkbenchStructuralCase.Analysis) -> String {
+        var probeCase = base
+        probeCase.analysis = analysis
+        if case let .failure(error) = WorkbenchStructuralJob.prepare(probeCase, build: build, state: state) { return error.description }
+        return "приняли без отказа"
+    }
+    var sine = WorkbenchStructuralCase.SineSettings()
+    sine.modeCount = 6
+    sine.dampingRatio = 0.02
+    var withRange = sine
+    withRange.fromHz = 5
+    withRange.toHz = 600
+    let noSpectrum = refusal(.sine(withRange))
+    var descending = sine
+    descending.fromHz = 5
+    descending.toHz = 600
+    descending.amplitude = [.init(frequencyHz: 100, value: 2), .init(frequencyHz: 50, value: 2)]
+    let notRising = refusal(.sine(descending))
+    var noRange = sine
+    noRange.amplitude = [.init(frequencyHz: 5, value: 2)]
+    let missingRange = refusal(.sine(noRange))
+    var forceWithoutFace = noRange
+    forceWithoutFace.excitation = .force
+    forceWithoutFace.fromHz = 5
+    forceWithoutFace.toHz = 600
+    let noFace = refusal(.sine(forceWithoutFace))
+    var onePoint = WorkbenchStructuralCase.RandomSettings()
+    onePoint.modeCount = 6
+    onePoint.dampingRatio = 0.03
+    onePoint.psd = [.init(frequencyHz: 20, value: 0.01)]
+    let singlePointPsd = refusal(.random(onePoint))
+    check(noSpectrum.contains("спектр") && notRising.contains("спектр") && missingRange.contains("диапазон")
+            && noFace.contains("грань") && singlePointPsd.contains("спектр"),
+          "no spectrum, a falling spectrum, no sweep range, a force without a face and a one-point PSD are refused",
+          [noSpectrum, notRising, missingRange, noFace, singlePointPsd].joined(separator: " | "))
+
+    // --- 1. Units, in the jobs themselves.
+    let shakerG = 2.0
+    sine.amplitude = [.init(frequencyHz: 5, value: shakerG), .init(frequencyHz: 600, value: shakerG)]
+    sine.fromHz = 5
+    sine.toHz = 600
+    sine.sweepPoints = 240
+    sine.probeFaceID = tip.id
+    var sineCase = base
+    sineCase.id = UUID()
+    sineCase.name = "луч на вибростенде"
+    sineCase.analysis = .sine(sine)
+
+    let psdG2 = 0.04
+    var random = WorkbenchStructuralCase.RandomSettings()
+    random.modeCount = 6
+    random.dampingRatio = 0.03
+    random.psd = [.init(frequencyHz: 20, value: psdG2), .init(frequencyHz: 2000, value: psdG2)]
+    random.probeFaceID = tip.id
+    var randomCase = base
+    randomCase.id = UUID()
+    randomCase.name = "луч по спектру"
+    randomCase.analysis = .random(random)
+
+    var imbalance = sine
+    imbalance.excitation = .imbalance
+    imbalance.amplitude = []
+    imbalance.imbalanceGmm = 500
+    imbalance.faceID = tip.id
+    var imbalanceCase = base
+    imbalanceCase.id = UUID()
+    imbalanceCase.name = "луч с дисбалансом винта"
+    imbalanceCase.analysis = .sine(imbalance)
+
+    func jobObject(_ loadCase: WorkbenchStructuralCase) -> [String: Any]? {
+        guard case let .success(job) = WorkbenchStructuralJob.prepare(loadCase, build: build, state: state) else { return nil }
+        return try? JSONSerialization.jsonObject(with: job.jobJSON) as? [String: Any]
+    }
+    guard let sineJob = jobObject(sineCase), let randomJob = jobObject(randomCase), let imbalanceJob = jobObject(imbalanceCase) else {
+        check(false, "the three vibration jobs prepare",
+              String(describing: WorkbenchStructuralJob.prepare(sineCase, build: build, state: state)))
+        exit(1)
+    }
+    let excitation = (sineJob["harmonic"] as! [String: Any])["excitation"] as! [String: Any]
+    let amplitude = (excitation["amplitude"] as! [[Double]])
+    let psd = ((randomJob["random"] as! [String: Any])["accelerationPsd"] as! [[Double]])
+    let imbalanceKgM = ((imbalanceJob["harmonic"] as! [String: Any])["excitation"] as! [String: Any])["imbalanceKgM"] as! Double
+    check(sineJob["analysis"] as? String == "harmonic" && randomJob["analysis"] as? String == "random"
+            && amplitude.allSatisfy({ abs($0[1] - shakerG * 9.80665) < 1e-9 })
+            && psd.allSatisfy({ abs($0[1] - psdG2 * 9.80665 * 9.80665) < 1e-9 })
+            && abs(imbalanceKgM - 500 * 1e-6) < 1e-15
+            && (excitation["amplitude"] != nil) && (excitation["imbalanceKgM"] == nil),
+          "g → m/s², g²/Hz → (m/s²)²/Hz, g·mm → kg·m, and amplitude and imbalance never travel together",
+          "амплитуда \(amplitude), PSD \(psd), дисбаланс \(imbalanceKgM)")
+    for (name, object) in [("harmonic", sineJob), ("random", randomJob)] {
+        let example = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/\(name)-job.example.json"))) as! [String: Any]
+        check(Set(object.keys) == Set(example.keys)
+                && Set((object[name] as! [String: Any]).keys) == Set((example[name] as! [String: Any]).keys),
+              "\(name) job keys match the C++ \(name) job example",
+              "наши \(Set((object[name] as! [String: Any]).keys).sorted()) | пример \(Set((example[name] as! [String: Any]).keys).sorted())")
+    }
+
+    // --- 3, 4. The runs.
+    let storeRoot = FileManager.default.temporaryDirectory.appendingPathComponent("probe-vibration-runs")
+    try? FileManager.default.removeItem(at: storeRoot)
+    let store = WorkbenchStructuralRunStore(root: storeRoot)
+    func run(_ loadCase: WorkbenchStructuralCase) -> WorkbenchStructuralRun? {
+        final class Box: @unchecked Sendable { var run: WorkbenchStructuralRun?; var error: String = "" }
+        let box = Box()
+        let semaphore = DispatchSemaphore(value: 0)
+        let buildToRun = build
+        Task.detached {
+            switch await WorkbenchStructuralRunner.run(loadCase, build: buildToRun, snapshot: snapshot, state: state, store: store, tool: tool) {
+            case let .success(value): box.run = value
+            case let .failure(error): box.error = error.description
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if box.run == nil { print("  не выполнено: \(box.error)") }
+        return box.run
+    }
+
+    var modalSettings = WorkbenchStructuralCase.ModalSettings()
+    modalSettings.modeCount = 6
+    var modalCase = base
+    modalCase.id = UUID()
+    modalCase.name = "луч, частоты"
+    modalCase.analysis = .modal(modalSettings)
+    guard let modalRun = run(modalCase), let firstHz = modalRun.record.metrics["firstFrequencyHz"]?.value,
+          let sineRun = run(sineCase), let randomRun = run(randomCase),
+          let peakHz = sineRun.record.metrics["peakStressFrequencyHz"]?.value,
+          let sineReserve = sineRun.record.metrics["reserveFactor"]?.value,
+          let threeSigma = randomRun.record.metrics["threeSigmaStressPa"]?.value else {
+        check(false, "the modal, sine and random cases all run")
+        exit(1)
+    }
+    print(String(format: "  arm: f1 %.2f Гц; пик синуса на %.2f Гц (%+.2f %%), запас %.2f; 3σ спектра %.3f МПа",
+                 firstHz, peakHz, 100 * (peakHz / firstHz - 1), sineReserve, threeSigma / 1e6))
+    check(abs(peakHz / firstHz - 1) <= 0.10,
+          "a flat sweep peaks at the part's own first frequency, so the excitation reached the mode",
+          String(format: "%.2f Гц против %.2f Гц", peakHz, firstHz))
+    check(sineRun.record.testType == .modalVibration && randomRun.record.testType == .modalVibration
+            && modalRun.record.testType == .modalVibration,
+          "modes, sine and random all file under one vibration test")
+    check(abs((sineRun.record.metrics["peakProbeAccelerationMps2"]?.value ?? 0)) > shakerG * 9.80665,
+          "the tip of a resonating cantilever moves harder than the shaker that drives it")
+
+    build.structuralCases = [modalCase, sineCase, randomCase]
+    let record = WorkbenchStructuralAggregate.record(
+        .modalVibration, build: build, snapshot: snapshot, upstreamRecords: builtIn, runs: store.runs(vehicleID: snapshot.vehicleID))
+    check(record?.metrics["reserveFactor"] != nil && record!.warnings.contains { $0.contains("определяющий вариант") },
+          "the aircraft's vibration record is governed by a stressed case, not by the modal one that has no stress",
+          record.map { $0.metrics.keys.sorted().joined(separator: ", ") } ?? "nil")
+    for schema in ["harmonic", "random"] {
+        let fixture = try! Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/\(schema)-result.example.json"))
+        check((try? EngineeringSolverResult.decode(fixture, expecting: .modalVibration))?.schema == "cadnext-\(schema)-result/1",
+              "schema/\(schema)-result.example.json decodes as a modalVibration result")
+    }
+}
+
+// MARK: - 18. Climate, fire and lightning from the Workbench
+
+// The three environment tests. Their inputs are read from standards rather than typed as forces, so
+// what has to be checked here is that the standard's own numbers survive the trip: °C to kelvin, a
+// category to the right envelope, faces to the right role.
+//
+// Criteria, fixed before the first run:
+//   1. Units and roles: temperatures entered in °C arrive in kelvin, the assembly temperature becomes
+//      stressFreeK, a hot case sends its hot category and a cold one its cold category, and the
+//      lightning components travel in the standard's order however they were toggled.
+//   2. Refusals: a climate case without air speed, surface properties, assembly temperature or step;
+//      a fire case without flame faces or duration; a lightning case without an attachment face,
+//      without components, or with a continuing current outside the standard's 200…800 A; equipment
+//      with no temperature limit at all.
+//   3. The runs: each files under its own test, and each result decodes from the schema example.
+//   4. The physics the solver already proved is not re-proved here — but one end-to-end number is
+//      checked per test, because a Swift-side unit slip would show up in it: the climate case's peak
+//      temperature must sit inside the category's envelope, the fire case must reach the flame's own
+//      temperature, and the lightning case must pass the current it was given.
+
+section("18. Climate, fire and lightning: standards in, kelvin out, one number each")
+do {
+    // The fixture's plate is 7075-T6 and its arm is CFRP; the material database has a full thermal
+    // set only for 6061-T6 (it has no expansion coefficient for 7075 and nothing thermal for CFRP,
+    // and says so instead of inventing it). So the probe writes its own variant of the frame with the
+    // plate in 6061-T6 — the geometry is untouched, only the material tag changes.
+    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("probe-frame-18.uavframe")
+    try? FileManager.default.removeItem(at: temporary)
+    do {
+        let source = try! Data(contentsOf: URL(fileURLWithPath: "CADNext/bridge/schema/uavframe-v2.example.json"))
+        var object = try! JSONSerialization.jsonObject(with: source) as! [String: Any]
+        var bodies = object["bodies"] as! [[String: Any]]
+        for index in bodies.indices where bodies[index]["id"] as? String == "plate" {
+            bodies[index]["materialId"] = "al_6061_t6"
+        }
+        object["bodies"] = bodies
+        try! JSONSerialization.data(withJSONObject: object, options: [.sortedKeys]).write(to: temporary)
+    }
+    guard let construction = try? WorkbenchConstruction.load(from: temporary).construction,
+          let arm = construction.bodies?.first(where: { $0.id == "arm" }),
+          let tool = WorkbenchStructuralToolLocator.locate() else {
+        check(false, "fixture frame and cadnext_structural available")
+        exit(1)
+    }
+    func forwardOf(_ face: WorkbenchConstruction.Body.FaceRange) -> Double {
+        var sum = 0.0
+        for t in face.firstTriangle..<(face.firstTriangle + face.triangleCount) {
+            for k in 0..<3 { sum -= Double(construction.mesh.vertices[3 * Int(construction.mesh.indices[3 * t + k]) + 1]) }
+        }
+        return sum / Double(3 * face.triangleCount)
+    }
+    let armRoot = arm.faces.min { forwardOf($0) < forwardOf($1) }!
+    let armTip = arm.faces.max { forwardOf($0) < forwardOf($1) }!
+    // These three tests need thermal and electrical material data. The arm is CFRP and the database
+    // has none for it — the solver says «нет данных» and refuses, which is checked below — so the
+    // cases themselves run on the aluminium plate.
+    guard let plate = construction.bodies?.first(where: { $0.id == "plate" }), plate.faces.count >= 2 else {
+        check(false, "the fixture has an aluminium plate to heat")
+        exit(1)
+    }
+    let root = plate.faces[0]
+    let tip = plate.faces[1]
+
+    var build = WorkbenchBuild.defaultQuad()
+    build.frame = .imported(construction)
+    let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+    let builtIn = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
+    let state = EngineeringValidationEngine.evaluate(snapshot: snapshot, records: builtIn)
+
+    var base = WorkbenchStructuralCase(name: "плита", bodyID: plate.id)
+    base.supports = [.init(faceID: root.id, fixed: [.x, .y, .z])]
+    base.coarseElementSizeM = 0.02
+
+    func refusal(_ analysis: WorkbenchStructuralCase.Analysis) -> String {
+        var probeCase = base
+        probeCase.id = UUID()
+        probeCase.analysis = analysis
+        if case let .failure(error) = WorkbenchStructuralJob.prepare(probeCase, build: build, state: state) { return error.description }
+        return "приняли без отказа"
+    }
+
+    // --- 2. Refusals.
+    var climate = WorkbenchStructuralCase.ClimateSettings()
+    let noAir = refusal(.climate(climate))
+    climate.airSpeedMps = 1.5
+    let noSurface = refusal(.climate(climate))
+    climate.solarAbsorptance = 0.6
+    climate.emissivity = 0.8
+    let noAssembly = refusal(.climate(climate))
+    climate.assemblyC = 20
+    let noStep = refusal(.climate(climate))
+    climate.stepS = 900
+    var withBadComponent = climate
+    withBadComponent.components = [.init(name: "контроллер", faceID: tip.id, powerW: 5, minimumC: nil, maximumC: nil)]
+    let noLimits = refusal(.climate(withBadComponent))
+
+    var fire = WorkbenchStructuralCase.FireSettings()
+    let noDuration = refusal(.fire(fire))
+    // 300 s at 5 s steps: the standard's fire-resistant duration, and sixty steps instead of nine
+    // hundred — this probe checks the path, and the C++ tests check the transient itself.
+    fire.durationS = 300
+    let noFlame = refusal(.fire(fire))
+    fire.flameFaceIDs = [tip.id]
+    fire.surfaceEmissivity = 0.7
+    fire.stepS = 5
+
+    var lightning = WorkbenchStructuralCase.LightningSettings()
+    lightning.components = []
+    let noComponents = refusal(.lightning(lightning))
+    lightning.components = [.a, .b, .c]
+    let noAttachment = refusal(.lightning(lightning))
+    lightning.attachmentFaceIDs = [tip.id]
+    lightning.groundFaceIDs = [root.id]
+    lightning.surfaceEmissivity = 0.3
+    var wildCurrent = lightning
+    wildCurrent.continuingCurrentA = 1500
+    let badCurrent = refusal(.lightning(wildCurrent))
+    check(noAir.contains("скорость обдува") && noSurface.contains("поверхности") && noAssembly.contains("температура сборки")
+            && noStep.contains("шаг") && noLimits.contains("предел") && noDuration.contains("длительность")
+            && noFlame.contains("пламен") && noComponents.contains("компонент") && noAttachment.contains("дуги")
+            && badCurrent.contains("200…800"),
+          "each missing or impossible input of the three tests is refused by name",
+          [noAir, noSurface, noAssembly, noStep, noLimits, noDuration, noFlame, noComponents, noAttachment, badCurrent].joined(separator: " | "))
+
+    // --- 1. Units and roles.
+    climate.components = [.init(name: "контроллер", faceID: tip.id, powerW: 5, minimumC: -40, maximumC: 85)]
+    var climateCase = base
+    climateCase.id = UUID()
+    climateCase.name = "плита на солнце"
+    climateCase.analysis = .climate(climate)
+
+    var fireCase = base
+    fireCase.id = UUID()
+    fireCase.name = "плита в пламени"
+    fireCase.ownLoadFactorG = CodableVector3D(x: 0, y: 1, z: 0)
+    fireCase.analysis = .fire(fire)
+
+    // Toggled out of order on purpose: the job must still carry A, B, C.
+    var shuffled = lightning
+    shuffled.components = [.c, .a, .b]
+    var lightningCase = base
+    lightningCase.id = UUID()
+    lightningCase.name = "законцовка, зона 1A"
+    lightningCase.analysis = .lightning(shuffled)
+
+    func jobObject(_ loadCase: WorkbenchStructuralCase) -> [String: Any]? {
+        guard case let .success(job) = WorkbenchStructuralJob.prepare(loadCase, build: build, state: state) else { return nil }
+        return try? JSONSerialization.jsonObject(with: job.jobJSON) as? [String: Any]
+    }
+    guard let climateJob = jobObject(climateCase), let fireJob = jobObject(fireCase), let lightningJob = jobObject(lightningCase) else {
+        check(false, "the three jobs prepare", String(describing: WorkbenchStructuralJob.prepare(climateCase, build: build, state: state)))
+        exit(1)
+    }
+    let climateBlock = climateJob["climate"] as! [String: Any]
+    let component = (climateBlock["components"] as! [[String: Any]])[0]
+    let fireBlock = fireJob["fire"] as! [String: Any]
+    let lightningBlock = lightningJob["lightning"] as! [String: Any]
+    check(abs((climateBlock["stressFreeK"] as! Double) - 293.15) < 1e-9
+            && abs((component["maximumK"] as! Double) - 358.15) < 1e-9
+            && abs((component["minimumK"] as! Double) - 233.15) < 1e-9
+            && climateBlock["environment"] as? String == "hot" && climateBlock["category"] as? String == "A1"
+            && (lightningBlock["components"] as! [String]) == ["A", "B", "C"]
+            && fireBlock["standard"] as? String == "iso2685" && abs((fireBlock["durationS"] as! Double) - fire.durationS!) < 1e-9,
+          "°C → K everywhere, the hot category travels as A1, and the current components in the standard's order",
+          "сборка \(climateBlock["stressFreeK"]!), компонент \(component), молния \(lightningBlock["components"]!)")
+    check((climateJob["loadCase"] as! [String: Any])["forces"] == nil
+            && ((fireJob["loadCase"] as! [String: Any])["bodyAccelerationMps2"] as! [Double])[2] != 0,
+          "climate sends no static load at all, while fire carries the load of the fire situation",
+          "огонь: \((fireJob["loadCase"] as! [String: Any])["bodyAccelerationMps2"]!)")
+    for (name, object) in [("climate", climateJob), ("fire", fireJob), ("lightning", lightningJob)] {
+        let example = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/\(name)-job.example.json"))) as! [String: Any]
+        check(Set((object[name] as! [String: Any]).keys) == Set((example[name] as! [String: Any]).keys),
+              "\(name) job block keys match the C++ \(name) job example",
+              "наши \(Set((object[name] as! [String: Any]).keys).sorted()) | пример \(Set((example[name] as! [String: Any]).keys).sorted())")
+    }
+
+    // --- 3, 4. The runs.
+    let storeRoot = FileManager.default.temporaryDirectory.appendingPathComponent("probe-environment-runs")
+    try? FileManager.default.removeItem(at: storeRoot)
+    let store = WorkbenchStructuralRunStore(root: storeRoot)
+    func run(_ loadCase: WorkbenchStructuralCase) -> WorkbenchStructuralRun? {
+        final class Box: @unchecked Sendable { var run: WorkbenchStructuralRun?; var error: String = "" }
+        let box = Box()
+        let semaphore = DispatchSemaphore(value: 0)
+        let buildToRun = build
+        Task.detached {
+            switch await WorkbenchStructuralRunner.run(loadCase, build: buildToRun, snapshot: snapshot, state: state, store: store, tool: tool) {
+            case let .success(value): box.run = value
+            case let .failure(error): box.error = error.description
+            }
+            semaphore.signal()
+        }
+        semaphore.wait()
+        if box.run == nil { print("  не выполнено: \(box.error)") }
+        return box.run
+    }
+
+    // The same case on the CFRP arm: the solver has no thermal expansion for that material and says
+    // so. An ERROR is a failure of the calculation, never an engineering verdict (spec §16), and the
+    // reason must reach the record instead of being rounded to a number.
+    var cfrpCase = climateCase
+    cfrpCase.id = UUID()
+    cfrpCase.bodyID = arm.id
+    cfrpCase.supports = [.init(faceID: armRoot.id, fixed: [.x, .y, .z])]
+    var cfrpClimate = climate
+    cfrpClimate.components = [.init(name: "контроллер", faceID: armTip.id, powerW: 5, minimumC: -40, maximumC: 85)]
+    cfrpCase.analysis = .climate(cfrpClimate)
+    let cfrpRun = run(cfrpCase)
+    check(cfrpRun?.record.outcome == .error
+            && cfrpRun?.record.failureReasons.contains(where: { $0.contains("нет данных") }) == true,
+          "a material without the thermal data it needs gives ERROR with «нет данных», not a verdict",
+          cfrpRun?.record.failureReasons.joined(separator: " | ") ?? "нет прогона")
+
+    // Each case runs once, and what it said travels into the failure message: a solver that refuses
+    // for a reason is more useful than a check that only says "no".
+    let climateRun = run(climateCase)
+    let fireRun = run(fireCase)
+    let lightningRun = run(lightningCase)
+    func report(_ run: WorkbenchStructuralRun?) -> String {
+        guard let run else { return "нет прогона" }
+        return run.record.outcome.rawValue + ": " + run.record.metrics.keys.sorted().joined(separator: ", ")
+            + (run.record.failureReasons.isEmpty ? "" : " | " + run.record.failureReasons.joined(separator: "; "))
+    }
+    guard let peakK = climateRun?.record.metrics["peakTemperatureK"]?.value,
+          let firePeakK = fireRun?.record.metrics["peakTemperatureK"]?.value,
+          let arcEnergy = lightningRun?.record.metrics["arcEnergyJ"]?.value,
+          let climateRun, let fireRun, let lightningRun else {
+        check(false, "the climate, fire and lightning cases all run",
+              [report(climateRun), report(fireRun), report(lightningRun)].joined(separator: " || "))
+        exit(1)
+    }
+    print(String(format: "  плита: климат %.1f °C (жара A1 на солнце); пламя %.0f °C; дуга %.4g Дж, прожог %@",
+                 peakK - 273.15, firePeakK - 273.15, arcEnergy,
+                 lightningRun.record.metrics["burnThroughTimeS"].map { String(format: "%.4g с", $0.value) } ?? "нет"))
+    check(climateRun.record.testType == .climatic && fireRun.record.testType == .fireResistance
+            && lightningRun.record.testType == .lightningDirect,
+          "each result files under its own test")
+    // A1 hot-dry in the sun: the standard's air reaches 49 °C and a sunlit surface goes above it, but
+    // a part in air cannot pass the ~90 °C an absorbing surface reaches in still air.
+    check(peakK - 273.15 > 49 && peakK - 273.15 < 120,
+          "the climate peak sits above the category's air temperature and below what a sunlit surface can reach",
+          String(format: "%.1f °C", peakK - 273.15))
+    // The flame itself, from the result the solver wrote. This file first asked the part to pass
+    // 500 °C, and that was a claim about the fixture, not about the path: a big aluminium plate
+    // heated on one small face for 300 s reaches 120 °C and conducts the rest away, which is
+    // physically right. What belongs here is that the standard's flame arrived — ISO 2685's
+    // 1100 °C — and that the part did get hotter than the air it started in.
+    let fireResult = (try? JSONSerialization.jsonObject(
+        with: Data(contentsOf: store.root.appendingPathComponent(fireRun.directory).appendingPathComponent("result.json")))) as? [String: Any]
+    let flame = fireResult?["flame"] as? [String: Any]
+    let flameK = flame?["temperatureK"] as? Double ?? 0
+    let requiredS = fireRun.record.metrics["requiredDurationS"]?.value ?? 0
+    check(abs(flameK - 1373.15) < 1.0 && firePeakK > 293.15 && abs(requiredS - fire.durationS!) < 1e-9,
+          "the solver burnt the part with the standard's own flame (1100 °C) for the time it was given",
+          String(format: "пламя %.2f K, деталь %.0f °C, требуемая длительность %.0f с", flameK, firePeakK - 273.15, requiredS))
+    check(arcEnergy > 0, "the arc delivered energy to the part")
+
+    build.structuralCases = [climateCase, fireCase, lightningCase]
+    for test in [EngineeringTestType.climatic, .fireResistance, .lightningDirect] {
+        let record = WorkbenchStructuralAggregate.record(
+            test, build: build, snapshot: snapshot, upstreamRecords: builtIn, runs: store.runs(vehicleID: snapshot.vehicleID))
+        let evaluated = record.map { EngineeringValidationEngine.evaluate(snapshot: snapshot, records: builtIn + [$0]) }
+        check(record != nil && evaluated?.evaluation(test)?.status.isCurrent == true,
+              "the aircraft's \(test.rawValue) record is current",
+              record.map { $0.metrics.keys.sorted().joined(separator: ", ") } ?? "nil")
+    }
+    for (schema, test) in [("climate", EngineeringTestType.climatic), ("fire", .fireResistance), ("lightning", .lightningDirect)] {
+        let fixture = try! Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/\(schema)-result.example.json"))
+        check((try? EngineeringSolverResult.decode(fixture, expecting: test))?.schema == "cadnext-\(schema)-result/1",
+              "schema/\(schema)-result.example.json decodes as a \(test.rawValue) result")
+    }
+}
+
+// MARK: - 19. EMC, icing, flutter and the bird from the Workbench
+
+// The last four. Their solvers are validated on the C++ side; what this section checks is the Swift
+// path into them — the units of the standards they read, the axes they are told to use, and the
+// refusals. One of them runs end to end (the bird, which needs no material data the fixture lacks),
+// because a mechanical analysis with a new block is worth proving through the process.
+//
+// Criteria, fixed before the first run:
+//   1. Units and axes: megahertz become hertz, minutes become seconds, a model axis becomes the CAD
+//      letter the solver expects, and the bird's direction becomes a unit vector in CAD axes.
+//   2. Refusals: no field and no level; no sweep; the same axis for flow and span; no cloud; no dive
+//      speed; no impact face; a bird with no speed.
+//   3. Key sets match the C++ job examples block for block.
+//   4. Each result schema decodes as its own test.
+//   5. The bird runs on the CFRP arm and comes back as a birdStrike record whose patch ratio is the
+//      geometry's: the struck face over the bird's own midsection, which is what decides whether the
+//      verdict may stay PASS.
+
+section("19. EMC, icing, flutter and the bird: standards in, axes right, one run through")
+do {
+    let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("probe-frame-19.uavframe")
+    try? FileManager.default.removeItem(at: temporary)
+    try? FileManager.default.copyItem(at: URL(fileURLWithPath: "CADNext/bridge/schema/uavframe-v2.example.json"), to: temporary)
+    guard let construction = try? WorkbenchConstruction.load(from: temporary).construction,
+          let arm = construction.bodies?.first(where: { $0.id == "arm" }),
+          let axes = construction.cadAxes, let frame = WorkbenchCADFrame(axes),
+          let tool = WorkbenchStructuralToolLocator.locate() else {
+        check(false, "fixture frame and cadnext_structural available")
+        exit(1)
+    }
+    func forwardOf(_ face: WorkbenchConstruction.Body.FaceRange) -> Double {
+        var sum = 0.0
+        for t in face.firstTriangle..<(face.firstTriangle + face.triangleCount) {
+            for k in 0..<3 { sum -= Double(construction.mesh.vertices[3 * Int(construction.mesh.indices[3 * t + k]) + 1]) }
+        }
+        return sum / Double(3 * face.triangleCount)
+    }
+    let root = arm.faces.min { forwardOf($0) < forwardOf($1) }!
+    let tip = arm.faces.max { forwardOf($0) < forwardOf($1) }!
+
+    // Icing and flutter apply to lifting surfaces, so those cases live on a fixed-wing blueprint.
+    var build = WorkbenchBuild.defaultFixedWing()
+    build.frame = .imported(construction)
+    let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
+    let builtIn = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
+    let state = EngineeringValidationEngine.evaluate(snapshot: snapshot, records: builtIn)
+
+    var base = WorkbenchStructuralCase(name: "луч", bodyID: arm.id)
+    base.supports = [.init(faceID: root.id, fixed: [.x, .y, .z])]
+    base.coarseElementSizeM = 0.02
+
+    func refusal(_ analysis: WorkbenchStructuralCase.Analysis) -> String {
+        var probeCase = base
+        probeCase.id = UUID()
+        probeCase.analysis = analysis
+        if case let .failure(error) = WorkbenchStructuralJob.prepare(probeCase, build: build, state: state) { return error.description }
+        return "приняли без отказа"
+    }
+    func jobObject(_ loadCase: WorkbenchStructuralCase) -> [String: Any]? {
+        guard case let .success(job) = WorkbenchStructuralJob.prepare(loadCase, build: build, state: state) else { return nil }
+        return try? JSONSerialization.jsonObject(with: job.jobJSON) as? [String: Any]
+    }
+
+    // --- 2. Refusals.
+    var emc = WorkbenchStructuralCase.EmcSettings()
+    let noSurfaceSize = refusal(.emc(emc))
+    emc.surfaceElementSizeM = 0.004
+    var withoutField = emc
+    withoutField.levelID = nil
+    let noField = refusal(.emc(withoutField))
+    let noSweep = refusal(.emc(emc))
+    emc.lowMHz = 500
+    emc.highMHz = 2000
+    emc.points = 8
+
+    var icing = WorkbenchStructuralCase.IcingSettings()
+    icing.flowAxis = .z
+    icing.spanAxis = .z
+    let sameAxes = refusal(.icing(icing))
+    icing.spanAxis = .x
+    icing.surfaceElementSizeM = 0.025
+    let noCloud = refusal(.icing(icing))
+    icing.airspeedMps = 60
+    icing.durationMin = 10
+    icing.maximumIceThicknessMm = 5
+    icing.antiIceTargetC = 2
+    icing.antiIceBudgetW = 400
+
+    var flutter = WorkbenchStructuralCase.FlutterSettings()
+    flutter.flowAxis = .z
+    flutter.spanAxis = .x
+    let noDive = refusal(.flutter(flutter))
+    flutter.diveSpeedMps = 90
+
+    var bird = WorkbenchStructuralCase.BirdSettings()
+    bird.modeCount = 12
+    bird.dampingRatio = 0.02
+    bird.speedMps = 60
+    let noImpactFace = refusal(.bird(bird))
+    bird.impactFaceID = tip.id
+    var stillBird = bird
+    stillBird.speedMps = nil
+    let noBirdSpeed = refusal(.bird(stillBird))
+    check(noField.contains("поле") && noSurfaceSize.contains("элемента поверхности") && noSweep.contains("развёртка")
+            && sameAxes.contains("различаться") && noCloud.contains("облака") && noDive.contains("V_D")
+            && noImpactFace.contains("грань удара") && noBirdSpeed.contains("скорость"),
+          "no field, no surface size, no sweep, coincident axes, no cloud, no dive speed, no impact face and a still bird are each refused",
+          [noField, noSurfaceSize, noSweep, sameAxes, noCloud, noDive, noImpactFace, noBirdSpeed].joined(separator: " | "))
+
+    // --- 1, 3. Units, axes and key sets.
+    var emcCase = base
+    emcCase.id = UUID()
+    emcCase.name = "корпус, RS103"
+    emc.equipment = [.init(name: "блок авионики", x: 0.048, y: 0.048, z: 0.048, immunityVm: 20)]
+    emcCase.analysis = .emc(emc)
+
+    var icingCase = base
+    icingCase.id = UUID()
+    icingCase.name = "консоль, взлётное обледенение"
+    icingCase.analysis = .icing(icing)
+
+    var flutterCase = base
+    flutterCase.id = UUID()
+    flutterCase.name = "консоль, флаттер"
+    flutterCase.analysis = .flutter(flutter)
+
+    var birdCase = base
+    birdCase.id = UUID()
+    birdCase.name = "носок, птица 1.81 кг"
+    birdCase.analysis = .bird(bird)
+
+    guard let emcJob = jobObject(emcCase), let icingJob = jobObject(icingCase),
+          let flutterJob = jobObject(flutterCase), let birdJob = jobObject(birdCase) else {
+        check(false, "the four jobs prepare",
+              [String(describing: WorkbenchStructuralJob.prepare(emcCase, build: build, state: state)),
+               String(describing: WorkbenchStructuralJob.prepare(icingCase, build: build, state: state)),
+               String(describing: WorkbenchStructuralJob.prepare(flutterCase, build: build, state: state)),
+               String(describing: WorkbenchStructuralJob.prepare(birdCase, build: build, state: state))].joined(separator: " || "))
+        exit(1)
+    }
+    let emcBlock = emcJob["emc"] as! [String: Any]
+    let icingBlock = icingJob["icing"] as! [String: Any]
+    let flutterBlock = flutterJob["flutter"] as! [String: Any]
+    let birdBlock = birdJob["bird"] as! [String: Any]
+    let birdDirection = birdBlock["direction"] as! [Double]
+    // Model −Z is "back" in the Workbench, which on this frame (forward +x) is CAD −x.
+    let expectedDirection = frame.modelToCAD(SIMD3(0, 0, -1))
+    check(abs((emcBlock["lowHz"] as! Double) - 500e6) < 1 && abs((emcBlock["highHz"] as! Double) - 2000e6) < 1
+            && abs(((icingBlock["flight"] as! [String: Any])["durationS"] as! Double) - 600) < 1e-9
+            && icingBlock["flowAxis"] as? String == frame.cadAxisLetter(.z)
+            && icingBlock["spanAxis"] as? String == frame.cadAxisLetter(.x)
+            && flutterBlock["flowAxis"] as? String == frame.cadAxisLetter(.z)
+            && zip(birdDirection, [expectedDirection.x, expectedDirection.y, expectedDirection.z]).allSatisfy({ abs($0 - $1) < 1e-12 }),
+          "MHz → Hz, minutes → seconds, model axes → the CAD letters, and the bird's direction in CAD axes",
+          "ЭМС \(emcBlock["lowHz"]!)…\(emcBlock["highHz"]!), лёд \(icingBlock["flowAxis"]!)/\(icingBlock["spanAxis"]!), птица \(birdDirection)")
+    for (name, object) in [("emc", emcJob), ("icing", icingJob), ("flutter", flutterJob), ("bird", birdJob)] {
+        let example = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/\(name)-job.example.json"))) as! [String: Any]
+        check(Set((object[name] as! [String: Any]).keys) == Set((example[name] as! [String: Any]).keys),
+              "\(name) job block keys match the C++ \(name) job example",
+              "наши \(Set((object[name] as! [String: Any]).keys).sorted()) | пример \(Set((example[name] as! [String: Any]).keys).sorted())")
+    }
+
+    // --- 4. Result schemas.
+    for (schema, test) in [("emc", EngineeringTestType.radiatedSusceptibility), ("icing", .icing),
+                           ("flutter", .flutter), ("bird", .birdStrike)] {
+        let fixture = try! Data(contentsOf: URL(fileURLWithPath: "CADNext/fea/schema/\(schema)-result.example.json"))
+        check((try? EngineeringSolverResult.decode(fixture, expecting: test))?.schema == "cadnext-\(schema)-result/1",
+              "schema/\(schema)-result.example.json decodes as a \(test.rawValue) result")
+    }
+
+    // --- 5. The bird, end to end.
+    let storeRoot = FileManager.default.temporaryDirectory.appendingPathComponent("probe-bird-runs")
+    try? FileManager.default.removeItem(at: storeRoot)
+    let store = WorkbenchStructuralRunStore(root: storeRoot)
+    final class Box: @unchecked Sendable { var run: WorkbenchStructuralRun?; var error: String = "" }
+    let box = Box()
+    let semaphore = DispatchSemaphore(value: 0)
+    let buildToRun = build
+    Task.detached {
+        switch await WorkbenchStructuralRunner.run(birdCase, build: buildToRun, snapshot: snapshot, state: state, store: store, tool: tool) {
+        case let .success(value): box.run = value
+        case let .failure(error): box.error = error.description
+        }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    guard let birdRun = box.run, let patchRatio = birdRun.record.metrics["patchRatio"]?.value,
+          let faceArea = birdRun.record.metrics["impactFaceAreaM2"]?.value,
+          let birdArea = birdRun.record.metrics["birdAreaM2"]?.value else {
+        check(false, "the bird case runs", box.error.isEmpty ? (box.run.map { $0.record.failureReasons.joined(separator: "; ") } ?? "нет прогона") : box.error)
+        exit(1)
+    }
+    print(String(format: "  луч: птица 1.81 кг при 60 м/с в грань %.2f см² (мидель %.2f см²), отношение %.3f, вердикт %@",
+                 faceArea * 1e4, birdArea * 1e4, patchRatio, birdRun.record.outcome.rawValue))
+    check(birdRun.record.testType == .birdStrike, "the bird result files under birdStrike")
+    check(abs(patchRatio - faceArea / birdArea) <= 1e-9,
+          "the reported patch ratio is the struck face over the bird's own midsection",
+          String(format: "%.6f против %.6f", patchRatio, faceArea / birdArea))
+    build.structuralCases = [birdCase]
+    let record = WorkbenchStructuralAggregate.record(
+        .birdStrike, build: build, snapshot: snapshot, upstreamRecords: builtIn, runs: store.runs(vehicleID: snapshot.vehicleID))
+    check(record?.metrics["patchRatio"] != nil, "the aircraft's bird record carries the patch ratio the verdict hinges on",
+          record.map { $0.metrics.keys.sorted().joined(separator: ", ") } ?? "nil")
 }
 
 // MARK: - Cost

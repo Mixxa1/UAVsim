@@ -16,6 +16,7 @@ enum class SketchProfileKind {
     Rectangle,
     Circle,
     Polygon,
+    Curved,
     Unsupported
 };
 
@@ -37,12 +38,28 @@ struct SketchProfile {
     std::string sketchId;
     SketchProfileKind kind = SketchProfileKind::Unsupported;
     // Closed outer boundary in sketch u/v (last point != first point;
-    // circles are stored as a polygonal approximation).
+    // circles and curved loops are stored as polygonal approximations).
     std::vector<SketchPoint2D> outerLoop;
-    // Rectangle/Circle: the single source entity. Polygon: empty.
+    struct Segment {
+        SketchPoint2D start;
+        SketchPoint2D middle; // Point on the exact circular arc; unused for lines.
+        SketchPoint2D end;
+        SketchPoint2D center;
+        double radius = 0.0;
+        bool isArc = false;
+        double signedSweepRadians = 0.0;
+    };
+    // Ordered exact boundary for a mixed line/arc profile. outerLoop is only
+    // a display and picking approximation for this profile kind.
+    std::vector<Segment> segments;
+    // Rectangle or a native Circle: the single source entity.
     std::string sourceEntityId;
-    // Polygon: the line entities forming the loop, in chain order.
+    // Polygon, mixed curved loop, or an exact circle assembled from arcs.
     std::vector<std::string> sourceEntityIds;
+    // Analytic geometry for circle profiles. outerLoop remains a display and
+    // picking approximation; the kernel uses these exact source parameters.
+    SketchPoint2D circleCenter;
+    double circleRadius = 0.0;
     double area = 0.0;
     bool isClosed = false;
     bool isValid = false;
@@ -51,7 +68,10 @@ struct SketchProfile {
 
 class SketchProfileDetector {
 public:
-    // Rectangle/Circle entities each yield one profile. Line entities are
+    // Rectangle/Circle entities each yield one profile; arcs on the same
+    // analytic circle yield a profile if their angular spans cover one full
+    // turn exactly. Lines and arcs also form mixed exact curved profiles
+    // when their endpoints close a nonbranching loop. Line entities are
     // clustered by endpoints (kSketchEndpointTolerance) into a graph;
     // every connected component whose vertices all have degree 2 forms a
     // simple loop, independent of the order the lines were drawn in, and

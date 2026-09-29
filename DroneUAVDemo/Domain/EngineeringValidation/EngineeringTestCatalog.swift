@@ -96,16 +96,111 @@ enum EngineeringTestCatalog {
             rationale: "Stiffness from geometry, materials and joints; loads from mass, thrust and lift."),
         EngineeringTestDefinition(
             type: .modalVibration,
-            definitionVersion: 1,
+            definitionVersion: 2,
             inputs: [.structuralGeometry, .materials, .joints],
             upstream: [
-                EngineeringTestDefinition.Upstream(test: .massProperties, requiredFor: all),
-                // The verdict is an overlap of natural modes with the rotor excitation band.
-                EngineeringTestDefinition.Upstream(test: .propulsionBench, requiredFor: all),
+                // Both edges are optional, and that is a correction: they were required while this
+                // test meant "natural modes against the rotor band" and nothing else. It now also
+                // holds sine sweeps and random spectra, and a shaker case brings its own excitation
+                // — it never reads the bench, and without equipment it never reads the masses, so
+                // requiring them would leave such a case permanently "computed without a required
+                // input". The guard that matters did not move: the modal solver itself says
+                // «полосы возбуждения не заданы — резонанс не проверен» when there is nothing to
+                // compare the modes against, which is the same warning in the place where it is true.
+                EngineeringTestDefinition.Upstream(test: .massProperties, requiredFor: []),
+                EngineeringTestDefinition.Upstream(test: .propulsionBench, requiredFor: []),
             ],
             appliesTo: all,
             requiredForReadinessOn: all,
             rationale: "K and M give the modes; the propulsion RPM range gives the excitation."),
+        EngineeringTestDefinition(
+            type: .mechanicalShock,
+            definitionVersion: 1,
+            inputs: [.structuralGeometry, .materials, .joints],
+            upstream: [
+                // The equipment a face carries through the pulse comes from the mass properties; the
+                // pulse itself is the user's (a catapult stroke, a landing, a drop), so nothing else
+                // is read. A case of bare geometry without equipment stays valid.
+                EngineeringTestDefinition.Upstream(test: .massProperties, requiredFor: []),
+            ],
+            appliesTo: all,
+            // Not part of appendix B's minimum first version: a shock case exists only where the
+            // airframe is actually shocked (catapult, hand launch, hard landing), and the spec does
+            // not ask for it on every aircraft. It is required when the user declares the case.
+            requiredForReadinessOn: [],
+            rationale: "One event, one pulse: modes and damping give the response, the limit-load rules give the verdict."),
+        EngineeringTestDefinition(
+            type: .climatic,
+            definitionVersion: 1,
+            inputs: [.structuralGeometry, .materials, .componentLayout, .avionicsAndPayload],
+            // The standard's air and the sun are the load; the equipment's own heat and limits are
+            // typed in per case, because the component library carries no temperature limits and
+            // inventing them would be worse than asking.
+            upstream: [],
+            appliesTo: all,
+            requiredForReadinessOn: [],
+            rationale: "MIL-STD-810H air, sun and the part's own heat; the verdict is equipment limits and thermal stress."),
+        EngineeringTestDefinition(
+            type: .fireResistance,
+            definitionVersion: 1,
+            inputs: [.structuralGeometry, .materials, .componentLayout, .avionicsAndPayload],
+            upstream: [],
+            appliesTo: all,
+            requiredForReadinessOn: [],
+            rationale: "ISO 2685 / AC 20-135 flame on named faces: integrity, strength when hot, the equipment's function."),
+        EngineeringTestDefinition(
+            type: .lightningDirect,
+            definitionVersion: 1,
+            inputs: [.structuralGeometry, .materials, .componentLayout, .avionicsAndPayload],
+            upstream: [],
+            appliesTo: all,
+            requiredForReadinessOn: [],
+            rationale: "SAE ARP5412 current through the part: where it spreads, what the arc heats, whether it burns through."),
+        EngineeringTestDefinition(
+            type: .radiatedSusceptibility,
+            definitionVersion: 1,
+            // The enclosure's shape and what it is made of decide what gets in; where the equipment
+            // sits decides what it sees there.
+            inputs: [.structuralGeometry, .materials, .componentLayout, .avionicsAndPayload],
+            upstream: [],
+            appliesTo: all,
+            requiredForReadinessOn: [],
+            rationale: "MIL-STD-461G RS103: the standard's field arrives as a plane wave, the question is how much reaches the equipment."),
+        EngineeringTestDefinition(
+            type: .icing,
+            definitionVersion: 1,
+            // Ice grows on the outer shape and depends on the material's heat, not on what is inside.
+            inputs: [.outerGeometry, .materials],
+            upstream: [],
+            // Lifting surfaces only, and that is about the method rather than about the weather: a
+            // multicopter's arms and blades ice up too, but the solver cuts aerofoil sections across
+            // a span and computes collection on them. An icing answer for a quadcopter's arm would
+            // be a number without a method behind it.
+            appliesTo: lifting,
+            requiredForReadinessOn: [],
+            rationale: "14 CFR 25 App. C droplets: where they land, how thick the ice gets, what it takes to keep the surface clear."),
+        EngineeringTestDefinition(
+            type: .flutter,
+            definitionVersion: 1,
+            inputs: [.outerGeometry, .structuralGeometry, .materials, .joints],
+            upstream: [
+                // Mass on a lifting surface moves its modes and its centre of gravity, which is what
+                // flutter is about; a case without declared equipment reads nothing.
+                EngineeringTestDefinition.Upstream(test: .massProperties, requiredFor: []),
+            ],
+            appliesTo: lifting,
+            requiredForReadinessOn: [],
+            rationale: "14 CFR 25.629: at what speed the air stops damping the part's own bending and torsion."),
+        EngineeringTestDefinition(
+            type: .birdStrike,
+            definitionVersion: 1,
+            inputs: [.outerGeometry, .structuralGeometry, .materials, .joints],
+            upstream: [
+                EngineeringTestDefinition.Upstream(test: .massProperties, requiredFor: []),
+            ],
+            appliesTo: all,
+            requiredForReadinessOn: [],
+            rationale: "14 CFR 25.571(e): the bird's own pressure history on a face, through the part's modes."),
         EngineeringTestDefinition(
             type: .mechanism,
             definitionVersion: 1,

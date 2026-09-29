@@ -123,7 +123,9 @@ enum WorkbenchStructuralRunner {
         guard let data = try? Data(contentsOf: resultURL) else {
             switch exit {
             case let .failure(error): return .failure(error)
-            case let .success(status): return .failure(.solverFailed("код завершения \(status), файла результата нет"))
+            case let .success(status):
+                let said = lastToolDiagnostics.isEmpty ? "" : ": " + lastToolDiagnostics
+                return .failure(.solverFailed("код завершения \(status), файла результата нет" + said))
             }
         }
         let result: EngineeringSolverResult
@@ -174,6 +176,9 @@ enum WorkbenchStructuralRunner {
         let lock = NSLock()
     }
 
+    /// Last thing the tool wrote to stderr, so a refusal can be reported instead of a bare code.
+    nonisolated(unsafe) private static var lastToolDiagnostics: String = ""
+
     private static func execute(
         tool: URL,
         job: URL,
@@ -186,8 +191,20 @@ enum WorkbenchStructuralRunner {
         process.currentDirectoryURL = directory
         let output = Pipe()
         process.standardOutput = output
-        process.standardError = Pipe()
+        // The tool says why it refused on stderr. Losing it left "код завершения 2" as the whole
+        // explanation, which tells nobody anything — a job it cannot even parse never gets as far as
+        // writing a result file.
+        let errors = Pipe()
+        process.standardError = errors
         let box = Box()
+        let errorBox = Box()
+        errors.fileHandleForReading.readabilityHandler = { handle in
+            let chunk = handle.availableData
+            guard !chunk.isEmpty else { return }
+            errorBox.lock.lock()
+            errorBox.buffer.append(chunk)
+            errorBox.lock.unlock()
+        }
         output.fileHandleForReading.readabilityHandler = { handle in
             let chunk = handle.availableData
             guard !chunk.isEmpty else { return }
@@ -210,6 +227,11 @@ enum WorkbenchStructuralRunner {
             await withCheckedContinuation { continuation in
                 process.terminationHandler = { finished in
                     output.fileHandleForReading.readabilityHandler = nil
+                    errors.fileHandleForReading.readabilityHandler = nil
+                    errorBox.lock.lock()
+                    let text = String(decoding: errorBox.buffer, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+                    errorBox.lock.unlock()
+                    if !text.isEmpty { Self.lastToolDiagnostics = text }
                     continuation.resume(returning: .success(finished.terminationStatus))
                 }
                 do {
@@ -311,13 +333,43 @@ enum WorkbenchStructuralAggregate {
             failures.append(contentsOf: record.failureReasons.map { "\(label): \($0)" })
             warnings.append(contentsOf: record.warnings.map { "\(label): \($0)" })
             if record.outcome == .error { continue }
-            // Strength: the smallest reserve factor governs. Modes: the smallest separation from an
-            // excitation band, or without bands the lowest first frequency.
-            func key(_ r: EngineeringTestRecord) -> Double {
-                if testType == .modalVibration {
-                    return r.metrics["minimumBandSeparation"]?.value ?? r.metrics["firstFrequencyHz"]?.value ?? .infinity
+            // Strength and any stressed case: the smallest reserve factor governs. A pure modal case
+            // has no stress to reserve against — there the smallest separation from an excitation
+            // band governs, or without bands the lowest first frequency.
+            //
+            // Vibration mixes both kinds: modes, sine and random file under one test. A reserve
+            // factor and a band separation measure different things and cannot be ordered against
+            // each other, so a case that reports a reserve factor always outranks one that does not:
+            // stress against an allowable is the sharper question, and a sine or random case exists
+            // only where someone declared the excitation it answers.
+            // What "worst" means, test by test. The rule is one: smaller sorts first and governs,
+            // so a quantity that is worse when larger is ordered by its negative or its reciprocal.
+            // A case that reports none of its test's numbers sorts last rather than winning by
+            // default.
+            func key(_ r: EngineeringTestRecord) -> (Int, Double) {
+                switch testType {
+                case .radiatedSusceptibility:
+                    // Less shielding is worse.
+                    if let db = r.metrics["shieldingEffectivenessDb"]?.value { return (0, db) }
+                case .icing:
+                    // Thicker ice is worse.
+                    if let ice = r.metrics["iceThicknessM"]?.value { return (0, -ice) }
+                case .flutter:
+                    // The lowest speed at which the part goes unstable governs, flutter or divergence.
+                    let speeds = [r.metrics["flutterSpeedMps"]?.value, r.metrics["divergenceSpeedMps"]?.value].compactMap { $0 }
+                    if let lowest = speeds.min() { return (0, lowest) }
+                case .fireResistance:
+                    // The highest utilisation when hot is worst.
+                    if let hot = r.metrics["hotUtilization"]?.value, hot > 0 { return (0, 1 / hot) }
+                case .lightningDirect:
+                    // The part that burns through soonest governs; one that never does has no time
+                    // to compare and sorts last.
+                    if let burn = r.metrics["burnThroughTimeS"]?.value { return (0, burn) }
+                default:
+                    break
                 }
-                return r.metrics["reserveFactor"]?.value ?? .infinity
+                if let reserve = r.metrics["reserveFactor"]?.value { return (0, reserve) }
+                return (1, r.metrics["minimumBandSeparation"]?.value ?? r.metrics["firstFrequencyHz"]?.value ?? .infinity)
             }
             if governing == nil || key(record) < key(governing!.run!.record) { governing = status }
         }
@@ -338,9 +390,27 @@ enum WorkbenchStructuralAggregate {
             "totalBodies": EngineeringMetric(Double(bodies.count), unit: "1"),
         ]
         if let record = governing?.run?.record {
-            let carried = testType == .modalVibration
-                ? ["firstFrequencyHz", "minimumBandSeparation"]
-                : ["reserveFactor", "maxVonMisesPa", "maxDisplacementM"]
+            // Carry what the governing case actually has: within one test the kinds report different
+            // numbers (a modal case has no stress, a random one has no single peak), so the list is
+            // the candidates for the test and what is missing is simply absent.
+            let carried: [String]
+            switch testType {
+            case .modalVibration:
+                carried = ["reserveFactor", "firstFrequencyHz", "minimumBandSeparation",
+                           "peakDynamicStressPa", "peakStressFrequencyHz", "threeSigmaStressPa", "rmsVonMisesPa"]
+            // A shock reports its peak stress and when it happened, not a static maximum.
+            case .mechanicalShock: carried = ["reserveFactor", "peakStressPa", "peakTimeS"]
+            case .climatic: carried = ["reserveFactor", "peakTemperatureK", "lowTemperatureK", "peakThermalStressPa"]
+            // Fire has no reserve factor: its numbers are the utilisation when hot and whether the
+            // part held for the time the standard asks.
+            case .fireResistance: carried = ["hotUtilization", "integrityLossTimeS", "requiredDurationS", "peakTemperatureK"]
+            case .lightningDirect: carried = ["burnThroughTimeS", "peakTemperatureK", "arcEnergyJ", "jouleEnergyJ", "peakCurrentDensityAm2"]
+            case .radiatedSusceptibility: carried = ["shieldingEffectivenessDb", "interiorFieldVm", "worstFrequencyHz"]
+            case .icing: carried = ["iceThicknessM", "iceMassKg", "collectionEfficiency", "inertiaParameter"]
+            case .flutter: carried = ["flutterSpeedMps", "flutterFrequencyHz", "divergenceSpeedMps", "requiredSpeedMps", "marginFraction"]
+            case .birdStrike: carried = ["reserveFactor", "peakStressPa", "patchRatio", "impulseNs", "peakForceN"]
+            default: carried = ["reserveFactor", "maxVonMisesPa", "maxDisplacementM"]
+            }
             for key in carried {
                 if let metric = record.metrics[key] { metrics[key] = metric }
             }

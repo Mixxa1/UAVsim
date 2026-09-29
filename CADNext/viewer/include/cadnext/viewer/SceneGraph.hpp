@@ -214,6 +214,8 @@ public:
     // the grid lines while keeping the plane fill and axes.
     void showSketchPlane(const WorkPlane& plane, double gridStep = 1.0, bool showGrid = true);
     void hideSketchPlane();
+    void showSketchEndpoints(const Sketch& sketch);
+    void clearSketchEndpoints();
     void addOrUpdateSketchNode(const Sketch& sketch);
     void removeSketchNode(const std::string& sketchId);
     void clearSketchNodes();
@@ -293,6 +295,7 @@ private:
     SoSeparator* sketchPlaneRoot_ = nullptr;
     SoSeparator* sketchPlaneNode_ = nullptr;
     SoSeparator* sketchTransientRoot_ = nullptr;
+    SoSeparator* sketchEndpointsNode_ = nullptr;
     SoSeparator* sketchCursorNode_ = nullptr;
     SoCoordinate3* sketchCursorCoords_ = nullptr;
     SoLineSet* sketchCursorLines_ = nullptr;

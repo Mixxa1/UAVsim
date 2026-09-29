@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -7,6 +8,7 @@
 #include <QMainWindow>
 
 #include <unordered_map>
+#include <vector>
 
 #include "cadnext/AttachmentPoint.hpp"
 #include "cadnext/bridge/UAVPartFormat.hpp"
@@ -128,6 +130,7 @@ private:
     void setSketchTool(SketchTool tool);
     void onSketchPoint(double u, double v);
     void onSketchMove(double u, double v);
+    SketchPoint2D snapSketchPoint(SketchPoint2D raw) const;
     void cancelSketchTool();
     void handleEscapeKey();
     void addSketchEntity(SketchEntity entity);
@@ -139,6 +142,9 @@ private:
     void updateExtrudeActionEnabled();
     std::optional<Sketch> sketchForExtrude() const;
     void openExtrudeDialog();
+    void openRevolveDialog();
+    void buildRevolvedBodyVisual(const Object& object, const Feature& feature);
+    const Feature* revolveFeatureForBody(const std::string& objectId) const;
     void onExtrudeParametersChanged();
     void applyExtrude();
     void cancelExtrude();
@@ -208,6 +214,13 @@ private:
                            QString* failureReason);
     bool replayEdgeOperationFeature(const Feature& feature, QString* failureReason);
 
+    // Thread with real turns on a cylindrical or conical face: the tool's window, the cut built off the
+    // UI thread under a progress window (its outcome kept there when `showOutcome`), and its replay.
+    void openThreadDialog();
+    bool buildThreadResult(const ThreadParameters& parameters, kernel::EvaluatedGeometry& outGeometry,
+                           QString* failureReason, bool showOutcome);
+    bool replayThreadFeature(const Feature& feature, QString* failureReason);
+
     // Sketch2D plane identity badge (viewport overlay).
     void updatePlaneBadge();
 
@@ -272,6 +285,14 @@ private:
     // File handling.
     void newDocument();
     void openDocument();   // открывает .cadnext как CAD-документ
+    void importCadExchange();
+    // SOLIDWORKS, Parasolid, STEP, IGES, FreeCAD: read on a thread of its own with a progress window,
+    // the bodies added when done (an assembly first offered to the Assembly workbench).
+    void importCadInBackground(const QString& path);
+    // Faces and edges worked out off the UI thread (bodyId empty) set for body `bodyId`.
+    void adoptBodyTopology(const std::string& bodyId, std::vector<kernel::FaceReference> faces,
+                           std::vector<kernel::EdgeReference> edges);
+    void exportCadExchange();
     void openUAVPart();    // открывает .uavpart через UAVPartReader → PreviewPanel
     void openPartForEditing(const bridge::UAVPartReadResult& result, const QString& filePath);
     bool saveDocument();
@@ -385,10 +406,19 @@ private:
     int circleCount_ = 0;
     int nextFeatureNumber_ = 1;
     int extrudeCount_ = 0;
+    int revolveCount_ = 0;
     int cutCount_ = 0;
     int facePlaneCount_ = 0;
     int chamferCount_ = 0;
     int filletCount_ = 0;
+    int threadCount_ = 0;
+    // Threads already cut, by the body they were cut on (its BRep's hash) and their recipe: undo, redo
+    // and every rebuild replay the features, and a thread takes seconds to cut again.
+    struct CachedThread {
+        std::vector<std::uint8_t> brep;
+        kernel::TriangleMesh mesh;
+    };
+    std::unordered_map<std::string, CachedThread> threadResults_;
 };
 
 } // namespace cadnext::gui

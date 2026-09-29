@@ -104,6 +104,16 @@ const Feature* extrudeFeatureForBody(const Document& document,
     return nullptr;
 }
 
+const Feature* revolveFeatureForBody(const Document& document,
+                                     const std::string& objectId) {
+    for (const Feature& feature : document.features()) {
+        if (feature.type == FeatureType::Revolve && feature.createdBodyId == objectId) {
+            return &feature;
+        }
+    }
+    return nullptr;
+}
+
 } // namespace
 
 AssemblyPartLoader::AssemblyPartLoader() {
@@ -120,23 +130,84 @@ const AssemblyPartGeometry& AssemblyPartLoader::geometryForSource(
     const std::string contentHash =
         assembly::AssemblySerializer::contentHashForFile(source.filePath);
 
-    auto it = cacheByPath_.find(source.filePath);
+    // One file can hold several bodies (bodyId picks one), so the path alone is not the key: two
+    // components linking to different bodies of one .cadnext used to share whichever loaded first.
+    const std::string key = source.filePath + '\n' + source.bodyId;
+    auto it = cacheByPath_.find(key);
     if (it != cacheByPath_.end() && it->second.contentHash == contentHash &&
         !contentHash.empty()) {
         return it->second;
     }
 
     AssemblyPartGeometry geometry = loadSource(source, contentHash);
-    auto inserted = cacheByPath_.insert_or_assign(source.filePath, std::move(geometry));
+    auto inserted = cacheByPath_.insert_or_assign(key, std::move(geometry));
     return inserted.first->second;
 }
 
 void AssemblyPartLoader::invalidate(const std::string& filePath) {
-    cacheByPath_.erase(filePath);
+    const std::string prefix = filePath + '\n';
+    for (auto it = cacheByPath_.begin(); it != cacheByPath_.end();) {
+        it = it->first.compare(0, prefix.size(), prefix) == 0 ? cacheByPath_.erase(it) : std::next(it);
+    }
 }
 
 void AssemblyPartLoader::clear() {
     cacheByPath_.clear();
+}
+
+std::vector<DetachedPartGeometry> AssemblyPartLoader::loadDetached(
+    const std::vector<assembly::PartReference>& sources, const ImportProgress* progress) {
+    std::vector<DetachedPartGeometry> loaded;
+    AssemblyPartLoader own;
+    for (std::size_t i = 0; i < sources.size(); ++i) {
+        if (progress) {
+            if (progress->cancelled()) break;
+            progress->report(int(i), int(sources.size()),
+                             QCoreApplication::translate("AssemblyPartLoader", "Сетка детали %1 из %2: %3")
+                                 .arg(i + 1)
+                                 .arg(sources.size())
+                                 .arg(QFileInfo(QString::fromStdString(sources[i].filePath)).completeBaseName()));
+        }
+        const AssemblyPartGeometry& geometry = own.geometryForSource(sources[i]);
+        if (!geometry.valid) continue;
+        DetachedPartGeometry part;
+        part.source = sources[i];
+        part.geometry = geometry;
+        part.geometry.exactShape = {};
+        if (!geometry.exactShape.isNull()) {
+            const auto bytes = own.kernel().exportBRepGeometry(geometry.exactShape);
+            if (!bytes.isOk()) continue;
+            part.brep = bytes.value();
+        }
+        loaded.push_back(std::move(part));
+    }
+    return loaded;
+}
+
+void AssemblyPartLoader::adopt(std::vector<DetachedPartGeometry>&& parts) {
+    for (DetachedPartGeometry& part : parts) {
+        if (!part.brep.empty()) {
+            const auto shape = kernel_->importBRep(part.brep);
+            if (!shape.isOk()) continue; // loads again, and says why, when asked for
+            part.geometry.exactShape = shape.value();
+        }
+        cacheByPath_.insert_or_assign(part.source.filePath + '\n' + part.source.bodyId, std::move(part.geometry));
+    }
+}
+
+std::vector<assembly::PartReference> AssemblyPartLoader::uncachedSources(
+    const assembly::AssemblyDocument& document) const {
+    std::vector<assembly::PartReference> sources;
+    std::set<std::string> seen;
+    for (const assembly::AssemblyComponent& component : document.components()) {
+        const std::string key = component.source.filePath + '\n' + component.source.bodyId;
+        if (!seen.insert(key).second) continue;
+        const auto it = cacheByPath_.find(key);
+        const std::string hash = assembly::AssemblySerializer::contentHashForFile(component.source.filePath);
+        if (it != cacheByPath_.end() && !hash.empty() && it->second.contentHash == hash) continue;
+        sources.push_back(component.source);
+    }
+    return sources;
 }
 
 AssemblyPartGeometry AssemblyPartLoader::loadSource(const assembly::PartReference& source,
@@ -252,8 +323,8 @@ AssemblyPartGeometry AssemblyPartLoader::loadCadnextPart(const std::string& path
                                       .toStdString()
                                 : document.name();
 
-    // Base bodies: primitives (evaluateObject) or extruded profiles
-    // (evaluateExtrude), exactly as MainWindow rebuilds them on load.
+    // Base bodies follow the same recipes as MainWindow: primitives,
+    // imported BRep, extrusions and revolutions.
     std::map<std::string, kernel::ShapeHandle> shapes;
     std::vector<std::string> bodyOrder;
     for (const Object& object : document.objects()) {
@@ -283,8 +354,31 @@ AssemblyPartGeometry AssemblyPartLoader::loadCadnextPart(const std::string& path
             }
             continue;
         }
+        if (const Feature* revolve = revolveFeatureForBody(document, object.id)) {
+            const Result<Sketch> sketch = document.sketchById(revolve->revolve.sketchId);
+            if (!sketch.isOk()) continue;
+            const auto profiles = SketchProfileDetector().detect(sketch.value());
+            const SketchProfile* profile = profileByIdOrLegacy(
+                profiles, revolve->revolve.profileId, sketch.value());
+            if (!profile) continue;
+            const auto evaluated = evaluator_->evaluateRevolve(
+                referenceForSketch(sketch.value()), *profile, revolve->revolve);
+            if (evaluated.isOk() && evaluated.value().isValid &&
+                !evaluated.value().shape.isNull()) {
+                shapes[object.id] = evaluated.value().shape;
+                bodyOrder.push_back(object.id);
+            }
+            continue;
+        }
         const Result<kernel::EvaluatedGeometry> evaluated =
-            evaluator_->evaluateObject(object);
+            !object.importedBRep.empty()
+                ? ([this, &object]() -> Result<kernel::EvaluatedGeometry> {
+                      const auto imported = kernel_->importBRep(object.importedBRep);
+                      if (!imported.isOk()) return Result<kernel::EvaluatedGeometry>::fail(
+                          imported.error());
+                      return evaluator_->evaluateShape(imported.value());
+                  })()
+                : evaluator_->evaluateObject(object);
         if (evaluated.isOk() && evaluated.value().isValid &&
             !evaluated.value().shape.isNull()) {
             shapes[object.id] = evaluated.value().shape;
@@ -448,6 +542,7 @@ AssemblyPartGeometry AssemblyPartLoader::geometryFromShape(const kernel::ShapeHa
     kernel::VertexAnalyzer vertexAnalyzer(*kernel_);
     geometry.topology.vertices = vertexAnalyzer.verticesForBody("part-body", shape);
 
+    geometry.exactShape = shape;
     geometry.valid = true;
     return geometry;
 }

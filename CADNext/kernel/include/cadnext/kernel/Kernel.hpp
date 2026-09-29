@@ -7,6 +7,7 @@
 #include "cadnext/Result.hpp"
 #include "cadnext/Vector3.hpp"
 #include "cadnext/kernel/ShapeHandle.hpp"
+#include "cadnext/kernel/ThreadCut.hpp"
 
 namespace cadnext::kernel {
 
@@ -68,6 +69,31 @@ struct ExtrudedCircleParameters {
     cadnext::Vector3 extrusion;
 };
 
+struct ExactProfileEdge {
+    cadnext::Vector3 start;
+    cadnext::Vector3 middle; // A point on a circular arc; ignored for a line.
+    cadnext::Vector3 end;
+    bool isArc = false;
+};
+
+struct ExtrudedCurvedProfileParameters {
+    std::vector<ExactProfileEdge> edges;
+    cadnext::Vector3 extrusion;
+};
+
+struct RevolvedProfileParameters {
+    std::vector<cadnext::Vector3> loop;
+    std::vector<ExactProfileEdge> edges;
+    cadnext::Vector3 axisOrigin;
+    cadnext::Vector3 axisDirection;
+    double angleDegrees = 360.0;
+    // An exact circle can be supplied instead of the approximated loop.
+    bool isCircle = false;
+    cadnext::Vector3 circleCenter;
+    cadnext::Vector3 circleNormal;
+    double circleRadius = 0.0;
+};
+
 class Kernel {
 public:
     virtual ~Kernel() = default;
@@ -81,6 +107,24 @@ public:
         const ExtrudedPolygonParameters& params) = 0;
     virtual cadnext::Result<ShapeHandle> makeExtrudedCircle(
         const ExtrudedCircleParameters& params) = 0;
+    virtual cadnext::Result<ShapeHandle> makeExtrudedCurvedProfile(
+        const ExtrudedCurvedProfileParameters&) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::KernelUnavailable,
+            "Curved profile extrusion requires an OCCT-enabled build"});
+    }
+    virtual cadnext::Result<ShapeHandle> makeRevolvedProfile(
+        const RevolvedProfileParameters& params) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::KernelUnavailable, "Revolve requires an OCCT-enabled build"});
+    }
+
+    // A screw thread with real turns cut into `body` (ThreadCut.hpp).
+    virtual cadnext::Result<ShapeHandle> cutThread(const ShapeHandle&, const ThreadCutParameters&,
+                                                   ThreadCutReport* = nullptr) {
+        return cadnext::Result<ShapeHandle>::fail({
+            cadnext::ErrorCode::KernelUnavailable, "Threads require an OCCT-enabled build"});
+    }
 
     virtual cadnext::Result<ShapeHandle> booleanFuse(
         const ShapeHandle& a,

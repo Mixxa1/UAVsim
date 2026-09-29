@@ -15,6 +15,14 @@ enum EngineeringTestType: String, Codable, CaseIterable, Hashable, Identifiable 
     case massProperties
     case structuralStatic
     case modalVibration
+    case mechanicalShock
+    case climatic
+    case fireResistance
+    case lightningDirect
+    case radiatedSusceptibility
+    case icing
+    case flutter
+    case birdStrike
     case mechanism
     case propulsionBench
     case thermalLimits
@@ -30,6 +38,14 @@ enum EngineeringTestType: String, Codable, CaseIterable, Hashable, Identifiable 
         case .massProperties: return "Масса, ЦТ, инерция"
         case .structuralStatic: return "Статическая прочность"
         case .modalVibration: return "Модальный анализ и вибрации"
+        case .mechanicalShock: return "Механический удар"
+        case .climatic: return "Климатические испытания"
+        case .fireResistance: return "Огнестойкость"
+        case .lightningDirect: return "Прямое воздействие молнии"
+        case .radiatedSusceptibility: return "ЭМС: экранирование корпуса"
+        case .icing: return "Обледенение"
+        case .flutter: return "Флаттер"
+        case .birdStrike: return "Удар птицы"
         case .mechanism: return "Механизмы"
         case .propulsionBench: return "Стенд силовой установки"
         case .thermalLimits: return "Тепловые пределы"

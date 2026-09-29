@@ -18,9 +18,11 @@ public:
     QAction* addSphereAction() const { return addSphereAction_; }
     QAction* addPlaneAction() const { return addPlaneAction_; }
     QAction* extrudeAction() const { return extrudeAction_; }
+    QAction* revolveAction() const { return revolveAction_; }
     QAction* cutExtrudeAction() const { return cutExtrudeAction_; }
     QAction* chamferAction() const { return chamferAction_; }
     QAction* filletAction() const { return filletAction_; }
+    QAction* threadAction() const { return threadAction_; }
     QAction* createSketchOnFaceAction() const { return createSketchOnFaceAction_; }
     QAction* workPlaneFromFaceAction() const { return workPlaneFromFaceAction_; }
     QAction* normalToFaceAction() const { return normalToFaceAction_; }
@@ -36,9 +38,11 @@ private:
     QAction* addSphereAction_ = nullptr;
     QAction* addPlaneAction_ = nullptr;
     QAction* extrudeAction_ = nullptr;
+    QAction* revolveAction_ = nullptr;
     QAction* cutExtrudeAction_ = nullptr;
     QAction* chamferAction_ = nullptr;
     QAction* filletAction_ = nullptr;
+    QAction* threadAction_ = nullptr;
     QAction* createSketchOnFaceAction_ = nullptr;
     QAction* workPlaneFromFaceAction_ = nullptr;
     QAction* normalToFaceAction_ = nullptr;

@@ -15,6 +15,7 @@ add_library(cadnext_core
     src/Extrude.cpp
     src/ExtrudeCut.cpp
     src/Fillet.cpp
+    src/Thread.cpp
     src/Feature.cpp
     src/Material.cpp
     src/Transform.cpp

@@ -55,6 +55,7 @@ QString sketchEntityTypeText(SketchEntityType type) {
     case SketchEntityType::Line: return QStringLiteral("Линия");
     case SketchEntityType::Rectangle: return QStringLiteral("Прямоугольник");
     case SketchEntityType::Circle: return QStringLiteral("Окружность");
+    case SketchEntityType::Arc: return QStringLiteral("Дуга");
     }
     return QStringLiteral("—");
 }
@@ -442,6 +443,14 @@ void PropertyPanel::showSketchEntity(const Sketch& sketch, const SketchEntity& e
                       .arg(mmText(sketchCircleDiameter(entity.circle)))
                       .arg(mmText(entity.circle.center.u))
                       .arg(mmText(entity.circle.center.v));
+        break;
+    case SketchEntityType::Arc:
+        details = tr("Радиус: %1\nЦентр U/V: %2, %3\nНачало: %4°\nРазмах: %5°")
+                      .arg(mmText(entity.arc.radius))
+                      .arg(mmText(entity.arc.center.u))
+                      .arg(mmText(entity.arc.center.v))
+                      .arg(entity.arc.startAngleDegrees, 0, 'g', 12)
+                      .arg(entity.arc.sweepDegrees, 0, 'g', 12);
         break;
     }
     detailsLabel_->setText(details);

@@ -26,6 +26,8 @@
 #include <TopoDS.hxx>
 #include <TopoDS_Face.hxx>
 #include <TopoDS_Shape.hxx>
+#include <BRepTools.hxx>
+#include <gp_Cone.hxx>
 #include <gp_Cylinder.hxx>
 #include <gp_Dir.hxx>
 #include <gp_Pln.hxx>
@@ -410,11 +412,28 @@ std::vector<FaceReference> FaceAnalyzer::planarFacesForBody(const std::string& b
                 reference.height = std::max(vMax - vMin, 1.0e-6);
                 reference.isSketchable = true;
             } else {
-                if (reference.kind == FaceKind::Cylindrical) {
-                    const gp_Cylinder cylinder = surface.Cylinder();
-                    reference.axisOrigin = toVector(cylinder.Axis().Location());
-                    reference.axisDirection = toVector(cylinder.Axis().Direction());
-                    reference.radius = cylinder.Radius();
+                if (reference.kind == FaceKind::Cylindrical || reference.kind == FaceKind::Conical) {
+                    const bool cone = reference.kind == FaceKind::Conical;
+                    const gp_Ax1 axis = cone ? surface.Cone().Axis() : surface.Cylinder().Axis();
+                    reference.axisOrigin = toVector(axis.Location());
+                    reference.axisDirection = toVector(axis.Direction());
+                    reference.radius = cone ? surface.Cone().RefRadius() : surface.Cylinder().Radius();
+                    // A cone's v runs along its generatrix: axially v cos α, the radius growing v sin α.
+                    const double semiAngle = cone ? surface.Cone().SemiAngle() : 0.0;
+                    reference.radiusSlope = std::tan(semiAngle);
+                    double u0 = 0.0, u1 = 0.0, v0 = 0.0, v1 = 0.0;
+                    BRepTools::UVBounds(face, u0, u1, v0, v1);
+                    reference.axialStart = v0 * std::cos(semiAngle);
+                    reference.axialEnd = v1 * std::cos(semiAngle);
+                    // The outward normal midway, toward the axis or away from it.
+                    gp_Pnt middle;
+                    gp_Vec du, dv;
+                    surface.D1((u0 + u1) / 2, (v0 + v1) / 2, middle, du, dv);
+                    gp_Vec outward = du.Crossed(dv);
+                    if (face.Orientation() == TopAbs_REVERSED) outward.Reverse();
+                    gp_Vec fromAxis(axis.Location(), middle);
+                    fromAxis -= gp_Vec(axis.Direction()) * fromAxis.Dot(gp_Vec(axis.Direction()));
+                    reference.holeWall = outward.Dot(fromAxis) < 0.0;
                 }
                 // Curved face: report it with its bounds center so the
                 // property panel has something to show.

@@ -58,17 +58,62 @@ int main() {
     options.snapToGrid = false;
     assertPoint(cadnext::applySketchSnap({0.14, 0.26}, options), 0.14, 0.26);
 
+    // Endpoint snapping stays active with the grid off, and it takes
+    // precedence over a nearby grid intersection when the grid is on.
+    cadnext::Sketch sketch;
+    cadnext::SketchEntity line;
+    line.type = cadnext::SketchEntityType::Line;
+    line.line = {{0.137, 0.263}, {0.8, 0.9}};
+    sketch.entities.push_back(line);
+    assertPoint(cadnext::applySketchSnap({0.14, 0.26}, options, sketch, 0.02),
+                0.137, 0.263);
+    options.snapToGrid = true;
+    assertPoint(cadnext::applySketchSnap({0.14, 0.26}, options, sketch, 0.02),
+                0.137, 0.263);
+    assertPoint(cadnext::applySketchSnap({0.14, 0.26}, options, sketch, 0.001),
+                0.1, 0.3);
+
+    cadnext::SketchEntity arc;
+    arc.type = cadnext::SketchEntityType::Arc;
+    arc.arc.center = {2.0, 3.0};
+    arc.arc.radius = 1.0;
+    arc.arc.startAngleDegrees = 0.0;
+    arc.arc.sweepDegrees = 90.0;
+    sketch.entities.push_back(arc);
+    options.snapToGrid = false;
+    assertPoint(cadnext::applySketchSnap({3.01, 3.01}, options, sketch, 0.03),
+                3.0, 3.0);
+    assertPoint(cadnext::applySketchSnap({2.01, 4.01}, options, sketch, 0.03),
+                2.0, 4.0);
+
     // Input state pending reset.
     cadnext::SketchInputState state;
     state.activeTool = cadnext::SketchTool::Line;
     state.phase = cadnext::SketchInputPhase::WaitingSecondPoint;
     state.firstPoint = cadnext::SketchPoint2D{1.0, 2.0};
     state.currentPoint = cadnext::SketchPoint2D{3.0, 4.0};
+    state.lineChainStart = cadnext::SketchPoint2D{1.0, 2.0};
+    state.lineChainSegments = 2;
     state.resetPending();
     assert(state.phase == cadnext::SketchInputPhase::Idle);
     assert(!state.firstPoint.has_value());
     assert(!state.currentPoint.has_value());
+    assert(!state.lineChainStart.has_value());
+    assert(state.lineChainSegments == 0);
     assert(state.activeTool == cadnext::SketchTool::Line);
+
+    // A committed line starts the next one at exactly its endpoint, and
+    // the third edge closes the chain at the stored starting coordinate.
+    state.phase = cadnext::SketchInputPhase::WaitingSecondPoint;
+    state.firstPoint = cadnext::SketchPoint2D{0, 0};
+    state.lineChainStart = cadnext::SketchPoint2D{0, 0};
+    assert(!state.completeLineSegment({1, 0}));
+    assertPoint(*state.firstPoint, 1, 0);
+    assert(!state.completeLineSegment({1, 1}));
+    assertPoint(*state.firstPoint, 1, 1);
+    assert(state.completeLineSegment({0, 0}));
+    assert(state.phase == cadnext::SketchInputPhase::Idle);
+    assert(!state.firstPoint.has_value());
 
     return 0;
 }

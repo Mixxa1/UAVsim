@@ -8,8 +8,10 @@ import Foundation
 /// claim a snapshot it was never given.
 ///
 /// Wire formats, both written by `cadnext_structural` and sharing this envelope:
-/// `cadnext-structural-result/1` (static strength) and `cadnext-modal-result/1` (natural modes
-/// against excitation bands; its modes and resonance findings ride along for display). The
+/// `cadnext-structural-result/1` (static strength), `cadnext-modal-result/1` (natural modes
+/// against excitation bands; its modes and resonance findings ride along for display) and
+/// `cadnext-shock-result/1` (one acceleration pulse: the response histories and the input's shock
+/// response spectrum ride along). The
 /// examples in `CADNext/fea/schema/` are decoded by `Tools/EngineeringValidationProbe` and matched
 /// key-for-key by the C++ tests that produce them.
 struct EngineeringSolverResult: Decodable, Hashable {
@@ -18,6 +20,17 @@ struct EngineeringSolverResult: Decodable, Hashable {
     static let schemaTests: [String: EngineeringTestType] = [
         "cadnext-structural-result/1": .structuralStatic,
         "cadnext-modal-result/1": .modalVibration,
+        // Sine and random are the same test as the modes: one verdict on vibration, three kinds of case.
+        "cadnext-harmonic-result/1": .modalVibration,
+        "cadnext-random-result/1": .modalVibration,
+        "cadnext-shock-result/1": .mechanicalShock,
+        "cadnext-climate-result/1": .climatic,
+        "cadnext-fire-result/1": .fireResistance,
+        "cadnext-lightning-result/1": .lightningDirect,
+        "cadnext-emc-result/1": .radiatedSusceptibility,
+        "cadnext-icing-result/1": .icing,
+        "cadnext-flutter-result/1": .flutter,
+        "cadnext-bird-result/1": .birdStrike,
         "cadnext-aerodynamics-result/1": .aerodynamics,
     ]
     static var supportedSchemas: Set<String> { Set(schemaTests.keys) }

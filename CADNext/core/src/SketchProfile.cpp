@@ -4,6 +4,8 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <map>
+#include <tuple>
 
 namespace cadnext {
 
@@ -125,6 +127,8 @@ void detectCircle(const Sketch& sketch, const SketchEntity& entity,
     profile.sketchId = sketch.id;
     profile.kind = SketchProfileKind::Circle;
     profile.sourceEntityId = entity.id;
+    profile.circleCenter = circle.center;
+    profile.circleRadius = circle.radius;
     profile.outerLoop.reserve(kCircleApproximationSegments);
     for (int i = 0; i < kCircleApproximationSegments; ++i) {
         const double angle = 2.0 * M_PI * static_cast<double>(i) /
@@ -136,6 +140,70 @@ void detectCircle(const Sketch& sketch, const SketchEntity& entity,
     profile.isClosed = true;
     profile.isValid = true;
     profiles.push_back(std::move(profile));
+}
+
+// ARC entities and bulged LWPOLYLINE segments can define a complete circle.
+// Grouping by exact centre/radius avoids substituting a merely nearby circle
+// for the source curves. Each arc's covered angular intervals must tile the
+// whole turn without overlaps or gaps.
+void detectArcCircles(const Sketch& sketch, std::vector<SketchProfile>& profiles) {
+    using CircleKey = std::tuple<double, double, double>;
+    std::map<CircleKey, std::vector<const SketchEntity*>> circles;
+    for (const auto& entity : sketch.entities) {
+        if (entity.type != SketchEntityType::Arc || entity.id.empty()) continue;
+        const SketchArc& arc = entity.arc;
+        if (!isFinitePoint(arc.center) || !std::isfinite(arc.radius) ||
+            arc.radius <= 0.0 || !std::isfinite(arc.startAngleDegrees) ||
+            !std::isfinite(arc.sweepDegrees) || arc.sweepDegrees <= 0.0 ||
+            arc.sweepDegrees >= 360.0) continue;
+        circles[{arc.center.u, arc.center.v, arc.radius}].push_back(&entity);
+    }
+    for (const auto& [key, entities] : circles) {
+        if (entities.size() < 2) continue;
+        std::vector<std::pair<double, double>> intervals;
+        std::vector<std::string> ids;
+        for (const auto* entity : entities) {
+            const auto& arc = entity->arc;
+            double start = std::fmod(arc.startAngleDegrees, 360.0);
+            if (start < 0.0) start += 360.0;
+            const double end = start + arc.sweepDegrees;
+            if (end <= 360.0) {
+                intervals.emplace_back(start, end);
+            } else {
+                intervals.emplace_back(start, 360.0);
+                intervals.emplace_back(0.0, end - 360.0);
+            }
+            ids.push_back(entity->id);
+        }
+        std::sort(intervals.begin(), intervals.end());
+        double covered = 0.0;
+        bool complete = true;
+        for (const auto& [start, end] : intervals) {
+            if (std::fabs(start - covered) > 1.0e-12 || end <= start) {
+                complete = false;
+                break;
+            }
+            covered = end;
+        }
+        if (!complete || std::fabs(covered - 360.0) > 1.0e-12) continue;
+        std::sort(ids.begin(), ids.end());
+        SketchProfile profile;
+        profile.id = "profile-arcs-" + fnv1aHex(ids);
+        profile.sketchId = sketch.id;
+        profile.kind = SketchProfileKind::Circle;
+        profile.sourceEntityIds = std::move(ids);
+        profile.circleCenter = {std::get<0>(key), std::get<1>(key)};
+        profile.circleRadius = std::get<2>(key);
+        for (int i = 0; i < kCircleApproximationSegments; ++i) {
+            const double angle = 360.0 * i / kCircleApproximationSegments;
+            profile.outerLoop.push_back(sketchArcPoint(
+                {profile.circleCenter, profile.circleRadius, 0.0, 90.0}, angle));
+        }
+        profile.area = M_PI * profile.circleRadius * profile.circleRadius;
+        profile.isClosed = true;
+        profile.isValid = true;
+        profiles.push_back(std::move(profile));
+    }
 }
 
 // v2 closed-loop detection: graph-based, order-independent. Line
@@ -273,6 +341,154 @@ void detectLineLoops(const Sketch& sketch, std::vector<SketchProfile>& profiles)
     }
 }
 
+// Walk connected line/arc chains without replacing their circular edges by
+// segments. The sampled outerLoop is used only for picking and preview; the
+// ordered segments are passed to the exact BRep kernel.
+void detectMixedLoops(const Sketch& sketch, std::vector<SketchProfile>& profiles) {
+    // OCCT must connect the original analytic curve endpoints without moving
+    // them. Keep this tighter than the display-oriented line snap tolerance.
+    constexpr double kExactCurveEndpointTolerance = 1.0e-9;
+    struct Edge {
+        size_t a = 0;
+        size_t b = 0;
+        const SketchEntity* entity = nullptr;
+    };
+    std::vector<SketchPoint2D> nodes;
+    const auto nodeFor = [&nodes](const SketchPoint2D& point) {
+        for (size_t i = 0; i < nodes.size(); ++i)
+            if (std::hypot(nodes[i].u - point.u, nodes[i].v - point.v) <=
+                kExactCurveEndpointTolerance) return i;
+        nodes.push_back(point);
+        return nodes.size() - 1;
+    };
+    std::vector<Edge> edges;
+    for (const auto& entity : sketch.entities) {
+        SketchPoint2D start, end;
+        if (entity.type == SketchEntityType::Line) {
+            start = entity.line.start;
+            end = entity.line.end;
+        } else if (entity.type == SketchEntityType::Arc) {
+            if (!isFinitePoint(entity.arc.center) ||
+                !std::isfinite(entity.arc.radius) || entity.arc.radius <= 0.0 ||
+                !std::isfinite(entity.arc.startAngleDegrees) ||
+                !std::isfinite(entity.arc.sweepDegrees) ||
+                entity.arc.sweepDegrees <= 0.0 || entity.arc.sweepDegrees >= 360.0)
+                continue;
+            start = sketchArcStart(entity.arc);
+            end = sketchArcEnd(entity.arc);
+        } else {
+            continue;
+        }
+        if (!isFinitePoint(start) || !isFinitePoint(end)) continue;
+        const size_t a = nodeFor(start), b = nodeFor(end);
+        if (a != b) edges.push_back({a, b, &entity});
+    }
+    if (edges.size() < 2) return;
+    std::vector<std::vector<size_t>> adjacency(nodes.size());
+    for (size_t i = 0; i < edges.size(); ++i) {
+        adjacency[edges[i].a].push_back(i);
+        adjacency[edges[i].b].push_back(i);
+    }
+    std::vector<bool> used(edges.size(), false);
+    for (size_t first = 0; first < edges.size(); ++first) {
+        if (used[first]) continue;
+        const size_t startNode = edges[first].a;
+        size_t node = startNode, edgeIndex = first;
+        std::vector<SketchProfile::Segment> segments;
+        std::vector<std::string> ids;
+        bool hasArc = false, closed = false;
+        for (size_t step = 0; step < edges.size(); ++step) {
+            if (adjacency[node].size() != 2 || used[edgeIndex]) break;
+            const Edge& edge = edges[edgeIndex];
+            const bool forward = edge.a == node;
+            const SketchEntity& entity = *edge.entity;
+            SketchProfile::Segment segment;
+            if (entity.type == SketchEntityType::Line) {
+                segment.start = forward ? entity.line.start : entity.line.end;
+                segment.end = forward ? entity.line.end : entity.line.start;
+            } else {
+                hasArc = true;
+                segment.isArc = true;
+                segment.start = forward ? sketchArcStart(entity.arc) : sketchArcEnd(entity.arc);
+                segment.end = forward ? sketchArcEnd(entity.arc) : sketchArcStart(entity.arc);
+                segment.middle = sketchArcPoint(
+                    entity.arc, entity.arc.startAngleDegrees +
+                                    entity.arc.sweepDegrees * 0.5);
+                segment.center = entity.arc.center;
+                segment.radius = entity.arc.radius;
+                segment.signedSweepRadians =
+                    (forward ? 1.0 : -1.0) * entity.arc.sweepDegrees * M_PI / 180.0;
+            }
+            segments.push_back(segment);
+            ids.push_back(entity.id);
+            used[edgeIndex] = true;
+            const size_t nextNode = forward ? edge.b : edge.a;
+            if (nextNode == startNode) {
+                closed = true;
+                break;
+            }
+            if (adjacency[nextNode].size() != 2) break;
+            const size_t next0 = adjacency[nextNode][0];
+            const size_t next1 = adjacency[nextNode][1];
+            edgeIndex = next0 == edgeIndex ? next1 : next0;
+            node = nextNode;
+        }
+        if (!closed || !hasArc) continue;
+        SketchProfile profile;
+        profile.kind = SketchProfileKind::Curved;
+        profile.sketchId = sketch.id;
+        profile.segments = std::move(segments);
+        profile.sourceEntityIds = std::move(ids);
+        auto sortedIds = profile.sourceEntityIds;
+        std::sort(sortedIds.begin(), sortedIds.end());
+        bool alreadyCircle = false;
+        for (const auto& existing : profiles) {
+            if (existing.kind != SketchProfileKind::Circle ||
+                existing.sourceEntityIds.size() != sortedIds.size()) continue;
+            auto circleIds = existing.sourceEntityIds;
+            std::sort(circleIds.begin(), circleIds.end());
+            if (circleIds == sortedIds) {
+                alreadyCircle = true;
+                break;
+            }
+        }
+        if (alreadyCircle) continue;
+        profile.id = "profile-curved-" + fnv1aHex(sortedIds);
+        double doubledArea = 0.0;
+        for (const auto& segment : profile.segments) {
+            doubledArea += segment.start.u * segment.end.v -
+                           segment.end.u * segment.start.v;
+            if (segment.isArc) {
+                doubledArea += segment.radius * segment.radius *
+                    (segment.signedSweepRadians - std::sin(segment.signedSweepRadians));
+            }
+            const int count = segment.isArc
+                ? std::max(2, int(std::ceil(std::fabs(segment.signedSweepRadians) /
+                                            (M_PI / 16.0)))) : 1;
+            if (!segment.isArc) {
+                profile.outerLoop.push_back(segment.start);
+            } else {
+                const double startAngle = std::atan2(
+                    segment.start.v - segment.center.v,
+                    segment.start.u - segment.center.u);
+                for (int i = 0; i < count; ++i) {
+                    const double fraction = double(i) / double(count);
+                    const double angle = startAngle + segment.signedSweepRadians * fraction;
+                    profile.outerLoop.push_back({
+                        segment.center.u + segment.radius * std::cos(angle),
+                        segment.center.v + segment.radius * std::sin(angle)});
+                }
+            }
+        }
+        profile.area = std::fabs(doubledArea) * 0.5;
+        profile.isClosed = true;
+        profile.isValid = profile.area >= kMinArea &&
+                          !polygonIsSelfIntersecting(profile.outerLoop);
+        if (!profile.isValid) profile.invalidReason = SketchProfileInvalidReason::SelfIntersecting;
+        if (profile.outerLoop.size() >= 3) profiles.push_back(std::move(profile));
+    }
+}
+
 } // namespace
 
 std::vector<SketchProfile> SketchProfileDetector::detect(const Sketch& sketch) const {
@@ -287,9 +503,13 @@ std::vector<SketchProfile> SketchProfileDetector::detect(const Sketch& sketch) c
             break;
         case SketchEntityType::Line:
             break; // handled as loops below
+        case SketchEntityType::Arc:
+            break; // Curved profile construction is not implemented yet.
         }
     }
+    detectArcCircles(sketch, profiles);
     detectLineLoops(sketch, profiles);
+    detectMixedLoops(sketch, profiles);
     return profiles;
 }
 

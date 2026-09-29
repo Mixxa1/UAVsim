@@ -5,7 +5,9 @@ private final class CreditsWindowController: NSWindowController {
     static let shared = CreditsWindowController()
 
     init() {
-        let view = NSHostingView(rootView: CreditsView())
+        // An AppKit window inherits nothing from the SwiftUI hierarchy: without this the credits
+        // came up in the system language while the rest of the app followed the picker.
+        let view = NSHostingView(rootView: CreditsView().environment(\.locale, L10n.currentLanguage().locale))
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 520, height: 320),
             styleMask: [.titled, .closable, .resizable],

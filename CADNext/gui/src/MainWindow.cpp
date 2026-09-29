@@ -1,5 +1,8 @@
 #include "cadnext/gui/AerodynamicsStudyDialog.hpp"
 #include "cadnext/gui/MainWindow.hpp"
+#include "cadnext/gui/BackgroundCadImport.hpp"
+#include "cadnext/gui/ImportProgressDialog.hpp"
+#include "cadnext/gui/ThreadDialog.hpp"
 
 #include <algorithm>
 #include <array>
@@ -8,13 +11,23 @@
 #include <cstring>
 #include <limits>
 #include <random>
+#include <sstream>
+#include <string_view>
 
+#include <QPushButton>
 #include <QCloseEvent>
+#include <QCoreApplication>
 #include <QDateTime>
+#include <QEventLoop>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QComboBox>
+#include <QFormLayout>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QInputDialog>
 #include <QCursor>
 #include <QLabel>
 #include <QMenu>
@@ -32,6 +45,9 @@
 #include "cadnext/bridge/UAVPartReader.hpp"
 #include "cadnext/bridge/UAVPartWriter.hpp"
 #include "cadnext/gui/AssemblyWindow.hpp"
+#include "cadnext/kernel/StepProductStructure.hpp"
+#include "cadnext/gui/ParasolidXtProduct.hpp"
+#include "cadnext/gui/ParasolidXtWriter.hpp"
 #include "cadnext/gui/AnalysisResultWindow.hpp"
 #include "cadnext/gui/WorkbenchExportDialog.hpp"
 #include "cadnext/bridge/ConstructionExport.hpp"
@@ -45,8 +61,18 @@
 #include "cadnext/gui/PropertyPanel.hpp"
 #include "cadnext/gui/SketchToolBar.hpp"
 #include "cadnext/gui/ToolBar.hpp"
+#include "cadnext/gui/NativeCadImport.hpp"
+#include "cadnext/gui/AcisSatWriter.hpp"
+#include "cadnext/gui/DwgWriter.hpp"
+#include "cadnext/gui/NativeDxfImport.hpp"
+#include "cadnext/gui/NativeDwgImport.hpp"
+#include "cadnext/gui/NativeDwgObjects.hpp"
+#include "cadnext/gui/NativeKompasGeometry.hpp"
+#include "cadnext/gui/NativeParasolidXt.hpp"
+#include "cadnext/gui/NativeSolidWorksGeometry.hpp"
 #include "cadnext/kernel/ExtrudeMesh.hpp"
 #include "cadnext/kernel/KernelFactory.hpp"
+#include "cadnext/kernel/OcctKernel.hpp"
 
 namespace cadnext::gui {
 
@@ -175,6 +201,9 @@ QString treeTypeText(const Object& object) {
     if (object.type == ObjectType::ReferencePlane) {
         return QObject::tr("Опорная плоскость");
     }
+    if (!object.importedBRep.empty()) {
+        return QObject::tr("Импортированное тело");
+    }
     return primitiveKindText(object.primitive.kind);
 }
 
@@ -214,6 +243,7 @@ QString profileKindText(cadnext::SketchProfileKind kind) {
     case cadnext::SketchProfileKind::Rectangle: return QObject::tr("Прямоугольник");
     case cadnext::SketchProfileKind::Circle: return QObject::tr("Окружность");
     case cadnext::SketchProfileKind::Polygon: return QObject::tr("Многоугольник");
+    case cadnext::SketchProfileKind::Curved: return QObject::tr("Контур с дугами");
     case cadnext::SketchProfileKind::Unsupported: break;
     }
     return QObject::tr("Профиль");
@@ -224,6 +254,7 @@ QString sketchEntityTypeText(cadnext::SketchEntityType type) {
     case cadnext::SketchEntityType::Line: return QObject::tr("Линия");
     case cadnext::SketchEntityType::Rectangle: return QObject::tr("Прямоугольник");
     case cadnext::SketchEntityType::Circle: return QObject::tr("Окружность");
+    case cadnext::SketchEntityType::Arc: return QObject::tr("Дуга");
     }
     return QObject::tr("Элемент эскиза");
 }
@@ -452,6 +483,18 @@ ViewBounds sketchEntityBounds(const Sketch& sketch, const SketchEntity& entity) 
         includePoint({circle.center.u, circle.center.v + circle.radius});
         break;
     }
+    case SketchEntityType::Arc: {
+        const SketchArc& arc = entity.arc;
+        includePoint(sketchArcStart(arc));
+        includePoint(sketchArcEnd(arc));
+        for (int quadrant = 0; quadrant < 4; ++quadrant) {
+            const double angle = quadrant * 90.0;
+            double offset = std::fmod(angle - arc.startAngleDegrees, 360.0);
+            if (offset < 0.0) offset += 360.0;
+            if (offset <= arc.sweepDegrees) includePoint(sketchArcPoint(arc, angle));
+        }
+        break;
+    }
     }
     return bounds;
 }
@@ -576,12 +619,16 @@ MainWindow::MainWindow(QWidget* parent)
             [this]() { addReferencePlane(); });
     connect(toolBar_->extrudeAction(), &QAction::triggered, this,
             [this]() { openExtrudeDialog(); });
+    connect(toolBar_->revolveAction(), &QAction::triggered, this,
+            [this]() { openRevolveDialog(); });
     connect(toolBar_->cutExtrudeAction(), &QAction::triggered, this,
             [this]() { openCutExtrudeDialog(); });
     connect(toolBar_->chamferAction(), &QAction::triggered, this,
             [this]() { openChamferDialog(); });
     connect(toolBar_->filletAction(), &QAction::triggered, this,
             [this]() { openFilletDialog(); });
+    connect(toolBar_->threadAction(), &QAction::triggered, this,
+            [this]() { openThreadDialog(); });
     connect(toolBar_->createSketchOnFaceAction(), &QAction::triggered, this,
             [this]() { createSketchOnSelectedFace(); });
     connect(toolBar_->workPlaneFromFaceAction(), &QAction::triggered, this,
@@ -793,12 +840,17 @@ void MainWindow::initializeViewport() {
         // Context click on a profile/entity offers Extrude/Cut directly.
         if (contextClick && (target.isProfile() || target.isSketchEntity()) &&
             (toolBar_->extrudeAction()->isEnabled() ||
+             toolBar_->revolveAction()->isEnabled() ||
              toolBar_->cutExtrudeAction()->isEnabled())) {
             QMenu menu(this);
             QAction* extrude = nullptr;
+            QAction* revolve = nullptr;
             QAction* cutExtrude = nullptr;
             if (toolBar_->extrudeAction()->isEnabled()) {
                 extrude = menu.addAction(tr("Выдавить"));
+            }
+            if (toolBar_->revolveAction()->isEnabled()) {
+                revolve = menu.addAction(tr("Вращать"));
             }
             if (toolBar_->cutExtrudeAction()->isEnabled()) {
                 cutExtrude = menu.addAction(tr("Вырезать выдавливанием"));
@@ -806,6 +858,8 @@ void MainWindow::initializeViewport() {
             QAction* chosen = menu.exec(QCursor::pos());
             if (chosen == extrude) {
                 openExtrudeDialog();
+            } else if (chosen == revolve) {
+                openRevolveDialog();
             } else if (chosen == cutExtrude) {
                 openCutExtrudeDialog();
             }
@@ -1494,7 +1548,14 @@ void MainWindow::buildObjectVisual(const Object& object) {
 
     if (evaluator_) {
         const cadnext::Result<kernel::EvaluatedGeometry> evaluated =
-            evaluator_->evaluateObject(object);
+            !object.importedBRep.empty()
+                ? ([this, &object]() -> Result<kernel::EvaluatedGeometry> {
+                      const auto imported = kernel_->importBRep(object.importedBRep);
+                      if (!imported.isOk()) return Result<kernel::EvaluatedGeometry>::fail(
+                          imported.error());
+                      return evaluator_->evaluateShape(imported.value());
+                  })()
+                : evaluator_->evaluateObject(object);
         if (evaluated.isOk() && evaluated.value().isValid &&
             !evaluated.value().previewMesh.isEmpty()) {
             // Remember the BRep handle: Cut Extrude needs the target's
@@ -1834,12 +1895,16 @@ void MainWindow::onSketchPoint(double u, double v) {
         return;
     }
 
-    const SketchPoint2D point = applySketchSnap({u, v}, sketchInput_.options);
+    const SketchPoint2D point = snapSketchPoint({u, v});
 
     if (sketchInput_.phase == SketchInputPhase::Idle) {
         sketchInput_.firstPoint = point;
         sketchInput_.currentPoint = point;
         sketchInput_.phase = SketchInputPhase::WaitingSecondPoint;
+        if (sketchInput_.activeTool == SketchTool::Line) {
+            sketchInput_.lineChainStart = point;
+            sketchInput_.lineChainSegments = 0;
+        }
         if (viewer_) {
             viewer_->scene().showSketchAnchor(point, activeSketchReference_);
             updateSketchPreview(point);
@@ -1926,11 +1991,33 @@ void MainWindow::onSketchPoint(double u, double v) {
                  "entity %s may render off-plane", entity.id.c_str());
     }
 
-    sketchInput_.resetPending();
+    const bool continueLine = sketchInput_.activeTool == SketchTool::Line;
+    const bool closedLineChain = continueLine
+        ? sketchInput_.completeLineSegment(point) : false;
+    if (!continueLine) sketchInput_.resetPending();
     clearPendingSketchVisuals();
     addSketchEntity(std::move(entity));
-    // The tool stays armed for the next entity (CAD workflow).
-    statusBar()->showMessage(sketchToolPrompt());
+    if (continueLine && !closedLineChain) {
+        viewer_->scene().showSketchAnchor(point, activeSketchReference_);
+        statusBar()->showMessage(
+            tr("Линия: кликните следующую точку или начальную точку для замыкания; Esc — завершить цепочку"));
+    } else {
+        statusBar()->showMessage(closedLineChain
+                                     ? tr("Контур замкнут — доступно выдавливание или вырез")
+                                     : sketchToolPrompt());
+    }
+}
+
+SketchPoint2D MainWindow::snapSketchPoint(SketchPoint2D raw) const {
+    if (activeSketchId_ && viewer_) {
+        const Result<Sketch> sketch = document_.sketchById(*activeSketchId_);
+        if (sketch.isOk()) {
+            constexpr double kEndpointSnapPixels = 10.0;
+            return applySketchSnap(raw, sketchInput_.options, sketch.value(),
+                                   viewer_->sketchUnitsPerPixel() * kEndpointSnapPixels);
+        }
+    }
+    return applySketchSnap(raw, sketchInput_.options);
 }
 
 void MainWindow::onSketchMove(double u, double v) {
@@ -1941,7 +2028,7 @@ void MainWindow::onSketchMove(double u, double v) {
         return;
     }
 
-    const SketchPoint2D snapped = applySketchSnap({u, v}, sketchInput_.options);
+    const SketchPoint2D snapped = snapSketchPoint({u, v});
     sketchInput_.currentPoint = snapped;
     if (sketchInput_.options.showSketchCursor) {
         viewer_->scene().showSketchCursor(snapped, activeSketchReference_);
@@ -2039,6 +2126,9 @@ void MainWindow::refreshSketchPlaneVisual() {
     // the ones that represent live input state.
     viewer_->scene().showSketchPlane(*activeSketchPlane_, sketchInput_.options.gridStep,
                                      sketchInput_.options.showSketchGrid);
+    if (const Result<Sketch> sketch = document_.sketchById(*activeSketchId_); sketch.isOk()) {
+        viewer_->scene().showSketchEndpoints(sketch.value());
+    }
     if (sketchInput_.firstPoint) {
         viewer_->scene().showSketchAnchor(*sketchInput_.firstPoint, activeSketchReference_);
     }
@@ -2104,7 +2194,7 @@ void MainWindow::updateModeStatusLabel() {
 QString MainWindow::sketchToolPrompt() const {
     switch (sketchInput_.activeTool) {
     case SketchTool::Line:
-        return tr("Линия: кликните первую точку");
+        return tr("Линия: кликните первую точку (крестики — привязка к концам отрезков)");
     case SketchTool::Rectangle:
         return tr("Прямоугольник: кликните первый угол");
     case SketchTool::Circle:
@@ -2212,6 +2302,7 @@ void MainWindow::refreshSketchProfiles() {
         viewer_->scene().setSelectedProfile(std::string());
     }
     viewer_->scene().showSketchProfiles(sketch.value(), activeProfiles_);
+    viewer_->scene().showSketchEndpoints(sketch.value());
     updateExtrudeActionEnabled();
 }
 
@@ -2254,6 +2345,7 @@ void MainWindow::updateExtrudeActionEnabled() {
         }
     }
     toolBar_->extrudeAction()->setEnabled(hasValidProfile);
+    toolBar_->revolveAction()->setEnabled(kOcctBackendAvailable && hasValidProfile);
 
     bool hasTargetBody = false;
     for (const Object& object : document_.objects()) {
@@ -2341,6 +2433,9 @@ void MainWindow::openExtrudeDialog() {
             }
         } else if (profile.kind == SketchProfileKind::Polygon) {
             label = tr("Профиль-многоугольник (%1 линий)")
+                        .arg(profile.sourceEntityIds.size());
+        } else if (profile.kind == SketchProfileKind::Curved) {
+            label = tr("Контур с дугами (%1 элементов)")
                         .arg(profile.sourceEntityIds.size());
         }
         label += tr(" — площадь %1").arg(profile.area, 0, 'f', 3);
@@ -2473,6 +2568,128 @@ void MainWindow::cancelExtrude() {
         extrudeDialog_->hide();
     }
     statusBar()->showMessage(tr("Выдавливание отменено"), 3000);
+}
+
+void MainWindow::openRevolveDialog() {
+    if (!viewer_ || !evaluator_ || !kOcctBackendAvailable) return;
+    const std::optional<Sketch> sketch = sketchForExtrude();
+    if (!sketch) {
+        statusBar()->showMessage(tr("Выберите эскиз с замкнутым профилем"), 5000);
+        return;
+    }
+    const auto profiles = SketchProfileDetector().detect(*sketch);
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Тело вращения"));
+    auto* form = new QFormLayout(&dialog);
+    QComboBox profileBox(&dialog);
+    for (const auto& profile : profiles) {
+        if (profile.isValid) {
+            profileBox.addItem(QString::fromStdString(profile.id),
+                               QString::fromStdString(profile.id));
+            if (profile.id == selectedProfileId_) profileBox.setCurrentIndex(profileBox.count() - 1);
+        }
+    }
+    if (profileBox.count() == 0) return;
+    form->addRow(tr("Замкнутый профиль"), &profileBox);
+    QComboBox axisBox(&dialog);
+    axisBox.addItems({tr("Ось V (вертикальная)"), tr("Ось U (горизонтальная)")});
+    form->addRow(tr("Ось в плоскости эскиза"), &axisBox);
+    QDoubleSpinBox offsetBox(&dialog);
+    offsetBox.setRange(-1.0e9, 1.0e9);
+    offsetBox.setDecimals(3);
+    offsetBox.setSuffix(tr(" мм"));
+    form->addRow(tr("Смещение оси"), &offsetBox);
+    QDoubleSpinBox angleBox(&dialog);
+    angleBox.setRange(0.01, 360.0);
+    angleBox.setDecimals(2);
+    angleBox.setValue(360.0);
+    angleBox.setSuffix(tr("°"));
+    form->addRow(tr("Угол"), &angleBox);
+    QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    QObject::connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    QObject::connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    form->addRow(&buttons);
+    if (dialog.exec() != QDialog::Accepted) return;
+
+    const std::string profileId = profileBox.currentData().toString().toStdString();
+    const SketchProfile* profile = profileById(profiles, profileId);
+    if (!profile) return;
+    RevolveParameters params;
+    params.sketchId = sketch->id;
+    params.profileId = profileId;
+    params.axis = axisBox.currentIndex() == 0 ? RevolveAxis::V : RevolveAxis::U;
+    params.axisOffset = fromMillimeters(offsetBox.value());
+    params.angleDegrees = angleBox.value();
+    const SketchReference reference = sketch->reference.sourceId.empty()
+        ? canonicalSketchReference(sketch->plane) : sketch->reference;
+    const auto evaluated = evaluator_->evaluateRevolve(reference, *profile, params);
+    if (!evaluated.isOk() || !evaluated.value().isValid ||
+        evaluated.value().previewMesh.isEmpty()) {
+        const QString reason = evaluated.isOk()
+            ? QString::fromStdString(evaluated.value().message)
+            : QString::fromStdString(evaluated.error().message);
+        QMessageBox::warning(this, tr("Вращение не выполнено"), reason);
+        return;
+    }
+    if (activeSketchId_) exitSketchMode();
+    Object body;
+    body.id = "object-" + std::to_string(nextObjectNumber_++);
+    body.type = ObjectType::Body;
+    body.name = tr("Тело вращения %1").arg(revolveCount_ + 1).toStdString();
+    body.primitive.kind = PrimitiveKind::None;
+    Feature feature;
+    feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
+    feature.name = tr("Вращение %1").arg(revolveCount_ + 1).toStdString();
+    feature.type = FeatureType::Revolve;
+    feature.targetObjectId = body.id;
+    feature.createdBodyId = body.id;
+    feature.revolve = params;
+    commandStack_.push(std::make_unique<AddObjectWithFeatureCommand>(body, feature), document_);
+    ++revolveCount_;
+    bodyShapes_[body.id] = evaluated.value().shape;
+    bodyMeshes_[body.id] = evaluated.value().previewMesh;
+    viewer_->scene().addOrUpdateObjectMesh(body, evaluated.value().previewMesh);
+    refreshBodyFaces(body.id);
+    refreshBodyEdges(body.id);
+    {
+        const QSignalBlocker blocker(projectTree_);
+        projectTree_->addBodyItem(QString::fromStdString(body.id),
+                                  QString::fromStdString(body.name), tr("Вращение"));
+    }
+    selectBody(body.id);
+    markDirty();
+    updateUndoRedoActions();
+    statusBar()->showMessage(tr("Тело вращения создано"), 5000);
+}
+
+const Feature* MainWindow::revolveFeatureForBody(const std::string& objectId) const {
+    for (const Feature& feature : document_.features()) {
+        if (feature.type == FeatureType::Revolve && feature.createdBodyId == objectId) {
+            return &feature;
+        }
+    }
+    return nullptr;
+}
+
+void MainWindow::buildRevolvedBodyVisual(const Object& object, const Feature& feature) {
+    if (!viewer_ || !evaluator_) return;
+    const auto sketch = document_.sketchById(feature.revolve.sketchId);
+    if (!sketch.isOk()) return;
+    const auto profiles = SketchProfileDetector().detect(sketch.value());
+    const SketchProfile* profile = profileById(profiles, feature.revolve.profileId);
+    if (!profile) return;
+    const SketchReference reference = sketch.value().reference.sourceId.empty()
+        ? canonicalSketchReference(sketch.value().plane) : sketch.value().reference;
+    const auto evaluated = evaluator_->evaluateRevolve(reference, *profile, feature.revolve);
+    if (!evaluated.isOk() || !evaluated.value().isValid) {
+        qWarning("CADNext: revolve regeneration failed for %s", object.name.c_str());
+        return;
+    }
+    bodyShapes_[object.id] = evaluated.value().shape;
+    bodyMeshes_[object.id] = evaluated.value().previewMesh;
+    viewer_->scene().addOrUpdateObjectMesh(object, evaluated.value().previewMesh);
+    refreshBodyFaces(object.id);
+    refreshBodyEdges(object.id);
 }
 
 bool MainWindow::buildExtrudeMesh(const Sketch& sketch, const SketchProfile& profile,
@@ -2698,6 +2915,9 @@ void MainWindow::openCutExtrudeDialog() {
             }
         } else if (profile.kind == SketchProfileKind::Polygon) {
             label = tr("Профиль-многоугольник (%1 линий)").arg(profile.sourceEntityIds.size());
+        } else if (profile.kind == SketchProfileKind::Curved) {
+            label = tr("Контур с дугами (%1 элементов)")
+                        .arg(profile.sourceEntityIds.size());
         }
         label += tr(" — площадь %1").arg(profile.area, 0, 'f', 3);
         profiles.append({QString::fromStdString(profile.id), label});
@@ -3178,6 +3398,9 @@ void MainWindow::updateFaceActionsEnabled() {
     toolBar_->createSketchOnFaceAction()->setEnabled(planar && !activeSketchId_);
     toolBar_->workPlaneFromFaceAction()->setEnabled(planar && !activeSketchId_);
     toolBar_->normalToFaceAction()->setEnabled(planar);
+    toolBar_->threadAction()->setEnabled(
+        kOcctBackendAvailable && face && !activeSketchId_ && face->radius > 0.0 &&
+        (face->kind == kernel::FaceKind::Cylindrical || face->kind == kernel::FaceKind::Conical));
 }
 
 void MainWindow::showFaceActionPalette(bool contextClick) {
@@ -3201,8 +3424,15 @@ void MainWindow::showFaceActionPalette(bool contextClick) {
         menu.addAction(tr("Грань не плоская — действия эскиза недоступны"))
             ->setEnabled(false);
     }
+    QAction* thread = nullptr;
+    if (toolBar_->threadAction()->isEnabled()) {
+        menu.addSeparator();
+        thread = menu.addAction(tr("Резьба…"));
+    }
     QAction* chosen = menu.exec(QCursor::pos());
-    if (chosen && chosen == createSketch) {
+    if (chosen && chosen == thread) {
+        openThreadDialog();
+    } else if (chosen && chosen == createSketch) {
         createSketchOnSelectedFace();
     } else if (chosen && chosen == createPlane) {
         createWorkPlaneFromSelectedFace();
@@ -3768,6 +3998,235 @@ bool MainWindow::replayEdgeOperationFeature(const Feature& feature, QString* fai
     if (!target || target->type != ObjectType::Body) {
         if (failureReason) {
             *failureReason = tr("Операция над ребром ссылается на отсутствующее тело.");
+        }
+        return false;
+    }
+    bodyShapes_[target->id] = geometry.shape;
+    bodyMeshes_[target->id] = geometry.previewMesh;
+    if (viewer_) {
+        viewer_->scene().addOrUpdateObjectMesh(*target, geometry.previewMesh);
+    }
+    refreshBodyFaces(target->id);
+    refreshBodyEdges(target->id);
+    refreshAttachmentPointMarkers(target->id);
+    return true;
+}
+
+// --- Thread (real turns on a cylindrical or conical face) ---------------------
+
+namespace {
+
+// "8", "1,25", "0,001": millimetres as a drawing writes them.
+QString threadMm(double value, int decimals = 3) {
+    QString text = QString::number(value, 'f', decimals);
+    while (text.contains('.') && text.endsWith('0')) text.chop(1);
+    if (text.endsWith('.')) text.chop(1);
+    return text.replace('.', ',');
+}
+
+// The cut depends on the body it is made on and the recipe's geometry, not on ids.
+std::string threadCacheKey(const std::vector<std::uint8_t>& brep, const ThreadParameters& p) {
+    std::ostringstream key;
+    key.precision(17);
+    const ThreadSurface& s = p.surface;
+    key << std::hash<std::string_view>{}(std::string_view(reinterpret_cast<const char*>(brep.data()), brep.size())) << ' '
+        << brep.size() << ' ' << s.axisOrigin.x << ' ' << s.axisOrigin.y << ' ' << s.axisOrigin.z << ' ' << s.axisDirection.x << ' '
+        << s.axisDirection.y << ' ' << s.axisDirection.z << ' ' << s.radius << ' ' << s.slope << ' ' << s.axialStart << ' '
+        << s.axialEnd << ' ' << s.holeWall << ' ' << threadStandardKey(p.standard) << ' ' << p.majorDiameterMm << ' ' << p.pitchMm
+        << ' ' << p.gaugeLengthMm << ' ' << p.lengthMm << ' ' << p.fromFarEnd << ' ' << p.rightHanded;
+    return key.str();
+}
+
+} // namespace
+
+void MainWindow::openThreadDialog() {
+    const kernel::FaceReference* face =
+        selectionKind_ == SelectionKind::BodyFace ? findBodyFace(selectedFace_.bodyId, selectedFace_.faceId) : nullptr;
+    if (!face || face->radius <= 0.0 ||
+        (face->kind != kernel::FaceKind::Cylindrical && face->kind != kernel::FaceKind::Conical)) {
+        statusBar()->showMessage(tr("Резьба режется на цилиндрической или конической грани — выберите её."), 6000);
+        return;
+    }
+    if (!kOcctBackendAvailable) {
+        statusBar()->showMessage(tr("Резьба требует ядра OCCT."), 6000);
+        return;
+    }
+    const std::string bodyId = selectedFace_.bodyId, faceId = selectedFace_.faceId;
+    ThreadFace threadFace;
+    ThreadSurface& surface = threadFace.surface;
+    surface.axisOrigin = face->axisOrigin;
+    surface.axisDirection = face->axisDirection;
+    surface.radius = face->radius;
+    surface.slope = face->radiusSlope;
+    surface.axialStart = face->axialStart;
+    surface.axialEnd = face->axialEnd;
+    surface.holeWall = face->holeWall;
+    for (int end = 0; end < 2; ++end) {
+        const double s = end == 0 ? surface.axialStart : surface.axialEnd;
+        threadFace.ends[end] = {surface.axisOrigin.x + surface.axisDirection.x * s, surface.axisOrigin.y + surface.axisDirection.y * s,
+                                surface.axisOrigin.z + surface.axisDirection.z * s};
+    }
+#ifdef CADNEXT_WITH_OCCT
+    if (const auto* occt = dynamic_cast<const kernel::OcctKernel*>(kernel_.get())) {
+        if (const auto shape = bodyShapes_.find(bodyId); shape != bodyShapes_.end())
+            threadFace.free = occt->faceEndsFree(shape->second, surface.axisOrigin, surface.axisDirection, surface.radius,
+                                                 surface.slope, surface.axialStart, surface.axialEnd, surface.holeWall);
+    }
+#endif
+    ThreadDialog dialog(threadFace, this);
+    if (dialog.exec() != QDialog::Accepted) {
+        return;
+    }
+    ThreadParameters parameters = dialog.parameters();
+    parameters.targetBodyId = bodyId;
+    parameters.faceId = faceId;
+    parameters.surface = surface;
+    parameters.internal = surface.holeWall;
+
+    kernel::EvaluatedGeometry geometry;
+    QString failureReason;
+    if (!buildThreadResult(parameters, geometry, &failureReason, true)) {
+        return; // the progress window says why
+    }
+    Object* target = document_.mutableObjectById(bodyId);
+    if (!target || target->type != ObjectType::Body) {
+        statusBar()->showMessage(tr("Целевое тело отсутствует."), 5000);
+        return;
+    }
+    Feature feature;
+    feature.id = "feature-" + std::to_string(nextFeatureNumber_++);
+    feature.name = "Резьба " + threadMarking(parameters);
+    feature.type = FeatureType::Thread;
+    feature.targetObjectId = bodyId;
+    feature.modifiedBodyId = bodyId;
+    feature.thread = parameters;
+    ++threadCount_;
+    bodyShapes_[target->id] = geometry.shape;
+    bodyMeshes_[target->id] = geometry.previewMesh;
+    viewer_->scene().addOrUpdateObjectMesh(*target, geometry.previewMesh);
+    refreshBodyFaces(target->id);
+    refreshBodyEdges(target->id);
+    refreshAttachmentPointMarkers(target->id);
+    commandStack_.push(std::make_unique<AddFeatureCommand>(feature), document_);
+    selectBody(target->id);
+    markDirty();
+    updateUndoRedoActions();
+    statusBar()->showMessage(tr("Резьба %1 построена.").arg(QString::fromStdString(threadMarking(parameters))), 5000);
+}
+
+bool MainWindow::buildThreadResult(const ThreadParameters& parameters, kernel::EvaluatedGeometry& outGeometry,
+                                   QString* failureReason, bool showOutcome) {
+    const auto fail = [&](const QString& reason) {
+        if (failureReason) *failureReason = reason;
+        return false;
+    };
+    if (!kOcctBackendAvailable) return fail(tr("Резьба требует ядра OCCT."));
+    if (!kernel_ || !threadParametersValid(parameters)) return fail(tr("Параметры резьбы некорректны."));
+    const auto shapeIt = bodyShapes_.find(parameters.targetBodyId);
+    if (shapeIt == bodyShapes_.end() || shapeIt->second.isNull()) return fail(tr("У целевого тела нет формы OCCT."));
+    const auto bytes = kernel_->exportBRep(shapeIt->second);
+    if (!bytes.isOk()) return fail(QString::fromStdString(bytes.error().message));
+
+    const std::string key = threadCacheKey(bytes.value(), parameters);
+    if (const auto hit = threadResults_.find(key); hit != threadResults_.end()) {
+        if (const auto shape = kernel_->importBRep(hit->second.brep); shape.isOk()) {
+            outGeometry = {};
+            outGeometry.objectId = parameters.targetBodyId;
+            outGeometry.shape = shape.value();
+            outGeometry.previewMesh = hit->second.mesh;
+            outGeometry.isValid = true;
+            return true;
+        }
+    }
+
+    // Cut on a kernel of the worker's own (the body passed as BRep), the UI thread kept free.
+    struct Outcome {
+        std::vector<std::uint8_t> brep;
+        kernel::TriangleMesh mesh;
+        kernel::ThreadCutReport report;
+        QString error;
+    };
+    const auto outcome = std::make_shared<Outcome>();
+    const QString marking = QString::fromStdString(threadMarking(parameters));
+    auto* dialog = new ImportProgressDialog(tr("Резьба %1").arg(marking), this);
+    const ImportProgress* progress = &dialog->progress();
+    QEventLoop wait;
+    dialog->run(
+        [outcome, progress, parameters, brep = bytes.value()] {
+            progress->report(0, 0, QCoreApplication::translate("MainWindow", "Витки: канавка, вырез, проверка по профилю"));
+            const std::unique_ptr<kernel::Kernel> own = kernel::makeKernel(kernel::KernelBackend::Occt);
+            const auto body = own->importBRep(brep);
+            if (!body.isOk()) {
+                outcome->error = QString::fromStdString(body.error().message);
+                return;
+            }
+            kernel::GeometryEvaluator evaluator(*own);
+            const auto evaluated = evaluator.evaluateThread(body.value(), parameters, &outcome->report);
+            if (!evaluated.isOk() || !evaluated.value().isValid) {
+                outcome->error = QString::fromStdString(evaluated.isOk() ? evaluated.value().message : evaluated.error().message);
+                return;
+            }
+            const auto out = own->exportBRep(evaluated.value().shape);
+            if (!out.isOk()) {
+                outcome->error = QString::fromStdString(out.error().message);
+                return;
+            }
+            outcome->mesh = evaluated.value().previewMesh;
+            outcome->brep = out.value();
+        },
+        [&wait] { wait.quit(); });
+    dialog->show();
+    wait.exec();
+
+    const bool stopped = dialog->progress().cancelled();
+    if (stopped || !outcome->error.isEmpty()) {
+        const QString reason = stopped ? tr("Остановлено.") : outcome->error;
+        dialog->finish(tr("Резьба %1 не построена").arg(marking), {reason}, true);
+        return fail(reason);
+    }
+    const auto shape = kernel_->importBRep(outcome->brep);
+    if (!shape.isOk()) {
+        dialog->finish(tr("Резьба %1 не построена").arg(marking), {QString::fromStdString(shape.error().message)}, true);
+        return fail(QString::fromStdString(shape.error().message));
+    }
+    threadResults_[key] = {outcome->brep, outcome->mesh};
+    outGeometry = {};
+    outGeometry.objectId = parameters.targetBodyId;
+    outGeometry.shape = shape.value();
+    outGeometry.previewMesh = outcome->mesh;
+    outGeometry.isValid = true;
+    if (!showOutcome) {
+        dialog->close();
+        return true;
+    }
+    const kernel::ThreadCutReport& report = outcome->report;
+    QStringList lines;
+    lines << tr("%1, %2, длина %3 мм")
+                 .arg(parameters.internal ? tr("Внутренняя") : tr("Наружная"),
+                      parameters.rightHanded ? tr("правая") : tr("левая"), threadMm(parameters.lengthMm));
+    lines << tr("Витков: %1").arg(report.turns);
+    lines << tr("Витки от профиля стандарта: не дальше %1 нм").arg(threadMm(report.deviation * 1e9, 1));
+    if (report.trimmed > 0.0) {
+        lines << (parameters.internal ? tr("Зона резьбы расточена на %1 мм") : tr("Зона резьбы проточена на %1 мм"))
+                     .arg(threadMm(report.trimmed * 1000.0, 4));
+    }
+    lines << tr("Готово за %1 с").arg(threadMm(dialog->elapsedSeconds(), 1));
+    dialog->finish(tr("Резьба %1 построена").arg(marking), lines);
+    return true;
+}
+
+bool MainWindow::replayThreadFeature(const Feature& feature, QString* failureReason) {
+    if (feature.suppressed) {
+        return true;
+    }
+    kernel::EvaluatedGeometry geometry;
+    if (!buildThreadResult(feature.thread, geometry, failureReason, false)) {
+        return false;
+    }
+    Object* target = document_.mutableObjectById(feature.thread.targetBodyId);
+    if (!target || target->type != ObjectType::Body) {
+        if (failureReason) {
+            *failureReason = tr("Резьба ссылается на отсутствующее тело.");
         }
         return false;
     }
@@ -4485,6 +4944,440 @@ void MainWindow::openDocument() {
     updateUndoRedoActions();
 }
 
+void MainWindow::importCadExchange() {
+    auto* occt = dynamic_cast<kernel::OcctKernel*>(kernel_.get());
+    if (!occt || !viewer_ || !evaluator_) {
+        QMessageBox::warning(this, tr("Импорт CAD"), tr("Для импорта требуется сборка с OCCT."));
+        return;
+    }
+    const QString path = QFileDialog::getOpenFileName(
+        this, tr("Импортировать CAD-модель"), QString(),
+        tr("CAD-модели (*.step *.stp *.iges *.igs *.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin *.sat *.SAT *.FCStd *.fcstd *.sldprt *.SLDPRT *.sldasm *.SLDASM *.dwg *.DWG *.dxf *.DXF *.m3d *.a3d);;"
+           "STEP и IGES (*.step *.stp *.iges *.igs);;Parasolid (*.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin);;ACIS (*.sat *.SAT);;FreeCAD (*.FCStd *.fcstd);;"
+           "SOLIDWORKS (*.sldprt *.SLDPRT *.sldasm *.SLDASM);;AutoCAD (*.dwg *.DWG *.dxf *.DXF);;КОМПАС-3D (*.m3d *.a3d)"));
+    if (path.isEmpty()) return;
+    const QString suffix = QFileInfo(path).suffix().toLower();
+    // A DXF holding solids comes in as bodies (on the import thread); one with plane geometry only, as a sketch.
+    if (suffix == QStringLiteral("dxf") && dxfHasAcisBodies(path)) {
+        importCadInBackground(path);
+        return;
+    }
+    // A DWG: its model's plane geometry as a sketch here, its solids as bodies on the import thread; what
+    // neither takes, said by type.
+    if (suffix == QStringLiteral("dwg")) {
+        DwgModel model;
+        QString error;
+        if (!readDwgModel(path, model, error)) {
+            QMessageBox::warning(this, tr("Импорт AutoCAD DWG"), error);
+            return;
+        }
+        std::vector<SketchEntity> entities;
+        std::map<QString, int> left;
+        dwgSketchEntities(model, entities, left);
+        QStringList report;
+        const bool imported = !entities.empty();
+        std::string sketchId;
+        if (imported) {
+            if (activeSketchId_) exitSketchMode();
+            Sketch sketch;
+            sketch.id = "sketch-" + std::to_string(nextSketchNumber_++);
+            sketch.name = "DWG " + QFileInfo(path).completeBaseName().toStdString();
+            sketch.plane = SketchPlane::XY;
+            sketch.reference = canonicalSketchReference(SketchPlane::XY);
+            sketch.entities = std::move(entities);
+            for (std::size_t i = 0; i < sketch.entities.size(); ++i) {
+                SketchEntity& entity = sketch.entities[i];
+                entity.id = sketch.id + "-entity-" + std::to_string(i + 1);
+                entity.name = sketchEntityTypeText(entity.type).toStdString() + " " + std::to_string(i + 1);
+            }
+            document_.addSketch(sketch);
+            viewer_->scene().addOrUpdateSketchNode(sketch);
+            {
+                const QSignalBlocker blocker(projectTree_);
+                projectTree_->addSketchItem(QString::fromStdString(sketch.id), QString::fromStdString(sketch.name));
+                for (const SketchEntity& entity : sketch.entities)
+                    projectTree_->addEntityItem(QString::fromStdString(sketch.id), QString::fromStdString(entity.id),
+                                                QString::fromStdString(entity.name), sketchEntityTypeText(entity.type));
+            }
+            markDirty();
+            selectSketch(sketch.id);
+            sketchId = sketch.id;
+            report << tr("Эскиз «%1»: %2 объектов (отрезки, окружности, дуги).")
+                          .arg(QString::fromStdString(sketch.name))
+                          .arg(sketch.entities.size());
+        }
+        if (!model.bodies.empty()) report << tr("Тел ACIS: %1 — строятся в фоне.").arg(model.bodies.size());
+        QStringList skipped;
+        for (const auto& [reason, count] : left) skipped << tr("%1: %2").arg(reason).arg(count);
+        for (const auto& [type, count] : model.otherEntities) skipped << tr("%1: %2").arg(type).arg(count);
+        if (model.paperSpaceEntities > 0) skipped << tr("объекты листов (пространство листа): %1").arg(model.paperSpaceEntities);
+        if (!skipped.isEmpty()) report << tr("Не импортировано — %1.").arg(skipped.join(QStringLiteral("; ")));
+        report << model.notes;
+        const QString title = tr("Импорт AutoCAD DWG %1").arg(model.version);
+        if (!imported && model.bodies.empty()) {
+            QMessageBox::warning(this, title, tr("В модели нет ни плоской геометрии, которую берёт эскиз, ни тел.\n") +
+                                                  report.join(QStringLiteral("\n")));
+            return;
+        }
+        QMessageBox::information(this, title, report.join(QStringLiteral("\n")));
+        if (!model.bodies.empty()) importCadInBackground(path);
+        else if (imported) enterSketchMode(sketchId);
+        return;
+    }
+    if (suffix == QStringLiteral("dxf")) {
+        DxfSketchData dxf;
+        QString error;
+        if (!readDxfSketch(path, dxf, error)) {
+            QMessageBox::warning(this, tr("Импорт DXF"), error);
+            return;
+        }
+        if (activeSketchId_) exitSketchMode();
+        Sketch sketch;
+        sketch.id = "sketch-" + std::to_string(nextSketchNumber_++);
+        sketch.name = "DXF " + QFileInfo(path).completeBaseName().toStdString();
+        sketch.plane = SketchPlane::XY;
+        sketch.reference = canonicalSketchReference(SketchPlane::XY);
+        sketch.entities = std::move(dxf.entities);
+        for (std::size_t i = 0; i < sketch.entities.size(); ++i) {
+            SketchEntity& entity = sketch.entities[i];
+            entity.id = sketch.id + "-entity-" + std::to_string(i + 1);
+            entity.name = sketchEntityTypeText(entity.type).toStdString() + " " +
+                          std::to_string(i + 1);
+        }
+        document_.addSketch(sketch);
+        viewer_->scene().addOrUpdateSketchNode(sketch);
+        {
+            const QSignalBlocker blocker(projectTree_);
+            projectTree_->addSketchItem(QString::fromStdString(sketch.id),
+                                        QString::fromStdString(sketch.name));
+            for (const SketchEntity& entity : sketch.entities) {
+                projectTree_->addEntityItem(QString::fromStdString(sketch.id),
+                                            QString::fromStdString(entity.id),
+                                            QString::fromStdString(entity.name),
+                                            sketchEntityTypeText(entity.type));
+            }
+        }
+        markDirty();
+        selectSketch(sketch.id);
+        enterSketchMode(sketch.id);
+        if (dxf.assumedMillimeters) {
+            statusBar()->showMessage(tr("DXF не задаёт единицы измерения; координаты приняты в миллиметрах."),
+                                     8000);
+        }
+        return;
+    }
+    // The heavy formats are read, built, meshed and analysed on a thread of their own.
+    if (isBackgroundCadFormat(suffix)) {
+        importCadInBackground(path);
+        return;
+    }
+    QMessageBox::warning(this, tr("Импорт CAD"), nativeCadImportDiagnostic(path));
+}
+
+void MainWindow::importCadInBackground(const QString& path) {
+    const QFileInfo source(path);
+    const QString suffix = source.suffix().toLower();
+    QString configuration;
+    if (suffix == QStringLiteral("sldprt")) {
+        std::vector<SolidWorksConfiguration> configurations;
+        QString error;
+        if (!readSolidWorksPartConfigurations(path, configurations, error)) {
+            QMessageBox::warning(this, tr("Импорт SOLIDWORKS"), error);
+            return;
+        }
+        if (configurations.size() > 1) {
+            QStringList names;
+            for (const auto& item : configurations)
+                names << (item.name.isEmpty() ? tr("Конфигурация %1").arg(item.id) : item.name);
+            bool accepted = false;
+            const QString choice = QInputDialog::getItem(this, tr("Импорт SOLIDWORKS"),
+                tr("Конфигурация детали %1:").arg(source.fileName()), names, 0, false, &accepted);
+            if (!accepted) return;
+            const auto& selected = configurations[std::size_t(names.indexOf(choice))];
+            configuration = QStringLiteral("Config-") + selected.id;
+        }
+    }
+    // An assembly may go to the Assembly workbench instead: asked before anything heavy is read.
+    if (suffix == QStringLiteral("sldasm") || cadFileLooksLikeAssembly(path)) {
+        QMessageBox question(this);
+        question.setWindowTitle(tr("Импорт сборки"));
+        question.setText(tr("Файл %1 — сборка.").arg(source.fileName()));
+        question.setInformativeText(
+            tr("Открыть её как сборку CADNext (детали сохранятся отдельными файлами, повторяющиеся "
+               "детали — одним файлом) или положить все тела в текущий документ?"));
+        QPushButton* asAssembly = question.addButton(tr("Как сборку"), QMessageBox::AcceptRole);
+        question.addButton(tr("Тела в документ"), QMessageBox::ActionRole);
+        question.addButton(QMessageBox::Cancel);
+        question.exec();
+        if (question.clickedButton() == asAssembly) {
+            openAssemblyWindow(false);
+            assemblyWindow_->importStepAssemblyFrom(path);
+            return;
+        }
+        if (question.clickedButton() == question.button(QMessageBox::Cancel)) return;
+    }
+    auto* dialog = new ImportProgressDialog(tr("Импорт %1").arg(source.fileName()), this);
+    const ImportProgress* progress = &dialog->progress();
+    const auto result = std::make_shared<BodyImportResult>();
+    dialog->run([result, progress, path, configuration] { *result = importBodiesFromFile(path, progress, configuration); },
+                [this, dialog, result, source] {
+                    if (!result->error.isEmpty()) {
+                        const bool stopped = dialog->progress().cancelled();
+                        dialog->finish(stopped ? tr("Импорт остановлен") : tr("Импорт не удался"),
+                                       stopped ? QStringList{} : QStringList{result->error}, true);
+                        return;
+                    }
+                    // Only the BRep read back into this document's kernel; mesh, faces and edges as made.
+                    QString lastId;
+                    for (ImportedBody& imported : result->bodies) {
+                        const auto shape = kernel_->importBRep(imported.brep);
+                        if (!shape.isOk()) {
+                            dialog->finish(tr("Импорт не удался"), {QString::fromStdString(shape.error().message)}, true);
+                            return;
+                        }
+                        Object body;
+                        body.id = "object-" + std::to_string(nextObjectNumber_++);
+                        body.name = imported.name.toStdString();
+                        body.type = ObjectType::Body;
+                        body.primitive.kind = PrimitiveKind::None;
+                        body.importedBRep = std::move(imported.brep);
+                        document_.addObject(body);
+                        bodyShapes_[body.id] = shape.value();
+                        bodyMeshes_[body.id] = imported.mesh;
+                        viewer_->scene().addOrUpdateObjectMesh(body, imported.mesh);
+                        adoptBodyTopology(body.id, std::move(imported.faces), std::move(imported.edges));
+                        {
+                            const QSignalBlocker blocker(projectTree_);
+                            projectTree_->addBodyItem(QString::fromStdString(body.id), imported.name,
+                                                      tr("Импортированное тело"));
+                        }
+                        lastId = QString::fromStdString(body.id);
+                    }
+                    if (!lastId.isEmpty()) selectBody(lastId.toStdString());
+                    markDirty();
+                    QStringList lines;
+                    lines << tr("Тел: %1").arg(result->bodies.size());
+                    lines << summarizeBuildReport(result->geometry);
+                    lines << result->notes;
+                    dialog->finish(tr("Готово за %1 с").arg(dialog->elapsedSeconds(), 0, 'f', 0), lines);
+                    statusBar()->showMessage(tr("Импортировано %1 тел из %2")
+                                                 .arg(result->bodies.size())
+                                                 .arg(source.fileName()),
+                                             5000);
+                });
+}
+
+void MainWindow::adoptBodyTopology(const std::string& bodyId, std::vector<kernel::FaceReference> faces,
+                                   std::vector<kernel::EdgeReference> edges) {
+    // As refreshBodyFaces/refreshBodyEdges leave them, from faces and edges worked out elsewhere.
+    for (kernel::FaceReference& face : faces) face.bodyId = bodyId;
+    viewer_->scene().setBodyFaces(bodyId, faces);
+    bodyFaces_[bodyId] = std::move(faces);
+    const Result<Object> body = document_.objectById(bodyId);
+    for (kernel::EdgeReference& edge : edges) {
+        edge.bodyId = bodyId;
+        if (body.isOk()) edge = transformedEdgeReference(edge, body.value().transform);
+    }
+    viewer_->scene().setBodyEdges(bodyId, edges);
+    bodyEdges_[bodyId] = std::move(edges);
+    updateFaceActionsEnabled();
+    updateEdgeActionsEnabled();
+}
+
+void MainWindow::exportCadExchange() {
+    if (selectionKind_ == SelectionKind::Sketch) {
+        const Result<Sketch> selected = document_.sketchById(selectedId_);
+        if (!selected.isOk()) return;
+        const Sketch& sketch = selected.value();
+        if (sketch.plane != SketchPlane::XY ||
+            (!sketch.reference.sourceId.empty() &&
+             sketch.reference.sourceId != canonicalWorkPlaneId(SketchPlane::XY))) {
+            QMessageBox::warning(this, tr("Экспорт DXF"),
+                                 tr("Экспорт DXF сейчас поддерживает эскизы на плоскости XY."));
+            return;
+        }
+        const QString asciiDxfFilter = tr("AutoCAD DXF (*.dxf)");
+        const QString binaryDxfFilter = tr("Бинарный AutoCAD DXF (*.dxf)");
+        QString selectedDxfFilter;
+        QString path = QFileDialog::getSaveFileName(
+            this, tr("Экспортировать эскиз DXF"),
+            QString::fromStdString(sketch.name) + QStringLiteral(".dxf"),
+            asciiDxfFilter + QStringLiteral(";;") + binaryDxfFilter,
+            &selectedDxfFilter);
+        if (path.isEmpty()) return;
+        if (QFileInfo(path).suffix().compare(QLatin1String("dxf"),
+                                             Qt::CaseInsensitive) != 0) {
+            path += QStringLiteral(".dxf");
+        }
+        QString error;
+        if (!writeDxfSketch(path, sketch, error,
+                            selectedDxfFilter == binaryDxfFilter)) {
+            QMessageBox::warning(this, tr("Экспорт DXF"), error);
+            return;
+        }
+        statusBar()->showMessage(tr("Эскиз экспортирован в %1")
+                                     .arg(QFileInfo(path).fileName()), 5000);
+        return;
+    }
+    auto* occt = dynamic_cast<kernel::OcctKernel*>(kernel_.get());
+    if (!occt || !viewer_) {
+        QMessageBox::warning(this, tr("Экспорт CAD"), tr("Для экспорта требуется сборка с OCCT."));
+        return;
+    }
+    std::vector<kernel::ExchangeBody> bodies;
+    std::vector<QString> bodyNames;
+    const auto addBody = [this, &bodies, &bodyNames](const Object& object) {
+        const auto it = bodyShapes_.find(object.id);
+        if (object.type == ObjectType::Body && it != bodyShapes_.end()) {
+            bodies.push_back({it->second, object.transform});
+            bodyNames.push_back(QString::fromStdString(object.name));
+        }
+    };
+    if (selectionKind_ == SelectionKind::Body) {
+        const auto selected = document_.objectById(selectedId_);
+        if (selected.isOk()) addBody(selected.value());
+    } else {
+        for (const Object& object : document_.objects()) addBody(object);
+    }
+    if (bodies.empty()) {
+        QMessageBox::information(this, tr("Экспорт CAD"),
+                                 tr("Выберите тело с точной геометрией."));
+        return;
+    }
+    QString selectedExchangeFilter;
+    QString exchangeFilters = tr("STEP (*.step);;IGES (*.iges);;FreeCAD (*.FCStd);;Parasolid, текст (*.x_t);;Parasolid, двоичный (*.x_b);;ACIS SAT, AutoCAD (*.sat);;AutoCAD DXF, тела 3DSOLID (*.dxf)");
+    if (dwgSolidWriterAvailable()) exchangeFilters += tr(";;AutoCAD DWG 2000, тела 3DSOLID (*.dwg)");
+    QString path = QFileDialog::getSaveFileName(
+        this, tr("Экспортировать CAD-модель"), QStringLiteral("model.step"),
+        exchangeFilters,
+        &selectedExchangeFilter);
+    if (path.isEmpty()) return;
+    QString suffix = QFileInfo(path).suffix().toLower();
+    if (suffix != QStringLiteral("step") && suffix != QStringLiteral("stp") &&
+        suffix != QStringLiteral("iges") && suffix != QStringLiteral("igs") &&
+        suffix != QStringLiteral("fcstd") && suffix != QStringLiteral("x_t") &&
+        suffix != QStringLiteral("x_b") && suffix != QStringLiteral("sat") &&
+        suffix != QStringLiteral("dxf") && suffix != QStringLiteral("dwg")) {
+        const int start = selectedExchangeFilter.indexOf(QStringLiteral("(*."));
+        const int end = selectedExchangeFilter.indexOf(QLatin1Char(')'), start);
+        suffix = start >= 0 && end > start ? selectedExchangeFilter.mid(start + 3, end - start - 3).toLower()
+                                          : QStringLiteral("step");
+        path += QLatin1Char('.') + suffix;
+    }
+    if (suffix == QStringLiteral("sat") || suffix == QStringLiteral("dxf") || suffix == QStringLiteral("dwg")) {
+        std::vector<kernel::NamedExchangeBody> named;
+        for (std::size_t i = 0; i < bodies.size(); ++i)
+            named.push_back({bodyNames[i].toStdString(), bodies[i]});
+        const auto written = suffix == QStringLiteral("sat") ? writeAcisSat(*occt, named, path)
+                           : suffix == QStringLiteral("dwg") ? writeDwgSolids(*occt, named, path)
+                                                              : writeDxfSolids(*occt, named, path);
+        if (!written.isOk()) {
+            QMessageBox::warning(this, tr("Экспорт AutoCAD"), QString::fromStdString(written.error().message));
+            return;
+        }
+        statusBar()->showMessage(tr("Экспортировано %1 тел: %2")
+                                     .arg(written.value().bodies).arg(QFileInfo(path).fileName()), 8000);
+        return;
+    }
+    if (suffix == QStringLiteral("x_t") || suffix == QStringLiteral("x_b")) {
+        // Each body where the document places it, as one part; several bodies go out as an
+        // assembly of parts at the identity, which every receiving system opens in place.
+        kernel::ProductStructure product;
+        kernel::ProductAssembly root;
+        root.name = QFileInfo(path).completeBaseName().toStdString();
+        for (std::size_t i = 0; i < bodies.size(); ++i) {
+            const cadnext::Transform& p = bodies[i].placement;
+            if (std::fabs(p.scale.x - 1.0) > 1e-12 || std::fabs(p.scale.y - 1.0) > 1e-12 ||
+                std::fabs(p.scale.z - 1.0) > 1e-12) {
+                QMessageBox::warning(this, tr("Экспорт Parasolid"),
+                                     tr("Тело «%1» масштабировано; Parasolid XT передаёт тела без масштаба. "
+                                        "Примените масштаб к геометрии или экспортируйте в STEP.").arg(bodyNames[i]));
+                return;
+            }
+            // The document's order: rotate about x, then y, then z, then move.
+            constexpr double radians = 3.14159265358979323846 / 180.0;
+            const double cx = std::cos(p.rotationEuler.x * radians), sx = std::sin(p.rotationEuler.x * radians);
+            const double cy = std::cos(p.rotationEuler.y * radians), sy = std::sin(p.rotationEuler.y * radians);
+            const double cz = std::cos(p.rotationEuler.z * radians), sz = std::sin(p.rotationEuler.z * radians);
+            const std::array<double, 9> r{cz * cy, cz * sy * sx - sz * cx, cz * sy * cx + sz * sx,
+                                          sz * cy, sz * sy * sx + cz * cx, sz * sy * cx - cz * sx,
+                                          -sy, cy * sx, cy * cx};
+            const std::array<double, 16> matrix{r[0], r[3], r[6], 0.0, r[1], r[4], r[7], 0.0,
+                                                r[2], r[5], r[8], 0.0, p.position.x, p.position.y, p.position.z, 1.0};
+            const auto placed = occt->transformShape(bodies[i].shape, matrix);
+            if (!placed.isOk()) {
+                QMessageBox::warning(this, tr("Экспорт Parasolid"), QString::fromStdString(placed.error().message));
+                return;
+            }
+            kernel::ProductPart part;
+            part.name = bodyNames[i].toStdString();
+            part.shape = placed.value();
+            product.parts.push_back(part);
+            kernel::ProductInstance instance;
+            instance.name = part.name;
+            instance.definition = int(i);
+            root.instances.push_back(instance);
+        }
+        product.assemblies.push_back(root);
+        const auto written = writeParasolidXtProduct(*occt, product, path.toStdString(),
+                                                     suffix == QStringLiteral("x_b") ? ParasolidXtEncoding::Binary
+                                                                                     : ParasolidXtEncoding::Text);
+        if (!written.isOk()) {
+            QMessageBox::warning(this, tr("Экспорт Parasolid"), QString::fromStdString(written.error().message));
+            return;
+        }
+        QStringList notes;
+        for (const std::string& warning : written.value().warnings) notes << QString::fromStdString(warning);
+        statusBar()->showMessage(tr("Экспортировано %1 тел в Parasolid: %2")
+                                     .arg(bodies.size()).arg(QFileInfo(path).fileName()), 8000);
+        if (!notes.isEmpty()) QMessageBox::information(this, tr("Экспорт Parasolid"), notes.join(QStringLiteral("\n")));
+        return;
+    }
+    if (QFileInfo(path).suffix().compare(QLatin1String("fcstd"), Qt::CaseInsensitive) == 0) {
+        std::vector<FreeCadShape> freeCadShapes;
+        freeCadShapes.reserve(bodies.size());
+        for (std::size_t i = 0; i < bodies.size(); ++i) {
+            const auto result = occt->exportFreeCadBRep(bodies[i]);
+            if (!result.isOk()) {
+                QMessageBox::warning(this, tr("Экспорт FreeCAD"),
+                                     QString::fromStdString(result.error().message));
+                return;
+            }
+            const auto& bytes = result.value();
+            freeCadShapes.push_back({bodyNames[i],
+                                     QByteArray(reinterpret_cast<const char*>(bytes.data()),
+                                                qsizetype(bytes.size())), false});
+        }
+        QString error;
+        if (!writeFreeCadShapes(path, freeCadShapes, error)) {
+            QMessageBox::warning(this, tr("Экспорт FreeCAD"), error);
+            return;
+        }
+        statusBar()->showMessage(tr("Экспортировано %1 тел: %2")
+                                     .arg(bodies.size()).arg(QFileInfo(path).fileName()), 5000);
+        return;
+    }
+    cadnext::Result<bool> saved = cadnext::Result<bool>::fail(
+        {cadnext::ErrorCode::UnsupportedOperation, "Unknown CAD format"});
+    const QString outputSuffix = QFileInfo(path).suffix().toLower();
+    if (outputSuffix == QStringLiteral("step") || outputSuffix == QStringLiteral("stp")) {
+        std::vector<kernel::NamedExchangeBody> named;
+        named.reserve(bodies.size());
+        for (std::size_t i = 0; i < bodies.size(); ++i)
+            named.push_back({bodyNames[i].toUtf8().toStdString(), bodies[i]});
+        saved = occt->exportStepAssembly(named, path.toStdString());
+    } else {
+        saved = occt->exportExchangeFile(bodies, path.toStdString());
+    }
+    if (!saved.isOk()) {
+        QMessageBox::warning(this, tr("Экспорт CAD"),
+                             QString::fromStdString(saved.error().message));
+        return;
+    }
+    statusBar()->showMessage(tr("Экспортировано %1 тел: %2")
+                                 .arg(bodies.size()).arg(QFileInfo(path).fileName()), 5000);
+}
+
 void MainWindow::showAerodynamics() {
     std::vector<WorkbenchExportBody> bodies;
     for (const auto& object : document_.objects()) {
@@ -4682,10 +5575,8 @@ void MainWindow::openPartForEditing(const bridge::UAVPartReadResult& result,
     const std::string partName = part.manifest.displayName.empty()
         ? part.manifest.name : part.manifest.displayName;
     object.name = partName.empty() ? tr("Импортированная деталь").toStdString() : partName;
-    object.primitive.kind = PrimitiveKind::Box;
-    object.primitive.width = std::max(part.mass.boundingWidth, 0.1);
-    object.primitive.height = std::max(part.mass.boundingHeight, 0.1);
-    object.primitive.depth = std::max(part.mass.boundingDepth, 0.1);
+    object.primitive.kind = PrimitiveKind::None;
+    object.importedBRep = part.exactGeometry.payload;
 
     document_.addObject(object);
 
@@ -4797,8 +5688,11 @@ void MainWindow::rebuildUiFromDocument() {
         // re-derived from their feature recipe (sketch profile + extrude
         // parameters).
         const Feature* extrudeFeature = extrudeFeatureForBody(object.id);
+        const Feature* revolveFeature = revolveFeatureForBody(object.id);
         if (extrudeFeature) {
             buildExtrudedBodyVisual(object, *extrudeFeature);
+        } else if (revolveFeature) {
+            buildRevolvedBodyVisual(object, *revolveFeature);
         } else {
             buildObjectVisual(object);
         }
@@ -4811,7 +5705,8 @@ void MainWindow::rebuildUiFromDocument() {
         } else {
             projectTree_->addBodyItem(QString::fromStdString(object.id),
                                       QString::fromStdString(object.name),
-                                      extrudeFeature ? tr("Выдавливание") : treeTypeText(object));
+                                      extrudeFeature ? tr("Выдавливание") :
+                                      revolveFeature ? tr("Вращение") : treeTypeText(object));
         }
     }
     for (const Feature& feature : document_.features()) {
@@ -4822,6 +5717,15 @@ void MainWindow::rebuildUiFromDocument() {
                          feature.id.c_str(), failureReason.toUtf8().constData());
                 statusBar()->showMessage(
                     tr("Не удалось воспроизвести вырез %1 (%2)")
+                        .arg(QString::fromStdString(feature.name), failureReason),
+                    8000);
+            }
+        } else if (feature.type == FeatureType::Thread) {
+            if (!replayThreadFeature(feature, &failureReason)) {
+                qWarning("CADNext: thread feature %s replay failed: %s",
+                         feature.id.c_str(), failureReason.toUtf8().constData());
+                statusBar()->showMessage(
+                    tr("Не удалось воспроизвести резьбу %1 (%2)")
                         .arg(QString::fromStdString(feature.name), failureReason),
                     8000);
             }
@@ -4884,10 +5788,12 @@ void MainWindow::deriveCountersFromDocument() {
     circleCount_ = 0;
     nextFeatureNumber_ = 1;
     extrudeCount_ = 0;
+    revolveCount_ = 0;
     cutCount_ = 0;
     facePlaneCount_ = 0;
     chamferCount_ = 0;
     filletCount_ = 0;
+    threadCount_ = 0;
 
     for (const WorkPlane& plane : document_.workPlanes()) {
         // facePlaneCount_ is the highest used "faceplane-N" number, so new
@@ -4902,12 +5808,16 @@ void MainWindow::deriveCountersFromDocument() {
         nextFeatureNumber_ = maxNumberSuffix(feature.id, "feature-", nextFeatureNumber_);
         if (feature.type == FeatureType::Extrude) {
             ++extrudeCount_;
+        } else if (feature.type == FeatureType::Revolve) {
+            ++revolveCount_;
         } else if (feature.type == FeatureType::ExtrudeCut) {
             ++cutCount_;
         } else if (feature.type == FeatureType::Chamfer) {
             ++chamferCount_;
         } else if (feature.type == FeatureType::Fillet) {
             ++filletCount_;
+        } else if (feature.type == FeatureType::Thread) {
+            ++threadCount_;
         }
     }
 
@@ -4935,6 +5845,7 @@ void MainWindow::deriveCountersFromDocument() {
             case SketchEntityType::Line: ++lineCount_; break;
             case SketchEntityType::Rectangle: ++rectangleCount_; break;
             case SketchEntityType::Circle: ++circleCount_; break;
+            case SketchEntityType::Arc: break;
             }
         }
     }
@@ -5006,14 +5917,22 @@ void MainWindow::createMenus() {
     fileMenu->addAction(tr("Открыть CAD-документ…"), QKeySequence::Open, this,
                         [this]() { openDocument(); });
     fileMenu->addAction(tr("Открыть деталь…"), this, [this]() { openUAVPart(); });
+    fileMenu->addAction(tr("Импорт CAD-модели…"), this,
+                        [this]() { importCadExchange(); });
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Создать сборку"), this, [this]() { openAssemblyWindow(false); });
     fileMenu->addAction(tr("Открыть сборку…"), this, [this]() { openAssemblyWindow(true); });
+    fileMenu->addAction(tr("Импорт сборки (STEP, Parasolid, SOLIDWORKS)…"), this, [this]() {
+        openAssemblyWindow(false);
+        assemblyWindow_->importStepAssembly();
+    });
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Сохранить CAD-документ"), QKeySequence::Save, this,
                         [this]() { saveDocument(); });
     fileMenu->addAction(tr("Сохранить CAD-документ как…"), QKeySequence::SaveAs, this,
                         [this]() { saveDocumentAs(); });
+    fileMenu->addAction(tr("Экспорт STEP/IGES…"), this,
+                        [this]() { exportCadExchange(); });
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Экспорт в Мастерскую (.uavframe)…"), this, [this]() { exportToWorkbench(); });
 
@@ -5025,9 +5944,11 @@ void MainWindow::createMenus() {
 
     QMenu* partMenu = menuBar()->addMenu(tr("&Деталь"));
     partMenu->addAction(toolBar_->extrudeAction());
+    partMenu->addAction(toolBar_->revolveAction());
     partMenu->addAction(toolBar_->cutExtrudeAction());
     partMenu->addAction(toolBar_->chamferAction());
     partMenu->addAction(toolBar_->filletAction());
+    partMenu->addAction(toolBar_->threadAction());
     partMenu->addSeparator();
     partMenu->addAction(toolBar_->createSketchOnFaceAction());
     partMenu->addAction(toolBar_->workPlaneFromFaceAction());

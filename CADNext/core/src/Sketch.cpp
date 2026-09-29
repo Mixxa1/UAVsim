@@ -57,6 +57,7 @@ const char* sketchEntityTypeName(SketchEntityType type) {
     case SketchEntityType::Line: return "Line";
     case SketchEntityType::Rectangle: return "Rectangle";
     case SketchEntityType::Circle: return "Circle";
+    case SketchEntityType::Arc: return "Arc";
     }
     return "Line";
 }
@@ -64,7 +65,23 @@ const char* sketchEntityTypeName(SketchEntityType type) {
 SketchEntityType sketchEntityTypeFromName(const std::string& name) {
     if (name == "Rectangle") return SketchEntityType::Rectangle;
     if (name == "Circle") return SketchEntityType::Circle;
+    if (name == "Arc") return SketchEntityType::Arc;
     return SketchEntityType::Line;
+}
+
+SketchPoint2D sketchArcPoint(const SketchArc& arc, double angleDegrees) {
+    constexpr double radiansPerDegree = 3.14159265358979323846 / 180.0;
+    const double angle = angleDegrees * radiansPerDegree;
+    return {arc.center.u + arc.radius * std::cos(angle),
+            arc.center.v + arc.radius * std::sin(angle)};
+}
+
+SketchPoint2D sketchArcStart(const SketchArc& arc) {
+    return sketchArcPoint(arc, arc.startAngleDegrees);
+}
+
+SketchPoint2D sketchArcEnd(const SketchArc& arc) {
+    return sketchArcPoint(arc, arc.startAngleDegrees + arc.sweepDegrees);
 }
 
 SketchEntity* findSketchEntity(Sketch& sketch, const std::string& entityId) {

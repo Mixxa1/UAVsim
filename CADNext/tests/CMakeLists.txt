@@ -856,6 +856,129 @@ target_link_libraries(cadnext_test_fea_benchmark_nafems_le1
 add_test(NAME cadnext_test_fea_benchmark_nafems_le1 COMMAND cadnext_test_fea_benchmark_nafems_le1)
 
 if(CADNEXT_WITH_OCCT)
+    add_executable(cadnext_test_step_product_structure test_step_product_structure.cpp)
+    find_package(OpenCASCADE REQUIRED)
+    target_include_directories(cadnext_test_step_product_structure PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+    target_link_libraries(cadnext_test_step_product_structure PRIVATE cadnext_kernel TKXSBase)
+    add_test(NAME cadnext_test_step_product_structure COMMAND cadnext_test_step_product_structure)
+
+    add_executable(cadnext_test_occt_thread_cut test_occt_thread_cut.cpp)
+    target_include_directories(cadnext_test_occt_thread_cut PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+    target_link_libraries(cadnext_test_occt_thread_cut PRIVATE cadnext_kernel TKernel TKMath TKBRep TKGeomBase TKG3d TKTopAlgo TKPrim TKBO)
+    add_test(NAME cadnext_test_occt_thread_cut COMMAND cadnext_test_occt_thread_cut)
+
+    add_executable(cadnext_test_thread_feature test_thread_feature.cpp)
+    target_include_directories(cadnext_test_thread_feature PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+    target_link_libraries(cadnext_test_thread_feature PRIVATE cadnext_kernel cadnext_core TKernel TKMath TKBRep TKGeomBase TKG3d TKTopAlgo TKPrim TKBO)
+    add_test(NAME cadnext_test_thread_feature COMMAND cadnext_test_thread_feature)
+
+    add_executable(cadnext_test_occt_revolve_exchange test_occt_revolve_exchange.cpp)
+    target_link_libraries(cadnext_test_occt_revolve_exchange PRIVATE cadnext_kernel)
+    add_test(NAME cadnext_test_occt_revolve_exchange
+             COMMAND cadnext_test_occt_revolve_exchange)
+    if(TARGET cadnext_gui)
+        add_executable(cadnext_test_thread_dialog test_thread_dialog.cpp)
+        target_link_libraries(cadnext_test_thread_dialog PRIVATE cadnext_gui cadnext_kernel)
+        add_test(NAME cadnext_test_thread_dialog COMMAND cadnext_test_thread_dialog)
+        # Against a real, independent CAD system. Skipped (not passed) unless
+        # CADNEXT_TEST_FREECADCMD points at FreeCADCmd.
+        add_executable(cadnext_test_freecad_interchange test_freecad_interchange.cpp)
+        target_link_libraries(cadnext_test_freecad_interchange PRIVATE cadnext_gui cadnext_kernel)
+        target_compile_definitions(cadnext_test_freecad_interchange PRIVATE
+            CADNEXT_FREECAD_SCRIPT="${CMAKE_CURRENT_SOURCE_DIR}/freecad/inspect_exchange.py")
+        add_test(NAME cadnext_test_freecad_interchange COMMAND cadnext_test_freecad_interchange)
+        set_tests_properties(cadnext_test_freecad_interchange PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 900)
+
+        add_executable(cadnext_test_assembly_step_exchange test_assembly_step_exchange.cpp)
+        target_link_libraries(cadnext_test_assembly_step_exchange PRIVATE cadnext_gui cadnext_kernel)
+        add_test(NAME cadnext_test_assembly_step_exchange COMMAND cadnext_test_assembly_step_exchange)
+
+        # Standalone Parasolid files (.x_t, .x_b). Samples from public repositories; skipped
+        # (not passed) unless CADNEXT_TEST_XT_DIR points at them.
+        find_package(OpenCASCADE REQUIRED)
+        add_executable(cadnext_test_parasolid_xt_files test_parasolid_xt_files.cpp)
+        target_include_directories(cadnext_test_parasolid_xt_files PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_parasolid_xt_files PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d)
+        add_test(NAME cadnext_test_parasolid_xt_files COMMAND cadnext_test_parasolid_xt_files)
+        set_tests_properties(cadnext_test_parasolid_xt_files PROPERTIES SKIP_RETURN_CODE 77)
+
+        # Parasolid files written by CADNext, read back. The kernel models always run; NIST parts and
+        # the XT samples join when their directories are given.
+        add_executable(cadnext_test_parasolid_xt_writer test_parasolid_xt_writer.cpp)
+        target_include_directories(cadnext_test_parasolid_xt_writer PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_parasolid_xt_writer PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKPrim)
+        add_test(NAME cadnext_test_parasolid_xt_writer COMMAND cadnext_test_parasolid_xt_writer)
+
+        add_executable(cadnext_test_exchange_roundtrip test_exchange_roundtrip.cpp)
+        target_include_directories(cadnext_test_exchange_roundtrip PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_exchange_roundtrip PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKPrim TKBO)
+        add_test(NAME cadnext_test_exchange_roundtrip COMMAND cadnext_test_exchange_roundtrip)
+        set_tests_properties(cadnext_test_exchange_roundtrip PROPERTIES TIMEOUT 600)
+        if(TARGET cadnext_dwg_writer)
+            add_dependencies(cadnext_test_exchange_roundtrip cadnext_dwg_writer)
+            set_tests_properties(cadnext_test_exchange_roundtrip PROPERTIES
+                ENVIRONMENT "CADNEXT_DWG_WRITER=$<TARGET_FILE:cadnext_dwg_writer>")
+        endif()
+
+        # All downloaded samples (SOLIDWORKS, Parasolid, KOMPAS-3D, DWG) through the readers;
+        # skipped unless CADNEXT_SAMPLES_DIR points at them.
+        add_executable(cadnext_test_acis_sat_files test_acis_sat_files.cpp)
+        target_include_directories(cadnext_test_acis_sat_files PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_acis_sat_files PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKShHealing TKBO TKDESTEP TKXSBase TKDE)
+        add_test(NAME cadnext_test_acis_sat_files COMMAND cadnext_test_acis_sat_files)
+        set_tests_properties(cadnext_test_acis_sat_files PROPERTIES TIMEOUT 1800)
+        add_executable(cadnext_test_dwg_r2000_files test_dwg_r2000_files.cpp)
+        target_include_directories(cadnext_test_dwg_r2000_files PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_dwg_r2000_files PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKShHealing TKBO)
+        add_test(NAME cadnext_test_dwg_r2000_files COMMAND cadnext_test_dwg_r2000_files)
+        set_tests_properties(cadnext_test_dwg_r2000_files PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        add_executable(cadnext_test_dwg_planar test_dwg_planar.cpp)
+        target_include_directories(cadnext_test_dwg_planar PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_dwg_planar PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKShHealing TKBO)
+        add_test(NAME cadnext_test_dwg_planar COMMAND cadnext_test_dwg_planar)
+        set_tests_properties(cadnext_test_dwg_planar PROPERTIES TIMEOUT 600)
+        add_executable(cadnext_test_dwg_versions test_dwg_versions.cpp)
+        target_include_directories(cadnext_test_dwg_versions PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_dwg_versions PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKShHealing TKBO)
+        add_test(NAME cadnext_test_dwg_versions COMMAND cadnext_test_dwg_versions)
+        set_tests_properties(cadnext_test_dwg_versions PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        add_executable(cadnext_test_kompas_c3d test_kompas_c3d.cpp)
+        target_include_directories(cadnext_test_kompas_c3d PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_kompas_c3d PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKShHealing TKBO TKDESTEP TKXSBase TKDE
+            TKXCAF TKLCAF TKCAF TKCDF TKVCAF)
+        add_test(NAME cadnext_test_kompas_c3d COMMAND cadnext_test_kompas_c3d)
+        set_tests_properties(cadnext_test_kompas_c3d PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+        add_executable(cadnext_test_cad_samples test_cad_samples.cpp)
+        target_include_directories(cadnext_test_cad_samples PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_cad_samples PRIVATE cadnext_gui cadnext_kernel
+            TKernel TKMath TKBRep TKTopAlgo TKGeomBase TKG3d TKGeomAlgo TKShHealing TKBO)
+        add_test(NAME cadnext_test_cad_samples COMMAND cadnext_test_cad_samples)
+        set_tests_properties(cadnext_test_cad_samples PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 1800)
+
+        add_executable(cadnext_test_native_cad_import test_native_cad_import.cpp)
+        find_package(OpenCASCADE REQUIRED)
+        target_include_directories(cadnext_test_native_cad_import PRIVATE ${OpenCASCADE_INCLUDE_DIR})
+        target_link_libraries(cadnext_test_native_cad_import PRIVATE cadnext_gui cadnext_kernel)
+        add_test(NAME cadnext_test_native_cad_import COMMAND cadnext_test_native_cad_import)
+        add_executable(cadnext_test_native_dxf_import test_native_dxf_import.cpp)
+        target_link_libraries(cadnext_test_native_dxf_import PRIVATE cadnext_gui)
+        add_test(NAME cadnext_test_native_dxf_import COMMAND cadnext_test_native_dxf_import)
+        add_executable(cadnext_test_native_dwg_import test_native_dwg_import.cpp)
+        target_link_libraries(cadnext_test_native_dwg_import PRIVATE cadnext_gui)
+        add_test(NAME cadnext_test_native_dwg_import COMMAND cadnext_test_native_dwg_import)
+        add_executable(cadnext_test_native_kompas_geometry test_native_kompas_geometry.cpp)
+        target_link_libraries(cadnext_test_native_kompas_geometry PRIVATE cadnext_gui cadnext_kernel)
+        add_test(NAME cadnext_test_native_kompas_geometry
+                 COMMAND cadnext_test_native_kompas_geometry)
+    endif()
     # The Workbench's structural geometry: exact BRep per body, faces, mass, axes.
     add_executable(cadnext_test_construction_builder
         test_construction_builder.cpp

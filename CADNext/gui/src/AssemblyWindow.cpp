@@ -1,19 +1,31 @@
+#include "cadnext/gui/AssemblyStepExchange.hpp"
+#include "cadnext/gui/ImportProgressDialog.hpp"
+#include "cadnext/gui/NativeCadImport.hpp"
 #include "cadnext/gui/AssemblyWindow.hpp"
 
 #include <algorithm>
 #include <cmath>
+#include <memory>
+#include <optional>
+#include <set>
 
 #include <QAction>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QDockWidget>
 #include <QDoubleSpinBox>
+#include <QApplication>
+#include <QCoreApplication>
+#include <QDir>
 #include <QFileDialog>
+#include <QFileInfo>
+#include <QStringList>
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QHeaderView>
 #include <QLabel>
+#include <QInputDialog>
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -233,6 +245,9 @@ AssemblyWindow::AssemblyWindow(QWidget* parent)
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Сохранить"), this, [this]() { saveAssembly(); });
     fileMenu->addAction(tr("Сохранить как…"), this, [this]() { saveAssemblyAs(); });
+    fileMenu->addSeparator();
+    fileMenu->addAction(tr("Импорт сборки (STEP, Parasolid, SOLIDWORKS)…"), this, [this]() { importStepAssembly(); });
+    fileMenu->addAction(tr("Экспорт сборки (STEP, Parasolid)…"), this, [this]() { exportStepAssembly(); });
 
     QMenu* editMenu = menuBar()->addMenu(tr("Правка"));
     undoAction_ = editMenu->addAction(tr("Отменить"), QKeySequence::Undo, this,
@@ -323,14 +338,227 @@ void AssemblyWindow::openAssembly() {
     }
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Открыть сборку"), QString(),
-        tr("Сборки CADNext (*.cadasm);;Все файлы (*)"));
+        tr("Сборки (*.cadasm *.sldasm *.SLDASM *.step *.stp *.STEP *.STP *.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin);;"
+           "Сборки CADNext (*.cadasm);;SOLIDWORKS (*.sldasm *.SLDASM);;STEP (*.step *.stp *.STEP *.STP);;"
+           "Parasolid (*.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin);;Все файлы (*)"));
     if (path.isEmpty()) {
+        return;
+    }
+    // Another system's assembly is imported into CADNext files first, then opened.
+    if (QFileInfo(path).suffix().compare(QLatin1String("cadasm"), Qt::CaseInsensitive) != 0) {
+        importStepAssemblyFrom(path, false);
         return;
     }
     loadFromPath(path);
 }
 
+void AssemblyWindow::importStepAssembly() {
+    if (!maybeSave()) {
+        return;
+    }
+    const QString stepPath = QFileDialog::getOpenFileName(
+        this, tr("Импорт сборки"), QString(),
+        tr("Сборки STEP, Parasolid, SOLIDWORKS и КОМПАС-3D (*.step *.stp *.STEP *.STP *.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin *.sldasm *.SLDASM *.a3d *.A3D);;"
+           "STEP (*.step *.stp *.STEP *.STP);;Parasolid (*.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin);;"
+           "SOLIDWORKS (*.sldasm *.SLDASM);;КОМПАС-3D (*.a3d *.A3D);;Все файлы (*)"));
+    if (stepPath.isEmpty()) {
+        return;
+    }
+    importStepAssemblyFrom(stepPath, false);
+}
+
+void AssemblyWindow::importStepAssemblyFrom(const QString& stepPath, bool askToSave) {
+    if (askToSave && !maybeSave()) {
+        return;
+    }
+    importAsCadnextFiles(stepPath, [this](const QString& top) { loadFromPath(top); });
+}
+
+void AssemblyWindow::importAsCadnextFiles(const QString& path, std::function<void(const QString&)> then) {
+    const QFileInfo source(path);
+    const QString suffix = source.suffix().toLower();
+    const bool parasolid = suffix == QLatin1String("x_t") || suffix == QLatin1String("x_b") ||
+                           suffix == QLatin1String("xmt_txt") || suffix == QLatin1String("xmt_bin");
+    const bool solidWorks = suffix == QLatin1String("sldasm") || suffix == QLatin1String("sldprt");
+    const bool step = suffix == QLatin1String("step") || suffix == QLatin1String("stp");
+    const bool kompas = suffix == QLatin1String("a3d") || suffix == QLatin1String("m3d");
+    if (!parasolid && !solidWorks && !step && !kompas) {
+        QMessageBox::warning(this, tr("Импорт"),
+                             tr("Формат файла %1 здесь не принимается. Окно сборки открывает .cadasm, вставляет "
+                                ".cadnext и .uavpart и переводит в них STEP (.step, .stp), Parasolid (.x_t, .x_b), "
+                                "SOLIDWORKS (.sldasm, .sldprt) и КОМПАС-3D (.a3d, .m3d).").arg(source.fileName()));
+        return;
+    }
+    const QString title = parasolid    ? tr("Импорт Parasolid")
+                          : solidWorks ? tr("Импорт SOLIDWORKS")
+                          : kompas     ? tr("Импорт КОМПАС-3D")
+                                       : tr("Импорт STEP");
+    QString configuration;
+    if (suffix == QStringLiteral("sldprt")) {
+        std::vector<SolidWorksConfiguration> configurations;
+        QString error;
+        if (!readSolidWorksPartConfigurations(path, configurations, error)) {
+            QMessageBox::warning(this, title, error);
+            return;
+        }
+        if (configurations.size() > 1) {
+            QStringList names;
+            for (const auto& item : configurations)
+                names << (item.name.isEmpty() ? tr("Конфигурация %1").arg(item.id) : item.name);
+            bool accepted = false;
+            const QString choice = QInputDialog::getItem(this, title,
+                tr("Конфигурация детали %1:").arg(source.fileName()), names, 0, false, &accepted);
+            if (!accepted) return;
+            configuration = QStringLiteral("Config-") + configurations[std::size_t(names.indexOf(choice))].id;
+        }
+    }
+    // The parts and assemblies go into a new folder of their own next to the file — a received
+    // assembly can hold hundreds of parts, and they should not spill into a working folder; an earlier
+    // import's folder is left as it is. Asked only where nothing can be written next to the file (the
+    // macOS folder panel shows no title, so it is said first what it is for).
+    QString parent = source.absolutePath();
+    if (!QFileInfo(parent).isWritable()) {
+        QMessageBox::information(this, title,
+                                 tr("В папку с файлом %1 записать нельзя. Выберите папку, в которой будут созданы "
+                                    "детали и сборки CADNext.").arg(source.fileName()));
+        parent = QFileDialog::getExistingDirectory(this, tr("Куда сохранить детали и сборки"), QDir::homePath());
+        if (parent.isEmpty()) {
+            statusBar()->showMessage(tr("Импорт отменён"), 5000);
+            return;
+        }
+    }
+    QString folder = QDir(parent).filePath(source.completeBaseName() + tr(" (CADNext)"));
+    for (int n = 2; QFileInfo::exists(folder); ++n)
+        folder = QDir(parent).filePath(source.completeBaseName() + tr(" (CADNext %1)").arg(n));
+
+    // The reading and building on a thread of their own (their own kernel and files only); the
+    // window shows each part as it goes and keeps a short outcome at the end.
+    struct Outcome {
+        std::optional<Result<std::string>> top;
+        AssemblyExchangeReport report;
+        std::vector<DetachedPartGeometry> parts; // the written parts, meshed for the viewer
+    };
+    const auto outcome = std::make_shared<Outcome>();
+    auto* dialog = new ImportProgressDialog(title, this);
+    const ImportProgress* progress = &dialog->progress();
+    const std::string from = path.toStdString(), into = folder.toStdString();
+    statusBar()->showMessage(tr("Импорт %1…").arg(source.fileName()));
+    dialog->run(
+        [outcome, progress, from, into, parasolid, solidWorks, kompas, configuration] {
+            outcome->top = parasolid    ? importParasolidXtAsAssembly(from, into, outcome->report, progress)
+                           : solidWorks ? importSolidWorksAsAssembly(from, into, outcome->report, progress, configuration.toStdString())
+                           : kompas     ? importKompasAsAssembly(from, into, outcome->report, progress)
+                                        : importStepAsAssembly(from, into, outcome->report, progress);
+            if (!outcome->top->isOk()) return;
+            // Meshed here too, so that opening the result costs the UI thread nothing heavy.
+            const auto written = assembly::AssemblySerializer::loadFromFile(outcome->top->value());
+            if (!written.isOk()) return;
+            std::vector<assembly::PartReference> sources;
+            std::set<std::string> seen;
+            for (const assembly::AssemblyComponent& component : written.value().components())
+                if (seen.insert(component.source.filePath + '\n' + component.source.bodyId).second)
+                    sources.push_back(component.source);
+            outcome->parts = AssemblyPartLoader::loadDetached(sources, progress);
+        },
+        [this, dialog, outcome, folder, then = std::move(then)] {
+            const Result<std::string>& top = *outcome->top;
+            if (!top.isOk()) {
+                // The folder was made for this import alone: nothing of a stopped or failed one is kept.
+                QDir(folder).removeRecursively();
+                const bool stopped = dialog->progress().cancelled();
+                dialog->finish(stopped ? tr("Импорт остановлен") : tr("Импорт не удался"),
+                               stopped ? QStringList{} : QStringList{QString::fromStdString(top.error().message)}, true);
+                statusBar()->clearMessage();
+                return;
+            }
+            if (dialog->progress().cancelled()) {
+                // Stopped while meshing: the files are complete, the parts load when shown.
+                outcome->parts.clear();
+            }
+            partLoader_->adopt(std::move(outcome->parts));
+            const AssemblyExchangeReport& report = outcome->report;
+            QStringList lines;
+            lines << tr("Деталей: %1, вхождений: %2").arg(report.parts).arg(report.occurrences)
+                  << tr("Папка: %1").arg(folder);
+            lines << summarizeBuildReport(report.geometry);
+            for (const std::string& warning : report.warnings) lines << QString::fromStdString(warning);
+            dialog->finish(tr("Готово за %1 с").arg(dialog->elapsedSeconds(), 0, 'f', 0), lines);
+            statusBar()->showMessage(tr("Импортировано: %1 деталей, %2 вхождений — в %3")
+                                         .arg(report.parts)
+                                         .arg(report.occurrences)
+                                         .arg(folder),
+                                     10000);
+            then(QString::fromStdString(top.value()));
+        });
+}
+
+void AssemblyWindow::exportStepAssembly() {
+    // Export reads the assembly the way it is on disk, with its part files: the unsaved state in
+    // this window is not what another CAD would receive.
+    if (currentFilePath_.isEmpty() || dirty_) {
+        const QMessageBox::StandardButton answer = QMessageBox::question(
+            this, tr("Экспорт сборки"),
+            tr("Экспорт берёт сохранённый файл сборки. Сохранить сборку сейчас?"),
+            QMessageBox::Save | QMessageBox::Cancel);
+        if (answer != QMessageBox::Save || !saveAssembly()) {
+            return;
+        }
+    }
+    const QFileInfo current(currentFilePath_);
+    QString selectedFilter;
+    const QString ap214 = tr("STEP AP214 — открывается в любой CAD (*.step *.stp)");
+    const QString ap242 = tr("STEP AP242 — современный стандарт (*.step *.stp)");
+    const QString xtText = tr("Parasolid, текст — SOLIDWORKS, Solid Edge, NX, КОМПАС-3D, AutoCAD (*.x_t)");
+    const QString xtBinary = tr("Parasolid, двоичный (*.x_b)");
+    QString stepPath = QFileDialog::getSaveFileName(
+        this, tr("Экспорт сборки"),
+        current.absoluteDir().filePath(current.completeBaseName() + QStringLiteral(".step")),
+        QStringList{ap214, ap242, xtText, xtBinary}.join(QStringLiteral(";;")), &selectedFilter);
+    if (stepPath.isEmpty()) {
+        return;
+    }
+    QString suffix = QFileInfo(stepPath).suffix().toLower();
+    const bool parasolid = selectedFilter == xtText || selectedFilter == xtBinary ||
+                           suffix == QLatin1String("x_t") || suffix == QLatin1String("x_b");
+    const bool binary = parasolid && (selectedFilter == xtBinary || suffix == QLatin1String("x_b"));
+    const QString wanted = parasolid ? (binary ? QStringLiteral("x_b") : QStringLiteral("x_t")) : QStringLiteral("step");
+    if (parasolid ? suffix != wanted : (suffix != QStringLiteral("step") && suffix != QStringLiteral("stp"))) {
+        stepPath += QLatin1Char('.') + wanted;
+    }
+    const QString title = parasolid ? tr("Экспорт сборки в Parasolid") : tr("Экспорт сборки в STEP");
+    const kernel::StepSchema schema =
+        selectedFilter == ap242 ? kernel::StepSchema::AP242 : kernel::StepSchema::AP214;
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    const Result<AssemblyExchangeReport> exported =
+        parasolid ? exportAssemblyToParasolid(currentFilePath_.toStdString(), stepPath.toStdString(),
+                                              binary ? ParasolidXtEncoding::Binary : ParasolidXtEncoding::Text)
+                  : exportAssemblyToStep(currentFilePath_.toStdString(), stepPath.toStdString(), schema);
+    QApplication::restoreOverrideCursor();
+    if (!exported.isOk()) {
+        QMessageBox::warning(this, title, QString::fromStdString(exported.error().message));
+        return;
+    }
+    const AssemblyExchangeReport& report = exported.value();
+    const QString summary = tr("Записано: %1 деталей, %2 сборок, %3 вхождений — %4")
+                                .arg(report.parts)
+                                .arg(report.assemblies)
+                                .arg(report.occurrences)
+                                .arg(stepPath);
+    statusBar()->showMessage(summary, 10000);
+    if (!report.warnings.empty()) {
+        QStringList lines;
+        for (const std::string& warning : report.warnings) lines << QString::fromStdString(warning);
+        QMessageBox::information(this, title,
+                                 summary + QStringLiteral("\n\n") + lines.join(QStringLiteral("\n")));
+    }
+}
+
 void AssemblyWindow::loadFromPath(const QString& path) {
+    // Not a CADNext assembly: imported first (or told why not), never parsed as one.
+    if (QFileInfo(path).suffix().compare(QLatin1String("cadasm"), Qt::CaseInsensitive) != 0) {
+        importStepAssemblyFrom(path);
+        return;
+    }
     const Result<assembly::AssemblyDocument> loaded =
         assembly::AssemblySerializer::loadFromFile(path.toStdString());
     if (!loaded.isOk()) {
@@ -338,9 +566,32 @@ void AssemblyWindow::loadFromPath(const QString& path) {
                              QString::fromStdString(loaded.error().message));
         return;
     }
+    // Parts not cached yet are loaded — replayed, meshed — on a thread of their own first; the UI
+    // thread then only takes them in (seconds against tens of milliseconds for the NIST MTC box).
+    std::vector<assembly::PartReference> missing = partLoader_->uncachedSources(loaded.value());
+    if (missing.empty()) {
+        showLoadedDocument(loaded.value(), path);
+        return;
+    }
+    auto* dialog = new ImportProgressDialog(tr("Открытие сборки"), this);
+    const ImportProgress* progress = &dialog->progress();
+    const auto parts = std::make_shared<std::vector<DetachedPartGeometry>>();
+    dialog->run([parts, progress, missing = std::move(missing)] { *parts = AssemblyPartLoader::loadDetached(missing, progress); },
+                [this, dialog, parts, document = loaded.value(), path] {
+                    if (dialog->progress().cancelled()) {
+                        dialog->finish(tr("Открытие остановлено"), {}, true);
+                        return;
+                    }
+                    partLoader_->adopt(std::move(*parts));
+                    dialog->close();
+                    showLoadedDocument(document, path);
+                });
+}
+
+void AssemblyWindow::showLoadedDocument(const assembly::AssemblyDocument& loaded, const QString& path) {
     cancelJointTool();
     setMoveModeActive(false);
-    document_ = loaded.value();
+    document_ = loaded;
     currentFilePath_ = path;
 
     // Keep generated ids unique after load.
@@ -513,13 +764,39 @@ std::string AssemblyWindow::nextComponentId() const {
 void AssemblyWindow::insertPart() {
     const QString path = QFileDialog::getOpenFileName(
         this, tr("Вставить деталь"), QString(),
-        tr("Детали и сборки (*.uavpart *.cadnext *.cadasm);;Детали UAVPart "
-           "(*.uavpart);;CAD-документы (*.cadnext);;Подсборки (*.cadasm);;Все "
-           "файлы (*)"));
+        tr("Детали и сборки (*.uavpart *.cadnext *.cadasm *.sldprt *.SLDPRT *.sldasm *.SLDASM *.step *.stp *.STEP *.STP "
+           "*.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin);;Детали UAVPart "
+           "(*.uavpart);;CAD-документы (*.cadnext);;Подсборки (*.cadasm);;"
+           "SOLIDWORKS (*.sldprt *.SLDPRT *.sldasm *.SLDASM);;STEP (*.step *.stp *.STEP *.STP);;"
+           "Parasolid (*.x_t *.x_b *.X_T *.X_B *.xmt_txt *.xmt_bin);;Все файлы (*)"));
     if (path.isEmpty()) {
         return;
     }
+    // Another system's file becomes CADNext files first: a single part placed where it is goes in as
+    // that part, anything more as a subassembly.
+    if (const QString suffix = QFileInfo(path).suffix().toLower();
+        suffix != QLatin1String("uavpart") && suffix != QLatin1String("cadnext") && suffix != QLatin1String("cadasm")) {
+        importAsCadnextFiles(path, [this](const QString& top) {
+            QString inserted = top;
+            const auto imported = assembly::AssemblySerializer::loadFromFile(top.toStdString());
+            if (imported.isOk() && imported.value().components().size() == 1) {
+                const assembly::AssemblyComponent& only = imported.value().components().front();
+                const assembly::Placement& at = only.placement;
+                if (only.source.kind == assembly::PartSourceKind::CadnextDocument && at.translation.x == 0.0 &&
+                    at.translation.y == 0.0 && at.translation.z == 0.0 && at.rotation.w == 1.0 &&
+                    at.rotation.x == 0.0 && at.rotation.y == 0.0 && at.rotation.z == 0.0) {
+                    insertPartFrom(QString::fromStdString(only.source.filePath), only.source.bodyId);
+                    return;
+                }
+            }
+            insertPartFrom(inserted);
+        });
+        return;
+    }
+    insertPartFrom(path);
+}
 
+void AssemblyWindow::insertPartFrom(const QString& path, const std::string& bodyId) {
     // A subassembly cannot contain itself, directly or transitively.
     if (!currentFilePath_.isEmpty() &&
         QFileInfo(path).canonicalFilePath() ==
@@ -538,6 +815,7 @@ void AssemblyWindow::insertPart() {
         source.kind = assembly::PartSourceKind::UavPart;
     }
     source.filePath = path.toStdString();
+    source.bodyId = bodyId;
 
     const AssemblyPartGeometry& geometry = partLoader_->geometryForSource(source);
     if (!geometry.valid) {

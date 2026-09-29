@@ -1114,7 +1114,12 @@ private struct KeyBindingsSheetHost: View {
                         simulationViewModel.setBindingsPanelVisible(false)
                     }
                 ) {
+                    // The picked language, explicitly. Reported from a flight: the settings opened
+                    // here came up in the system language while the same screen from the start menu
+                    // was translated, so the locale ContentView sets on the main hierarchy does not
+                    // reach this sheet's content. Same remedy as ReplayCenterView's own window uses.
                     SettingsView(onClose: { simulationViewModel.setBindingsPanelVisible(false) }, simulationViewModel: simulationViewModel)
+                        .environment(\.locale, L10n.currentLanguage().locale)
                 }
                 .frame(width: min(1040, (NSScreen.main?.visibleFrame.width ?? 1200) - 80),
                        height: min(800, (NSScreen.main?.visibleFrame.height ?? 900) - 100))

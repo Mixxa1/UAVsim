@@ -802,7 +802,6 @@
 "project.open.action" = "Open Project Browser";
 "project.open.failure" = "Failed to open project";
 "project.save.action" = "Save Project";
-"project.save_as.action" = "Save Project As";
 "project.save_as.title" = "Save Project As";
 "project.save_as.action" = "Save As";
 "project.save.success" = "Project saved";

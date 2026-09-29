@@ -48,6 +48,16 @@ int main() {
     circle.circle.radius = 0.25;
     sketch.entities.push_back(circle);
 
+    cadnext::SketchEntity arc;
+    arc.id = "arc-1";
+    arc.name = "Arc 1";
+    arc.type = cadnext::SketchEntityType::Arc;
+    arc.arc.center = {4.25, -1.5};
+    arc.arc.radius = 2.75;
+    arc.arc.startAngleDegrees = 315.0;
+    arc.arc.sweepDegrees = 120.0;
+    sketch.entities.push_back(arc);
+
     document.addSketch(sketch);
 
     // Round trip.
@@ -68,7 +78,7 @@ int main() {
     assert(nearlyEqual(restored.reference.uAxis.x, 1.0));
     assert(nearlyEqual(restored.reference.vAxis.z, 1.0));
     assert(nearlyEqual(restored.reference.normal.y, 1.0));
-    assert(restored.entities.size() == 3);
+    assert(restored.entities.size() == 4);
 
     const cadnext::SketchEntity& restoredLine = restored.entities[0];
     assert(restoredLine.id == "line-1");
@@ -90,6 +100,14 @@ int main() {
     assert(nearlyEqual(restoredCircle.circle.center.u, 0.5));
     assert(nearlyEqual(restoredCircle.circle.center.v, 0.5));
     assert(nearlyEqual(restoredCircle.circle.radius, 0.25));
+
+    const cadnext::SketchEntity& restoredArc = restored.entities[3];
+    assert(restoredArc.type == cadnext::SketchEntityType::Arc);
+    assert(nearlyEqual(restoredArc.arc.center.u, 4.25));
+    assert(nearlyEqual(restoredArc.arc.center.v, -1.5));
+    assert(nearlyEqual(restoredArc.arc.radius, 2.75));
+    assert(nearlyEqual(restoredArc.arc.startAngleDegrees, 315.0));
+    assert(nearlyEqual(restoredArc.arc.sweepDegrees, 120.0));
 
     // Backward compatibility: documents without "sketches" still load.
     const auto legacy = cadnext::DocumentSerializer::fromJson(

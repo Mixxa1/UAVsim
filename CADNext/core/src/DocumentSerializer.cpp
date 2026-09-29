@@ -11,12 +11,56 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <vector>
 
 namespace cadnext {
 
 namespace {
+
+std::string encodeBase64(const std::vector<std::uint8_t>& bytes) {
+    static constexpr char alphabet[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    std::string out;
+    out.reserve((bytes.size() + 2) / 3 * 4);
+    for (size_t i = 0; i < bytes.size(); i += 3) {
+        const unsigned a = bytes[i];
+        const unsigned b = i + 1 < bytes.size() ? bytes[i + 1] : 0;
+        const unsigned c = i + 2 < bytes.size() ? bytes[i + 2] : 0;
+        out.push_back(alphabet[a >> 2]);
+        out.push_back(alphabet[((a & 3) << 4) | (b >> 4)]);
+        out.push_back(i + 1 < bytes.size() ? alphabet[((b & 15) << 2) | (c >> 6)] : '=');
+        out.push_back(i + 2 < bytes.size() ? alphabet[c & 63] : '=');
+    }
+    return out;
+}
+
+std::optional<std::vector<std::uint8_t>> decodeBase64(const std::string& text) {
+    static const std::string alphabet =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    if (text.size() % 4 != 0) return std::nullopt;
+    std::vector<std::uint8_t> out;
+    out.reserve(text.size() / 4 * 3);
+    for (size_t i = 0; i < text.size(); i += 4) {
+        const auto a = alphabet.find(text[i]);
+        const auto b = alphabet.find(text[i + 1]);
+        const auto c = text[i + 2] == '=' ? 0 : alphabet.find(text[i + 2]);
+        const auto d = text[i + 3] == '=' ? 0 : alphabet.find(text[i + 3]);
+        if (a == std::string::npos || b == std::string::npos ||
+            c == std::string::npos || d == std::string::npos ||
+            (text[i + 2] == '=' && text[i + 3] != '=') ||
+            (i + 4 != text.size() && (text[i + 2] == '=' || text[i + 3] == '='))) {
+            return std::nullopt;
+        }
+        out.push_back(static_cast<std::uint8_t>((a << 2) | (b >> 4)));
+        if (text[i + 2] != '=')
+            out.push_back(static_cast<std::uint8_t>(((b & 15) << 4) | (c >> 2)));
+        if (text[i + 3] != '=')
+            out.push_back(static_cast<std::uint8_t>(((c & 3) << 6) | d));
+    }
+    return out;
+}
 
 // ---------------------------------------------------------------------------
 // Minimal JSON value model + recursive-descent parser. Only what the
@@ -347,6 +391,7 @@ const char* featureTypeName(FeatureType type) {
     switch (type) {
     case FeatureType::Sketch: return "Sketch";
     case FeatureType::Extrude: return "Extrude";
+    case FeatureType::Revolve: return "Revolve";
     case FeatureType::ExtrudeCut: return "ExtrudeCut";
     case FeatureType::Cut: return "Cut";
     case FeatureType::Fillet: return "Fillet";
@@ -354,12 +399,14 @@ const char* featureTypeName(FeatureType type) {
     case FeatureType::BooleanFuse: return "BooleanFuse";
     case FeatureType::BooleanCut: return "BooleanCut";
     case FeatureType::BooleanCommon: return "BooleanCommon";
+    case FeatureType::Thread: return "Thread";
     }
     return "Sketch";
 }
 
 FeatureType featureTypeFromName(const std::string& name) {
     if (name == "Extrude") return FeatureType::Extrude;
+    if (name == "Revolve") return FeatureType::Revolve;
     if (name == "ExtrudeCut") return FeatureType::ExtrudeCut;
     if (name == "Cut") return FeatureType::Cut;
     if (name == "Fillet") return FeatureType::Fillet;
@@ -367,6 +414,7 @@ FeatureType featureTypeFromName(const std::string& name) {
     if (name == "BooleanFuse") return FeatureType::BooleanFuse;
     if (name == "BooleanCut") return FeatureType::BooleanCut;
     if (name == "BooleanCommon") return FeatureType::BooleanCommon;
+    if (name == "Thread") return FeatureType::Thread;
     return FeatureType::Sketch;
 }
 
@@ -459,7 +507,13 @@ std::string DocumentSerializer::toJson(const Document& document) {
         out << "          \"rotationEuler\": " << vectorJson(object.transform.rotationEuler)
             << ",\n";
         out << "          \"scale\": " << vectorJson(object.transform.scale) << "\n";
-        out << "        }\n";
+        out << "        }";
+        if (!object.importedBRep.empty()) {
+            out << ",\n        \"brepBase64\": \""
+                << encodeBase64(object.importedBRep) << "\"\n";
+        } else {
+            out << "\n";
+        }
         out << "      }";
     }
     out << (objects.empty() ? "],\n" : "\n    ],\n");
@@ -527,6 +581,17 @@ std::string DocumentSerializer::toJson(const Document& document) {
                 out << "              \"radius\": " << numberText(entity.circle.radius) << "\n";
                 out << "            }\n";
                 break;
+            case SketchEntityType::Arc:
+                out << "            \"arc\": {\n";
+                out << "              \"center\": { \"u\": " << numberText(entity.arc.center.u)
+                    << ", \"v\": " << numberText(entity.arc.center.v) << " },\n";
+                out << "              \"radius\": " << numberText(entity.arc.radius) << ",\n";
+                out << "              \"startAngleDegrees\": "
+                    << numberText(entity.arc.startAngleDegrees) << ",\n";
+                out << "              \"sweepDegrees\": "
+                    << numberText(entity.arc.sweepDegrees) << "\n";
+                out << "            }\n";
+                break;
             }
             out << "          }";
         }
@@ -589,6 +654,22 @@ std::string DocumentSerializer::toJson(const Document& document) {
             out << "          \"distance\": " << numberText(feature.extrude.distance) << "\n";
             out << "        },\n";
         }
+        if (feature.type == FeatureType::Revolve) {
+            out << "        \"createdBodyId\": \"" << escapeString(feature.createdBodyId)
+                << "\",\n";
+            out << "        \"revolve\": {\n";
+            out << "          \"sketchId\": \"" << escapeString(feature.revolve.sketchId)
+                << "\",\n";
+            out << "          \"profileId\": \"" << escapeString(feature.revolve.profileId)
+                << "\",\n";
+            out << "          \"axis\": \""
+                << (feature.revolve.axis == RevolveAxis::U ? "U" : "V") << "\",\n";
+            out << "          \"axisOffset\": " << numberText(feature.revolve.axisOffset)
+                << ",\n";
+            out << "          \"angleDegrees\": " << numberText(feature.revolve.angleDegrees)
+                << "\n";
+            out << "        },\n";
+        }
         if (feature.type == FeatureType::ExtrudeCut) {
             // Parametric cut recipe; the cutter solid and the resulting
             // BRep/mesh are never serialized — cuts are replayed on load.
@@ -635,6 +716,33 @@ std::string DocumentSerializer::toJson(const Document& document) {
             out << "          \"edgeIds\": " << stringArrayJson(feature.fillet.edgeIds, 10)
                 << ",\n";
             out << "          \"radiusMm\": " << numberText(feature.fillet.radiusMm) << "\n";
+            out << "        },\n";
+        }
+        if (feature.type == FeatureType::Thread) {
+            const ThreadParameters& thread = feature.thread;
+            const ThreadSurface& surface = thread.surface;
+            out << "        \"modifiedBodyId\": \"" << escapeString(feature.modifiedBodyId) << "\",\n";
+            out << "        \"thread\": {\n";
+            out << "          \"targetBodyId\": \"" << escapeString(thread.targetBodyId) << "\",\n";
+            out << "          \"faceId\": \"" << escapeString(thread.faceId) << "\",\n";
+            out << "          \"surface\": {\n";
+            out << "            \"axisOrigin\": " << vectorJson(surface.axisOrigin) << ",\n";
+            out << "            \"axisDirection\": " << vectorJson(surface.axisDirection) << ",\n";
+            out << "            \"radius\": " << numberText(surface.radius) << ",\n";
+            out << "            \"slope\": " << numberText(surface.slope) << ",\n";
+            out << "            \"axialStart\": " << numberText(surface.axialStart) << ",\n";
+            out << "            \"axialEnd\": " << numberText(surface.axialEnd) << ",\n";
+            out << "            \"holeWall\": " << (surface.holeWall ? "true" : "false") << "\n";
+            out << "          },\n";
+            out << "          \"standard\": \"" << threadStandardKey(thread.standard) << "\",\n";
+            out << "          \"designation\": \"" << escapeString(thread.designation) << "\",\n";
+            out << "          \"majorDiameterMm\": " << numberText(thread.majorDiameterMm) << ",\n";
+            out << "          \"pitchMm\": " << numberText(thread.pitchMm) << ",\n";
+            out << "          \"gaugeLengthMm\": " << numberText(thread.gaugeLengthMm) << ",\n";
+            out << "          \"lengthMm\": " << numberText(thread.lengthMm) << ",\n";
+            out << "          \"fromFarEnd\": " << (thread.fromFarEnd ? "true" : "false") << ",\n";
+            out << "          \"internal\": " << (thread.internal ? "true" : "false") << ",\n";
+            out << "          \"rightHanded\": " << (thread.rightHanded ? "true" : "false") << "\n";
             out << "        },\n";
         }
         out << "        \"suppressed\": " << (feature.suppressed ? "true" : "false") << "\n";
@@ -715,6 +823,15 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
                     scale ? vectorFromJson(scale) : Vector3{1.0, 1.0, 1.0};
             }
 
+            if (const JsonValue* brep = objectValue.member("brepBase64"); brep) {
+                if (brep->type != JsonValue::Type::String) {
+                    return parseError("brepBase64 must be a string");
+                }
+                const auto bytes = decodeBase64(brep->stringValue);
+                if (!bytes) return parseError("Invalid brepBase64 payload");
+                object.importedBRep = *bytes;
+            }
+
             document.addObject(std::move(object));
         }
     }
@@ -780,6 +897,24 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
                         }
                         entity.circle.center = pointFromJson(circle->member("center"));
                         entity.circle.radius = circle->numberOr("radius", 0.5);
+                        break;
+                    }
+                    case SketchEntityType::Arc: {
+                        const JsonValue* arc = entityValue.member("arc");
+                        if (!arc || !arc->isObject()) {
+                            continue;
+                        }
+                        entity.arc.center = pointFromJson(arc->member("center"));
+                        entity.arc.radius = arc->numberOr("radius", 0.0);
+                        entity.arc.startAngleDegrees = arc->numberOr("startAngleDegrees", 0.0);
+                        entity.arc.sweepDegrees = arc->numberOr("sweepDegrees", 0.0);
+                        if (!std::isfinite(entity.arc.center.u) ||
+                            !std::isfinite(entity.arc.center.v) ||
+                            !std::isfinite(entity.arc.radius) || entity.arc.radius <= 0.0 ||
+                            !std::isfinite(entity.arc.startAngleDegrees) ||
+                            !std::isfinite(entity.arc.sweepDegrees) ||
+                            entity.arc.sweepDegrees <= 0.0 ||
+                            entity.arc.sweepDegrees >= 360.0) continue;
                         break;
                     }
                     }
@@ -850,6 +985,15 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
                     extrudeDepthModeFromName(extrude->stringOr("depthMode", "Distance"));
                 feature.extrude.distance = extrude->numberOr("distance", 1.0);
             }
+            if (const JsonValue* revolve = featureValue.member("revolve");
+                revolve && revolve->isObject()) {
+                feature.revolve.sketchId = revolve->stringOr("sketchId", "");
+                feature.revolve.profileId = revolve->stringOr("profileId", "");
+                feature.revolve.axis = revolve->stringOr("axis", "V") == "U"
+                    ? RevolveAxis::U : RevolveAxis::V;
+                feature.revolve.axisOffset = revolve->numberOr("axisOffset", 0.0);
+                feature.revolve.angleDegrees = revolve->numberOr("angleDegrees", 360.0);
+            }
             feature.modifiedBodyId = featureValue.stringOr("modifiedBodyId", "");
             if (const JsonValue* cut = featureValue.member("extrudeCut");
                 cut && cut->isObject()) {
@@ -889,6 +1033,33 @@ Result<Document> DocumentSerializer::fromJson(const std::string& json) {
                     feature.fillet.radiusMm =
                         toMillimeters(fillet->numberOr("radius", 0.001));
                 }
+            }
+            if (const JsonValue* thread = featureValue.member("thread"); thread && thread->isObject()) {
+                const auto flag = [](const JsonValue* object, const char* name, bool fallback) {
+                    const JsonValue* value = object ? object->member(name) : nullptr;
+                    return value && value->type == JsonValue::Type::Bool ? value->boolValue : fallback;
+                };
+                ThreadParameters& parameters = feature.thread;
+                parameters.targetBodyId = thread->stringOr("targetBodyId", "");
+                parameters.faceId = thread->stringOr("faceId", "");
+                if (const JsonValue* surface = thread->member("surface"); surface && surface->isObject()) {
+                    parameters.surface.axisOrigin = vectorFromJson(surface->member("axisOrigin"));
+                    parameters.surface.axisDirection = vectorFromJson(surface->member("axisDirection"));
+                    parameters.surface.radius = surface->numberOr("radius", 0.0);
+                    parameters.surface.slope = surface->numberOr("slope", 0.0);
+                    parameters.surface.axialStart = surface->numberOr("axialStart", 0.0);
+                    parameters.surface.axialEnd = surface->numberOr("axialEnd", 0.0);
+                    parameters.surface.holeWall = flag(surface, "holeWall", false);
+                }
+                parameters.standard = threadStandardFromKey(thread->stringOr("standard", "MetricCoarse"));
+                parameters.designation = thread->stringOr("designation", "");
+                parameters.majorDiameterMm = thread->numberOr("majorDiameterMm", 0.0);
+                parameters.pitchMm = thread->numberOr("pitchMm", 0.0);
+                parameters.gaugeLengthMm = thread->numberOr("gaugeLengthMm", 0.0);
+                parameters.lengthMm = thread->numberOr("lengthMm", 0.0);
+                parameters.fromFarEnd = flag(thread, "fromFarEnd", false);
+                parameters.internal = flag(thread, "internal", false);
+                parameters.rightHanded = flag(thread, "rightHanded", true);
             }
             document.addFeature(std::move(feature));
         }

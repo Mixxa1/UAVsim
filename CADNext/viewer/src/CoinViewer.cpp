@@ -630,6 +630,19 @@ ViewMode CoinViewer::viewMode() const {
     return viewMode_;
 }
 
+double CoinViewer::sketchUnitsPerPixel() const {
+    if (!camera_ || !viewer_ ||
+        !camera_->isOfType(SoOrthographicCamera::getClassTypeId())) {
+        return 0.0;
+    }
+    const int height = viewer_->getViewportRegion().getViewportSizePixels()[1];
+    if (height <= 0) {
+        return 0.0;
+    }
+    return static_cast<const SoOrthographicCamera*>(camera_)->height.getValue() /
+           static_cast<double>(height);
+}
+
 void CoinViewer::setSelectedWorkPlane(const std::string& planeId) {
     policy_.setSelectedWorkPlane(planeId);
     scene_->setSelectedWorkPlane(planeId);

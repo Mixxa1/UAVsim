@@ -305,6 +305,16 @@ std::vector<SbVec3f> sketchEntityPolyline(const cadnext::SketchReference& refere
         }
         break;
     }
+    case cadnext::SketchEntityType::Arc: {
+        const auto& arc = entity.arc;
+        const int segments = std::max(2, static_cast<int>(std::ceil(arc.sweepDegrees / 7.5)));
+        for (int i = 0; i <= segments; ++i) {
+            const auto point = cadnext::sketchArcPoint(
+                arc, arc.startAngleDegrees + arc.sweepDegrees * i / segments);
+            points.push_back(sketchUVToWorld(reference, point.u, point.v));
+        }
+        break;
+    }
     }
     return points;
 }
@@ -335,6 +345,7 @@ double dot3(const Vector3& a, const Vector3& b) {
 const SbColor kSketchCursorColor(0.45f, 0.95f, 0.60f);
 const SbColor kSketchAnchorColor(0.95f, 0.65f, 0.15f);
 const SbColor kSketchPreviewColor(0.35f, 0.85f, 0.95f);
+const SbColor kSketchEndpointColor(1.0f, 0.78f, 0.25f);
 
 // Transients are lifted slightly along the plane normal so they always
 // render above the plane fill and grid lines.
@@ -342,6 +353,7 @@ constexpr double kTransientLift = 0.002;
 constexpr double kCursorCrossHalf = 0.12;
 constexpr double kCursorBoxHalf = 0.03;
 constexpr double kAnchorHalf = 0.06;
+constexpr double kEndpointHalf = 0.035;
 constexpr int kCirclePreviewSegments = 48;
 
 SbVec3f transientPoint(const cadnext::SketchReference& reference, double u, double v) {
@@ -1625,6 +1637,60 @@ void SceneGraph::hideSketchPlane() {
     hideSketchCursor();
     hideSketchAnchor();
     clearSketchPreview();
+    clearSketchEndpoints();
+}
+
+void SceneGraph::showSketchEndpoints(const Sketch& sketch) {
+    clearSketchEndpoints();
+    const SketchReference reference = referenceForSketch(sketch);
+    auto* node = new SoSeparator;
+    node->addChild(unpickableStyle());
+    auto* light = new SoLightModel;
+    light->model = SoLightModel::BASE_COLOR;
+    node->addChild(light);
+    auto* color = new SoBaseColor;
+    color->rgb = kSketchEndpointColor;
+    node->addChild(color);
+    auto* style = new SoDrawStyle;
+    style->lineWidth = 2.0f;
+    node->addChild(style);
+    auto* coords = new SoCoordinate3;
+    auto* lines = new SoLineSet;
+    int index = 0;
+    for (const SketchEntity& entity : sketch.entities) {
+        if (entity.type != SketchEntityType::Line && entity.type != SketchEntityType::Arc)
+            continue;
+        const SketchPoint2D start = entity.type == SketchEntityType::Arc
+            ? sketchArcStart(entity.arc) : entity.line.start;
+        const SketchPoint2D end = entity.type == SketchEntityType::Arc
+            ? sketchArcEnd(entity.arc) : entity.line.end;
+        for (const SketchPoint2D point : {start, end}) {
+            if (!std::isfinite(point.u) || !std::isfinite(point.v)) {
+                continue;
+            }
+            coords->point.set1Value(index++, transientPoint(reference, point.u - kEndpointHalf,
+                                                            point.v - kEndpointHalf));
+            coords->point.set1Value(index++, transientPoint(reference, point.u + kEndpointHalf,
+                                                            point.v + kEndpointHalf));
+            lines->numVertices.set1Value(lines->numVertices.getNum(), 2);
+            coords->point.set1Value(index++, transientPoint(reference, point.u - kEndpointHalf,
+                                                            point.v + kEndpointHalf));
+            coords->point.set1Value(index++, transientPoint(reference, point.u + kEndpointHalf,
+                                                            point.v - kEndpointHalf));
+            lines->numVertices.set1Value(lines->numVertices.getNum(), 2);
+        }
+    }
+    node->addChild(coords);
+    node->addChild(lines);
+    sketchTransientRoot_->addChild(node);
+    sketchEndpointsNode_ = node;
+}
+
+void SceneGraph::clearSketchEndpoints() {
+    if (sketchEndpointsNode_) {
+        sketchTransientRoot_->removeChild(sketchEndpointsNode_);
+        sketchEndpointsNode_ = nullptr;
+    }
 }
 
 // --- Transient sketch input visuals ----------------------------------------

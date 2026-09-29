@@ -7,12 +7,15 @@
 #include "cadnext/Extrude.hpp"
 #include "cadnext/ExtrudeCut.hpp"
 #include "cadnext/Fillet.hpp"
+#include "cadnext/Revolve.hpp"
+#include "cadnext/Thread.hpp"
 #include "cadnext/Object.hpp"
 #include "cadnext/Result.hpp"
 #include "cadnext/Sketch.hpp"
 #include "cadnext/SketchProfile.hpp"
 #include "cadnext/kernel/Kernel.hpp"
 #include "cadnext/kernel/MeshExtractor.hpp"
+#include "cadnext/kernel/ThreadCut.hpp"
 #include "cadnext/kernel/TriangleMesh.hpp"
 
 namespace cadnext::kernel {
@@ -31,6 +34,12 @@ struct EvaluatedGeometry {
     bool isValid = false;
     std::string message;
 };
+
+// The Thread feature's recipe as the kernel's cut: the axis run from the face's chosen end (a taper
+// thread: from its small end), the major diameter there (a taper thread's gauge plane carried to it),
+// the face's own diameter there, run-outs where the ends are free. Fails with the reason for a face
+// the thread does not fit: a taper thread off a cone of its taper, a parallel one off a cylinder.
+cadnext::Result<ThreadCutParameters> threadCutFor(const cadnext::ThreadParameters& parameters);
 
 class GeometryEvaluator {
 public:
@@ -51,6 +60,11 @@ public:
         const cadnext::SketchReference& reference,
         const cadnext::SketchProfile& profile,
         const cadnext::ExtrudeParameters& parameters);
+
+    cadnext::Result<EvaluatedGeometry> evaluateRevolve(
+        const cadnext::SketchReference& reference,
+        const cadnext::SketchProfile& profile,
+        const cadnext::RevolveParameters& parameters);
 
     // Profile prism between two offsets along the sketch plane normal
     // (relative to the sketch origin, start < end): the shared builder
@@ -78,6 +92,13 @@ public:
     cadnext::Result<EvaluatedGeometry> evaluateFillet(
         const ShapeHandle& targetShape,
         const cadnext::FilletParameters& parameters);
+
+    // Thread: real turns cut on the face the parameters record (Thread.hpp, ThreadCut.hpp); the cut's
+    // own account — how far the turns are off the profile, how many, what was turned away — in `report`.
+    cadnext::Result<EvaluatedGeometry> evaluateThread(
+        const ShapeHandle& targetShape,
+        const cadnext::ThreadParameters& parameters,
+        ThreadCutReport* report = nullptr);
 
     // Generate a preview mesh from a shape handle already registered in the
     // kernel. Used for imported BRep shapes (openPartForEditing workflow).

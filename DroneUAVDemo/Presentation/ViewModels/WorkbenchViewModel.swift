@@ -87,10 +87,33 @@ enum WorkbenchFacePick: Hashable {
     case pressure(Double)
     case exclusion(Double)
     case equipment(kind: WorkbenchComponentKind, count: Double)
+    /// The face whose motion a vibration or shock case reports, as a sensor on the fixture would see it.
+    case probe
+    /// The face a sine force or a rotor imbalance acts on.
+    case excitationFace
+    /// A face under the flame in a fire case.
+    case flameFace
+    /// Where the lightning arc attaches, and where the current leaves into the structure.
+    case attachmentFace
+    case groundFace
+    /// A piece of equipment in a thermal case, with its own heat and limits (°C).
+    case thermalComponent(name: String, powerW: Double, minimumC: Double?, maximumC: Double?)
+    /// A point inside the enclosure for an EMC case: the picked face's centre, moved inwards.
+    case emcProbe(name: String, offsetMm: Double, immunityVm: Double)
+    /// The face a bird hits.
+    case impactFace
 
     var displayName: String {
         switch self {
         case .equipment: return "массу оборудования"
+        case .probe: return "грань датчика"
+        case .excitationFace: return "грань возбуждения"
+        case .flameFace: return "грань под пламенем"
+        case .attachmentFace: return "грань привязки дуги"
+        case .groundFace: return "грань, связанную с конструкцией"
+        case .thermalComponent: return "оборудование"
+        case .emcProbe: return "точку оборудования внутри корпуса"
+        case .impactFace: return "грань удара птицы"
         case let .support(axes): return axes.count == 3 ? "заделку" : "опору"
         case .force: return "силу"
         case .pressure: return "давление"
@@ -533,7 +556,9 @@ final class WorkbenchViewModel: ObservableObject {
         var records = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
         records += build.aerodynamicRuns.map(\.record)
         let upstream = records
-        for test in [EngineeringTestType.structuralStatic, .modalVibration] {
+        for test in [EngineeringTestType.structuralStatic, .modalVibration, .mechanicalShock,
+                     .climatic, .fireResistance, .lightningDirect,
+                     .radiatedSusceptibility, .icing, .flutter, .birdStrike] {
             if let derived = WorkbenchStructuralAggregate.record(
                 test, build: build, snapshot: snapshot, upstreamRecords: upstream, runs: structuralRuns) {
                 records.append(derived)
@@ -754,9 +779,108 @@ final class WorkbenchViewModel: ObservableObject {
             case let .pressure(pascals): edited.pressures.append(.init(faceID: face.id, pressurePa: pascals))
             case let .exclusion(distance): edited.exclusions.append(.init(faceID: face.id, distanceM: distance))
             case let .equipment(kind, count):
-                if case var .modal(settings) = edited.analysis {
+                // Equipment rides through every dynamic case: modes, sine, random, shock.
+                switch edited.analysis {
+                case var .modal(settings):
                     settings.equipment.append(.init(faceID: face.id, kind: kind, count: count))
                     edited.analysis = .modal(settings)
+                case var .sine(settings):
+                    settings.equipment.append(.init(faceID: face.id, kind: kind, count: count))
+                    edited.analysis = .sine(settings)
+                case var .random(settings):
+                    settings.equipment.append(.init(faceID: face.id, kind: kind, count: count))
+                    edited.analysis = .random(settings)
+                case var .shock(settings):
+                    settings.equipment.append(.init(faceID: face.id, kind: kind, count: count))
+                    edited.analysis = .shock(settings)
+                case var .bird(settings):
+                    settings.equipment.append(.init(faceID: face.id, kind: kind, count: count))
+                    edited.analysis = .bird(settings)
+                case .strength, .climate, .fire, .lightning, .emc, .icing, .flutter:
+                    break
+                }
+            case .probe:
+                switch edited.analysis {
+                case var .sine(settings):
+                    settings.probeFaceID = face.id
+                    edited.analysis = .sine(settings)
+                case var .random(settings):
+                    settings.probeFaceID = face.id
+                    edited.analysis = .random(settings)
+                case var .shock(settings):
+                    settings.probeFaceID = face.id
+                    edited.analysis = .shock(settings)
+                case .modal, .strength, .climate, .fire, .lightning, .emc, .icing, .flutter, .bird:
+                    break
+                }
+            case .excitationFace:
+                if case var .sine(settings) = edited.analysis {
+                    settings.faceID = face.id
+                    edited.analysis = .sine(settings)
+                }
+            case .flameFace:
+                if case var .fire(settings) = edited.analysis, !settings.flameFaceIDs.contains(face.id) {
+                    settings.flameFaceIDs.append(face.id)
+                    edited.analysis = .fire(settings)
+                }
+            case .attachmentFace:
+                if case var .lightning(settings) = edited.analysis, !settings.attachmentFaceIDs.contains(face.id) {
+                    settings.attachmentFaceIDs.append(face.id)
+                    edited.analysis = .lightning(settings)
+                }
+            case .groundFace:
+                if case var .lightning(settings) = edited.analysis, !settings.groundFaceIDs.contains(face.id) {
+                    settings.groundFaceIDs.append(face.id)
+                    edited.analysis = .lightning(settings)
+                }
+            case let .emcProbe(name, offsetMm, immunityVm):
+                // The face's own centre, moved inwards along its normal: the point the field has to
+                // reach. Mesh vertices are already in the part's coordinates, which is what the
+                // solver reads, so nothing is converted here.
+                if case var .emc(settings) = edited.analysis, case let .imported(construction) = build.frame {
+                    var centre = SIMD3<Double>(repeating: 0)
+                    var normal = SIMD3<Double>(repeating: 0)
+                    var count = 0.0
+                    for t in face.firstTriangle..<(face.firstTriangle + face.triangleCount) {
+                        var corners: [SIMD3<Double>] = []
+                        for k in 0..<3 {
+                            let v = 3 * Int(construction.mesh.indices[3 * t + k])
+                            corners.append(SIMD3(Double(construction.mesh.vertices[v]),
+                                                 Double(construction.mesh.vertices[v + 1]),
+                                                 Double(construction.mesh.vertices[v + 2])))
+                        }
+                        centre += (corners[0] + corners[1] + corners[2]) / 3
+                        normal += simd_cross(corners[1] - corners[0], corners[2] - corners[0])
+                        count += 1
+                    }
+                    if count > 0, simd_length(normal) > 0 {
+                        centre /= count
+                        let inward = -simd_normalize(normal)
+                        let point = centre + inward * (offsetMm / 1e3)
+                        settings.equipment.append(.init(name: name, x: point.x, y: point.y, z: point.z, immunityVm: immunityVm))
+                        edited.analysis = .emc(settings)
+                    }
+                }
+            case .impactFace:
+                if case var .bird(settings) = edited.analysis {
+                    settings.impactFaceID = face.id
+                    edited.analysis = .bird(settings)
+                }
+            case let .thermalComponent(name, powerW, minimumC, maximumC):
+                let component = WorkbenchStructuralCase.ThermalComponent(
+                    name: name, faceID: face.id, powerW: powerW, minimumC: minimumC, maximumC: maximumC)
+                switch edited.analysis {
+                case var .climate(settings):
+                    settings.components.append(component)
+                    edited.analysis = .climate(settings)
+                case var .fire(settings):
+                    settings.components.append(component)
+                    edited.analysis = .fire(settings)
+                case var .lightning(settings):
+                    settings.equipment.append(component)
+                    edited.analysis = .lightning(settings)
+                case .strength, .modal, .sine, .random, .shock, .emc, .icing, .flutter, .bird:
+                    break
                 }
             }
         }

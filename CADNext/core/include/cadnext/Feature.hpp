@@ -7,19 +7,23 @@
 #include "cadnext/Extrude.hpp"
 #include "cadnext/ExtrudeCut.hpp"
 #include "cadnext/Fillet.hpp"
+#include "cadnext/Revolve.hpp"
+#include "cadnext/Thread.hpp"
 
 namespace cadnext {
 
 enum class FeatureType {
     Sketch,
     Extrude,
+    Revolve,
     ExtrudeCut,
     Chamfer,
     Fillet,
     Cut,
     BooleanFuse,
     BooleanCut,
-    BooleanCommon
+    BooleanCommon,
+    Thread
 };
 
 struct Feature {
@@ -34,6 +38,7 @@ struct Feature {
     // parameters) and the body it generated. The recipe is the source of
     // truth — body meshes are re-derived from it on load.
     ExtrudeParameters extrude;
+    RevolveParameters revolve;
     std::string createdBodyId;
 
     // FeatureType::ExtrudeCut: the cut recipe; the cut modifies the target
@@ -47,6 +52,10 @@ struct Feature {
     // re-resolved during replay; robust topological naming is future work.
     ChamferParameters chamfer;
     FilletParameters fillet;
+
+    // FeatureType::Thread: real turns cut on a cylindrical or conical face (Thread.hpp); modifies the
+    // target body in place, like a chamfer, and replays in order on load.
+    ThreadParameters thread;
 };
 
 } // namespace cadnext

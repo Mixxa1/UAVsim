@@ -31,6 +31,14 @@ SketchPoint2D snapPointToGrid(SketchPoint2D raw, double gridStep);
 // the raw point otherwise.
 SketchPoint2D applySketchSnap(SketchPoint2D raw, const SketchInputOptions& options);
 
+// Endpoints win over the grid so a click near an existing line or arc uses its
+// exact stored coordinate. The radius is in sketch units and supplied by
+// the viewport from a fixed pixel radius at the current zoom level.
+std::optional<SketchPoint2D> nearestSketchLineEndpoint(
+    SketchPoint2D raw, const Sketch& sketch, double radius);
+SketchPoint2D applySketchSnap(SketchPoint2D raw, const SketchInputOptions& options,
+                              const Sketch& sketch, double endpointRadius);
+
 enum class SketchTool {
     Select,
     Line,
@@ -51,13 +59,21 @@ struct SketchInputState {
 
     std::optional<SketchPoint2D> firstPoint;
     std::optional<SketchPoint2D> currentPoint;
+    std::optional<SketchPoint2D> lineChainStart;
+    int lineChainSegments = 0;
 
     SketchInputOptions options;
+
+    // Called after a non-degenerate line has been committed. Continues
+    // from its endpoint, or resets when the endpoint closes the chain.
+    bool completeLineSegment(SketchPoint2D endpoint);
 
     void resetPending() {
         phase = SketchInputPhase::Idle;
         firstPoint.reset();
         currentPoint.reset();
+        lineChainStart.reset();
+        lineChainSegments = 0;
     }
 };
 

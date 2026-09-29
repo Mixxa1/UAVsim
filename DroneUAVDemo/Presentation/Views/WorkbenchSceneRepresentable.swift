@@ -143,6 +143,37 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
             if case let .modal(modal) = loadCase.analysis {
                 groups += modal.equipment.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
             }
+            if case let .sine(sine) = loadCase.analysis {
+                groups += sine.equipment.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+                groups += [sine.faceID].compactMap { $0 }.compactMap(range).map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+                groups += [sine.probeFaceID].compactMap { $0 }.compactMap(range).map { ($0, NSColor(calibratedRed: 0.42, green: 0.80, blue: 0.62, alpha: 1)) }
+            }
+            if case let .random(random) = loadCase.analysis {
+                groups += random.equipment.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+                groups += [random.probeFaceID].compactMap { $0 }.compactMap(range).map { ($0, NSColor(calibratedRed: 0.42, green: 0.80, blue: 0.62, alpha: 1)) }
+            }
+            if case let .shock(shock) = loadCase.analysis {
+                groups += shock.equipment.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+                // The sensor face gets its own colour: it carries no load, it only reports motion.
+                groups += [shock.probeFaceID].compactMap { $0 }.compactMap(range).map { ($0, NSColor(calibratedRed: 0.42, green: 0.80, blue: 0.62, alpha: 1)) }
+            }
+            if case let .climate(climate) = loadCase.analysis {
+                groups += climate.components.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+            }
+            if case let .fire(fire) = loadCase.analysis {
+                groups += fire.flameFaceIDs.compactMap(range).map { ($0, NSColor(calibratedRed: 0.90, green: 0.32, blue: 0.16, alpha: 1)) }
+                groups += fire.components.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+            }
+            if case let .lightning(lightning) = loadCase.analysis {
+                groups += lightning.attachmentFaceIDs.compactMap(range).map { ($0, NSColor(calibratedRed: 0.95, green: 0.85, blue: 0.25, alpha: 1)) }
+                groups += lightning.groundFaceIDs.compactMap(range).map { ($0, NSColor(calibratedRed: 0.23, green: 0.56, blue: 0.94, alpha: 1)) }
+                groups += lightning.equipment.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+            }
+            if case let .bird(bird) = loadCase.analysis {
+                // The struck face is the load here, so it gets the load colour.
+                groups += [bird.impactFaceID].compactMap { $0 }.compactMap(range).map { ($0, NSColor(calibratedRed: 0.93, green: 0.55, blue: 0.20, alpha: 1)) }
+                groups += bird.equipment.compactMap { range($0.faceID) }.map { ($0, NSColor(calibratedWhite: 0.75, alpha: 1)) }
+            }
             guard !groups.isEmpty else { return }
             let overlay = WorkbenchModelBuilder.triangleOverlayNode(mesh: construction.mesh, groups: groups)
             overlay.name = Self.overlayNodeName

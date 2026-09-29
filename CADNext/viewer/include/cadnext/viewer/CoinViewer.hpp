@@ -79,6 +79,8 @@ public:
     void enterSketch2DView(const WorkPlane& plane, double gridStep = 1.0, bool showGrid = true);
     void exitSketch2DView();
     ViewMode viewMode() const;
+    // Sketch-local distance occupied by one vertical screen pixel.
+    double sketchUnitsPerPixel() const;
 
     // Selection / visibility policy for the work plane helpers. The
     // selected plane drives both the outline highlight and the Free3D

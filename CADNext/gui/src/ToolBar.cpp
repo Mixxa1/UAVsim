@@ -17,12 +17,17 @@ ToolBar::ToolBar(QWidget* parent)
     // and a target body).
     extrudeAction_ = addAction(tr("Выдавить"));
     extrudeAction_->setEnabled(false);
+    revolveAction_ = addAction(tr("Вращать"));
+    revolveAction_->setEnabled(false);
     cutExtrudeAction_ = addAction(tr("Вырезать выдавливанием"));
     cutExtrudeAction_->setEnabled(false);
     chamferAction_ = addAction(tr("Фаска"));
     chamferAction_->setEnabled(false);
     filletAction_ = addAction(tr("Скругление"));
     filletAction_->setEnabled(false);
+    threadAction_ = addAction(tr("Резьба"));
+    threadAction_->setToolTip(tr("Резьба с настоящими витками на цилиндрической или конической грани"));
+    threadAction_->setEnabled(false);
     addSeparator();
     // Enabled by MainWindow when the selection is a sketchable planar
     // body face (CADNext 0.8 Sketch on Face).
