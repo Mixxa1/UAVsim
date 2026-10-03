@@ -40,6 +40,7 @@
 #include <BRepClass_FaceClassifier.hxx>
 #include <ShapeFix_Face.hxx>
 #include <ShapeFix_Wire.hxx>
+#include <BRepTools_WireExplorer.hxx>
 #include <ShapeFix_Shell.hxx>
 #include <ShapeFix_Edge.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
@@ -69,8 +70,11 @@
 #include <GeomAPI_ProjectPointOnSurf.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom2d_BSplineCurve.hxx>
+#include <Geom2d_Line.hxx>
 #include <TColgp_Array1OfPnt2d.hxx>
 #include <Geom_SurfaceOfLinearExtrusion.hxx>
+#include <Geom_SurfaceOfRevolution.hxx>
+#include <Geom_TrimmedCurve.hxx>
 #include <ShapeAnalysis_Surface.hxx>
 #include <gp_Pnt2d.hxx>
 #include <Geom_RectangularTrimmedSurface.hxx>
@@ -303,7 +307,16 @@ public:
 
 protected:
     void SameParameter(const TopoDS_Edge& edge) const override {
-        if (preserveBoundaries_)
+        if (preserveBoundaries_ && BRep_Tool::SameRange(edge) && BRep_Tool::SameParameter(edge)) return;
+        if (preserveBoundaries_ && hasCommonParameter(edge)) {
+            // Sewing can clear these flags while keeping already compatible
+            // curves. Re-fitting their UV geometry to the shared 3D curve
+            // would change a face's boundary inside its native tolerance.
+            // Set the flags only after checking all stored representations.
+            BRep_Builder builder;
+            builder.SameRange(edge, true);
+            builder.SameParameter(edge, true);
+        } else if (preserveBoundaries_)
             // OCCT's merge calls this with its default precision, even when a
             // valid UV boundary differs from the shared 3D curve by the edge's
             // declared tolerance. Keep that tolerance during reparameterisation.
@@ -313,6 +326,40 @@ protected:
     }
 
 private:
+    static bool hasCommonParameter(const TopoDS_Edge& edge) {
+        try {
+            double first, last;
+            TopLoc_Location curveLocation;
+            const auto curve = BRep_Tool::Curve(edge, curveLocation, first, last);
+            if (curve.IsNull() || !(last > first) || !std::isfinite(first) || !std::isfinite(last)) return false;
+            const double tolerance = BRep_Tool::Tolerance(edge);
+            if (!std::isfinite(tolerance) || !(tolerance > 0)) return false;
+            bool hasBoundary = false;
+            for (int index = 1;; ++index) {
+                Handle(Geom2d_Curve) pcurve;
+                Handle(Geom_Surface) surface;
+                TopLoc_Location surfaceLocation;
+                double from, to;
+                BRep_Tool::CurveOnSurface(edge, pcurve, surface, surfaceLocation, from, to, index);
+                if (pcurve.IsNull() || surface.IsNull()) break;
+                const double scale = std::max({1.0, std::fabs(first), std::fabs(last)});
+                if (std::fabs(from - first) > 1e-12 * scale || std::fabs(to - last) > 1e-12 * scale)
+                    return false;
+                for (int sample = 0; sample <= 64; ++sample) {
+                    const double parameter = first + (last - first) * sample / 64.0;
+                    const auto uv = pcurve->Value(parameter);
+                    const auto onSurface = surface->Value(uv.X(), uv.Y()).Transformed(surfaceLocation.Transformation());
+                    const auto inSpace = curve->Value(parameter).Transformed(curveLocation.Transformation());
+                    if (!(onSurface.Distance(inSpace) <= tolerance)) return false;
+                }
+                hasBoundary = true;
+            }
+            return hasBoundary;
+        } catch (const Standard_Failure&) {
+            return false;
+        }
+    }
+
     bool preserveBoundaries_;
 };
 
@@ -2007,7 +2054,12 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                                     const auto uv = pcurve->Value(pcFirst + (pcLast - pcFirst) * sample / 32.0);
                                     const auto at = surface->Value(uv.X(), uv.Y());
                                     const GeomAPI_ProjectPointOnCurve projection(at, boundary3d, f, l);
-                                    independent = projection.NbPoints() && projection.LowerDistance() <= allowed;
+                                    // The distance to a bounded curve: its nearest foot or one of its ends. A
+                                    // point at the edge's end, a hair past it, has no foot inside the range.
+                                    const double distance = std::min({projection.NbPoints() ? projection.LowerDistance()
+                                                                                             : std::numeric_limits<double>::infinity(),
+                                                                      at.Distance(boundary3d->Value(f)), at.Distance(boundary3d->Value(l))});
+                                    independent = distance <= allowed;
                                 }
                                 // Both ends must cover the edge, not merely a sub-arc of it.
                                 const auto a = pcurve->Value(pcFirst), b = pcurve->Value(pcLast);
@@ -2025,13 +2077,29 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                             }
                             if (!independent) {
                                 if (reverse) pcurve->Reverse();
-                                TColStd_Array1OfReal matchingKnots(1, pcurve->NbKnots());
-                                for (int k = 1; k <= matchingKnots.Length(); ++k)
-                                    matchingKnots.SetValue(k, first + (pcurve->Knot(k) - pcFirst) * (last - first) / (pcLast - pcFirst));
-                                pcurve->SetKnots(matchingKnots);
+                                if (first != pcFirst || last != pcLast) {
+                                    TColStd_Array1OfReal matchingKnots(1, pcurve->NbKnots());
+                                    for (int k = 1; k <= matchingKnots.Length(); ++k)
+                                        matchingKnots.SetValue(k, first + (pcurve->Knot(k) - pcFirst) * (last - first) / (pcLast - pcFirst));
+                                    pcurve->SetKnots(matchingKnots);
+                                }
                                 largestSupportGap = std::max(largestSupportGap, gap);
+                                Handle(Geom2d_Curve) storedBoundary = pcurve;
+                                if (pcurve->Degree() == 1 && pcurve->NbPoles() == 2 &&
+                                    pcurve->Weight(1) == pcurve->Weight(2)) {
+                                    const gp_Vec2d derivative(pcurve->Pole(1), pcurve->Pole(2));
+                                    const double speed = derivative.Magnitude() / (last - first);
+                                    if (std::fabs(speed - 1.0) <= 8 * std::numeric_limits<double>::epsilon()) {
+                                        // A metric affine UV law is exactly a line. Keep that
+                                        // representation: adaptive integration handles a line
+                                        // differently from an equivalent degree-one spline.
+                                        const gp_Dir2d direction(derivative);
+                                        storedBoundary = new Geom2d_Line(
+                                            pcurve->Pole(1).Translated(gp_Vec2d(direction) * -first), direction);
+                                    }
+                                }
                                 BRep_Builder boundary;
-                                boundary.UpdateEdge(edge, pcurve, support,
+                                boundary.UpdateEdge(edge, storedBoundary, support,
                                     std::max({BRep_Tool::Tolerance(edge), segment.tolerance, 1.01 * gap}));
                                 boundary.Range(edge, support, first, last);
                                 boundary.SameRange(edge, true);
@@ -2159,7 +2227,108 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                 if (changed)
                     for (auto& wire : wires) wire = TopoDS::Wire(shared->Apply(wire));
             }
-            for (int orientation = 0; orientation < 2; ++orientation) {
+            bool periodicSupport = false;
+            if constexpr (std::is_convertible_v<decltype(surface), Handle(Geom_Surface)>)
+                periodicSupport = surface->IsUPeriodic() || surface->IsVPeriodic();
+            // A wire with some of its boundaries transferred, on a support that is not periodic,
+            // keeps its edge curves as placed (first pass). Where that leaves a face OCCT does not
+            // accept — an NX box of the samples has one, its other edges' curves not valid on the
+            // surface until repaired — the wire is repaired as a whole (second pass), and the
+            // boundary check below still decides.
+            const bool partlyExplicit = explicitBoundaries && !allExplicitBoundaries && !periodicSupport;
+            // A support with a side drawn into a point (a B-spline patch whose row of poles meets in
+            // one, under a three-sided face): the face's edges meet there in space but not in UV,
+            // where OCCT wants a degenerate edge along that side. A face OCCT does not accept on such
+            // a support is made again with those edges added, its own edges untouched (last pass).
+            double poleTolerance = 1e-7;
+            for (const auto& loop : patch.loops)
+                for (const auto& segment : loop)
+                    if (std::isfinite(segment.tolerance)) poleTolerance = std::max(poleTolerance, boundaryTolerance(segment));
+            bool singularSupport = false;
+            if constexpr (std::is_convertible_v<decltype(surface), Handle(Geom_Surface)>)
+                singularSupport = !periodicSupport && ShapeAnalysis_Surface(surface).HasSingularities(poleTolerance);
+            // A support that overlaps itself (a helix swept along its axis: a turn on, the same points
+            // again) can carry a face whose fins' curves the source put on different turns: the loop
+            // is closed in space but apart in UV, twice, by one step and back. The shorter run of
+            // edges moves by that step when every point of it then stays where it was in space (to
+            // the edge's tolerance); OCCT then gets a loop closed in UV (last pass).
+            const auto joinSheets = [&](const TopoDS_Face& onSupport) -> bool {
+                if constexpr (!std::is_convertible_v<decltype(surface), Handle(Geom_Surface)>) {
+                    return false;
+                } else {
+                    const Handle(Geom_Surface) geometry = surface;
+                    struct Piece {
+                        TopoDS_Edge edge;
+                        Handle(Geom2d_Curve) pcurve;
+                        double first = 0, last = 0, tolerance = 0;
+                        gp_Pnt2d start, end;
+                    };
+                    // A UV step's length in space at a point, to first order.
+                    const auto spatial = [&](const gp_Pnt2d& at, const gp_Vec2d& step) {
+                        gp_Pnt p;
+                        gp_Vec du, dv;
+                        geometry->D1(at.X(), at.Y(), p, du, dv);
+                        return (du * step.X() + dv * step.Y()).Magnitude();
+                    };
+                    bool moved = false;
+                    for (TopExp_Explorer w(onSupport, TopAbs_WIRE); w.More(); w.Next()) {
+                        std::vector<Piece> pieces;
+                        for (BRepTools_WireExplorer e(TopoDS::Wire(w.Current()), onSupport); e.More(); e.Next()) {
+                            Piece piece;
+                            piece.edge = e.Current();
+                            piece.pcurve = BRep_Tool::CurveOnSurface(piece.edge, onSupport, piece.first, piece.last);
+                            if (piece.pcurve.IsNull()) return false;
+                            const bool backwards = piece.edge.Orientation() == TopAbs_REVERSED;
+                            piece.start = piece.pcurve->Value(backwards ? piece.last : piece.first);
+                            piece.end = piece.pcurve->Value(backwards ? piece.first : piece.last);
+                            piece.tolerance = std::max(1e-7, BRep_Tool::Tolerance(piece.edge));
+                            pieces.push_back(piece);
+                        }
+                        const std::size_t n = pieces.size();
+                        std::vector<std::size_t> open; // junction k: the end of piece k to the start of k + 1
+                        for (std::size_t k = 0; k < n; ++k) {
+                            const gp_Vec2d gap(pieces[k].end, pieces[(k + 1) % n].start);
+                            if (spatial(pieces[k].end, gap) > 10.0 * std::max(pieces[k].tolerance, pieces[(k + 1) % n].tolerance))
+                                open.push_back(k);
+                        }
+                        if (open.empty()) continue;
+                        if (open.size() != 2) return false;
+                        const std::size_t i = open[0], j = open[1];
+                        const gp_Vec2d out(pieces[i].end, pieces[(i + 1) % n].start), back(pieces[j].end, pieces[(j + 1) % n].start);
+                        if (spatial(pieces[i].end, out + back) > 10.0 * std::max(pieces[i].tolerance, pieces[j].tolerance)) return false;
+                        // Pieces i+1..j move by `back`, or pieces j+1..i (round the loop) by `out`.
+                        const bool inner = j - i <= n - (j - i);
+                        const gp_Vec2d step = inner ? back : out;
+                        std::vector<std::size_t> run;
+                        for (std::size_t k = inner ? i + 1 : j + 1, count = inner ? j - i : n - (j - i); count > 0; --count, k = (k + 1) % n)
+                            run.push_back(k % n);
+                        for (const std::size_t k : run)
+                            for (int sample = 0; sample <= 16; ++sample) {
+                                const gp_Pnt2d at = pieces[k].pcurve->Value(pieces[k].first + (pieces[k].last - pieces[k].first) * sample / 16.0);
+                                const gp_Pnt2d there = at.Translated(step);
+                                if (!(geometry->Value(at.X(), at.Y()).Distance(geometry->Value(there.X(), there.Y())) <= pieces[k].tolerance))
+                                    return false;
+                            }
+                        BRep_Builder builder;
+                        for (const std::size_t k : run) {
+                            const Handle(Geom2d_Curve) shifted = Handle(Geom2d_Curve)::DownCast(pieces[k].pcurve->Translated(step));
+                            builder.UpdateEdge(pieces[k].edge, shifted, onSupport, BRep_Tool::Tolerance(pieces[k].edge));
+                            builder.Range(pieces[k].edge, onSupport, pieces[k].first, pieces[k].last);
+                        }
+                        moved = true;
+                    }
+                    return moved;
+                }
+            };
+            enum class Pass { AsPlaced, RepairWhole, ClosePoles, JoinSheets };
+            std::vector<Pass> passes{Pass::AsPlaced};
+            if (partlyExplicit) passes.push_back(Pass::RepairWhole);
+            if (singularSupport) passes.push_back(Pass::ClosePoles);
+            if (explicitBoundaries && !periodicSupport) passes.push_back(Pass::JoinSheets);
+            for (std::size_t attempt = 0; attempt < 2 * passes.size(); ++attempt) {
+                const int orientation = int(attempt % 2);
+                const Pass pass = passes[attempt / 2];
+                const bool repairWhole = pass == Pass::RepairWhole;
                 TopoDS_Wire wire = wires[outer];
                 if (orientation) wire.Reverse();
                 BRepBuilderAPI_MakeFace maker(surface, wire, false);
@@ -2167,20 +2336,44 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                 for (std::size_t i = 0; i < wires.size(); ++i)
                     if (i != outer) maker.Add(wires[i]);
                 if (!maker.IsDone()) { trimDiagnostic = "hole"; continue; }
-                ShapeFix_Face fixer(maker.Face());
+                TopoDS_Face trimmed = maker.Face();
+                if (pass == Pass::ClosePoles) {
+                    std::vector<TopoDS_Wire> closed;
+                    for (TopExp_Explorer w(trimmed, TopAbs_WIRE); w.More(); w.Next()) {
+                        ShapeFix_Wire poles(TopoDS::Wire(w.Current()), trimmed, poleTolerance);
+                        poles.FixDegenerated();
+                        closed.push_back(poles.Wire());
+                    }
+                    if (closed.empty()) { trimDiagnostic = "poles"; continue; }
+                    BRepBuilderAPI_MakeFace again(surface, closed.front(), false);
+                    for (std::size_t i = 1; i < closed.size() && again.IsDone(); ++i) again.Add(closed[i]);
+                    if (!again.IsDone()) { trimDiagnostic = "poles"; continue; }
+                    trimmed = again.Face();
+                }
+                if (pass == Pass::JoinSheets && orientation == 0 && !joinSheets(trimmed)) {
+                    trimDiagnostic = "sheets";
+                    break;
+                }
+                ShapeFix_Face fixer(trimmed);
                 // Adding the degenerate edge of an enclosed pole itself: on a cone's tip bounded by an
                 // intersection ring (ACIS: the apex a curveless edge) OCCT 7.9 dereferences a null
                 // handle there and the process dies. Such a face goes to splitSupportFace instead.
                 fixer.FixPeriodicDegeneratedMode() = 0;
-                if (allExplicitBoundaries) {
-                    // Periodic wire repair is still needed for seams, but its curve repair
-                    // can replace valid tolerant UV boundaries with new projections.
+                if (allExplicitBoundaries || (partlyExplicit && !repairWhole)) {
+                    // Non-transferred edges were already placed and checked
+                    // above. Wire repair may still add periodic seams, but
+                    // repairing all edge curves would also replace a valid
+                    // transferred boundary on a partly explicit planar wire.
+                    // Partly explicit periodic wires still need seam repair.
                     fixer.FixWireTool()->FixEdgeCurvesMode() = 0;
                     fixer.FixWireTool()->FixSameParameterMode() = 0;
+                    // The native vertex tolerance already covers small UV
+                    // endpoint gaps. FixLacking would bend both pcurves to
+                    // their average endpoint and change the enclosed area.
+                    // Keep periodic shifts and seam repair enabled.
+                    fixer.FixWireTool()->FixLackingMode() = 0;
                 }
-                bool needsRepair = !allExplicitBoundaries;
-                if constexpr (std::is_convertible_v<decltype(surface), Handle(Geom_Surface)>)
-                    needsRepair |= surface->IsUPeriodic() || surface->IsVPeriodic();
+                const bool needsRepair = !allExplicitBoundaries || periodicSupport;
                 if (needsRepair) fixer.Perform();
                 fixer.FixOrientation();
                 const TopoDS_Face face = fixer.Face();
@@ -2439,13 +2632,61 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
         }
         return {};
     };
+    // A loop that runs along an edge and back again (a slit: both of the edge's fins on this face,
+    // as the seam a STEP cylinder brings along) bounds the face's region only as its two other
+    // parts do: the loop is those parts, the edge none of the face's boundary. The edge is one
+    // traversed both ways when the two uses have the same kind, swapped ends and the same middle —
+    // the same, not close: two distinct edges nearer than their tolerance (a strip thinner than it)
+    // are both boundary.
+    const auto withoutSlits = [&](const AnalyticFacePatch& source) -> std::optional<AnalyticFacePatch> {
+        const auto slit = [&](const AnalyticEdgeSegment& x, const AnalyticEdgeSegment& y) {
+            if (x.kind != y.kind || !x.hasEndpoints || !y.hasEndpoints || x.forward == y.forward) return false;
+            constexpr double tolerance = 1e-12;
+            if (point(x.start).Distance(point(x.end)) <= 1e-7 || point(x.start).Distance(point(y.end)) > tolerance ||
+                point(x.end).Distance(point(y.start)) > tolerance) return false;
+            try {
+                const TopoDS_Edge a = sourceBoundary(x), b = sourceBoundary(y);
+                if (a.IsNull() || b.IsNull()) return false;
+                const BRepAdaptor_Curve ca(a), cb(b);
+                return ca.Value(0.5 * (ca.FirstParameter() + ca.LastParameter()))
+                           .Distance(cb.Value(0.5 * (cb.FirstParameter() + cb.LastParameter()))) <= 1e-10;
+            } catch (const Standard_Failure&) {
+                return false;
+            }
+        };
+        std::vector<std::vector<AnalyticEdgeSegment>> pending(source.loops.begin(), source.loops.end()), loops;
+        bool changed = false;
+        while (!pending.empty()) {
+            std::vector<AnalyticEdgeSegment> loop = std::move(pending.back());
+            pending.pop_back();
+            bool split = false;
+            for (std::size_t a = 0; a < loop.size() && !split; ++a)
+                for (std::size_t b = a + 1; b < loop.size() && !split; ++b) {
+                    if (!slit(loop[a], loop[b])) continue;
+                    std::vector<AnalyticEdgeSegment> between(loop.begin() + std::ptrdiff_t(a + 1), loop.begin() + std::ptrdiff_t(b));
+                    std::vector<AnalyticEdgeSegment> around(loop.begin() + std::ptrdiff_t(b + 1), loop.end());
+                    around.insert(around.end(), loop.begin(), loop.begin() + std::ptrdiff_t(a));
+                    if (!between.empty()) pending.push_back(std::move(between));
+                    if (!around.empty()) pending.push_back(std::move(around));
+                    split = changed = true;
+                }
+            if (!split) loops.push_back(std::move(loop));
+        }
+        if (!changed) return std::nullopt;
+        AnalyticFacePatch result = source;
+        // The source's order of loops kept as far as it goes: the loop holding the first segment first.
+        std::reverse(loops.begin(), loops.end());
+        result.loops = std::move(loops);
+        return result;
+    };
     try {
         TopoDS_Compound compound;
         BRep_Builder builder;
         builder.MakeCompound(compound);
         for (std::size_t faceIndex = 0; faceIndex < patches.size(); ++faceIndex) {
             currentFace = faceIndex;
-            const auto& patch = patches[faceIndex];
+            const std::optional<AnalyticFacePatch> unslit = withoutSlits(patches[faceIndex]);
+            const auto& patch = unslit ? *unslit : patches[faceIndex];
             if (patch.loops.empty() && patch.kind != AnalyticFacePatch::Kind::Sphere && patch.kind != AnalyticFacePatch::Kind::Torus)
                 return fail("Analytic face " + std::to_string(faceIndex) + " has no boundary");
             const gp_Ax3 frame(point(patch.origin), direction(patch.normal),
@@ -3276,6 +3517,15 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                     return fail("Could not construct analytic sphere face " +
                                 std::to_string(faceIndex));
                 face = maker.Face();
+                // A latitude the source splits into arcs (a band whose circles are two edges each):
+                // the band's whole circles are not its edges, so the face is trimmed by the arcs
+                // themselves on the same sphere. The boundary check below still decides.
+                std::string band;
+                if (!boundaryMatches(face, patch, band)) {
+                    const Handle(Geom_SphericalSurface) arcs = new Geom_SphericalSurface(sphereFrame, patch.radius);
+                    const TopoDS_Face trimmed = trimmedSurfaceFace(arcs, patch);
+                    if (!trimmed.IsNull()) face = trimmed;
+                }
                 }
             } else if (patch.kind == AnalyticFacePatch::Kind::Torus &&
                        isPositiveFinite(patch.majorRadius) && isPositiveFinite(patch.minorRadius) &&
@@ -3289,6 +3539,24 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                 face = trimmedSurfaceFace(apple, patch);
                 if (face.IsNull())
                     return fail("Apple torus boundary does not match its exact support: " + trimDiagnostic);
+            } else if (patch.kind == AnalyticFacePatch::Kind::Torus &&
+                       std::isfinite(patch.majorRadius) && patch.majorRadius < 0.0 &&
+                       isPositiveFinite(patch.minorRadius) && -patch.majorRadius < patch.minorRadius) {
+                // A "lemon" torus (XT: a negative major radius a, |a| < minor b), the inner part of
+                // a self-intersecting one: R(u, v) = C + (a + b·cos v)(cos u·X + sin u·Y) + b·sin v·A
+                // where a + b·cos v >= 0 (a crowned wheel's tread is one). OCCT's torus has no
+                // negative radius, so the support is that formula as it stands: the meridian's arc
+                // between the two points on the axis, revolved; same parameters, same normal.
+                const double reach = std::acos(-patch.majorRadius / patch.minorRadius);
+                const gp_Ax2 meridian(frame.Location().Translated(gp_Vec(frame.XDirection()) * patch.majorRadius),
+                                      frame.YDirection().Reversed(), frame.XDirection());
+                const Handle(Geom_Curve) arc =
+                    new Geom_TrimmedCurve(new Geom_Circle(meridian, patch.minorRadius), -reach, reach);
+                const Handle(Geom_Surface) lemon =
+                    new Geom_SurfaceOfRevolution(arc, gp_Ax1(frame.Location(), frame.Direction()));
+                face = trimmedSurfaceFace(lemon, patch);
+                if (face.IsNull())
+                    return fail("Lemon torus boundary does not match its exact support: " + trimDiagnostic);
             } else if (patch.kind == AnalyticFacePatch::Kind::Torus) {
                 if (!isPositiveFinite(patch.majorRadius) ||
                     !isPositiveFinite(patch.minorRadius) ||
@@ -3438,13 +3706,35 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                     bool meridians = true;
                     for (std::size_t i = 0; i < 2 && meridians; ++i) {
                         const auto& loop = patch.loops[i];
-                        if (loop.size() != 1 || loop.front().kind != AnalyticEdgeKind::Circle ||
-                            (loop.front().hasEndpoints &&
-                             point(loop.front().start).Distance(point(loop.front().end)) >= 1e-10)) {
+                        if (loop.empty() || loop.front().kind != AnalyticEdgeKind::Circle) {
                             meridians = false;
                             break;
                         }
                         const auto& segment = loop.front();
+                        double sweep=0.0;
+                        for (const auto& arc:loop) {
+                            if (arc.kind!=AnalyticEdgeKind::Circle ||
+                                point(arc.center).Distance(point(segment.center))>1e-7 ||
+                                std::fabs(arc.radius-segment.radius)>1e-7 ||
+                                std::fabs(direction(arc.normal).Dot(direction(segment.normal)))<1.0-1e-10 ||
+                                (direction(arc.normal).Dot(direction(segment.normal))>0)!=(arc.forward==segment.forward)) {
+                                meridians=false;break;
+                            }
+                            if (!arc.hasEndpoints || point(arc.start).Distance(point(arc.end))<1e-10) {
+                                sweep+=turn;continue;
+                            }
+                            const gp_Ax2 circleFrame(point(arc.center),direction(arc.normal),direction(arc.xAxis));
+                            const auto angle=[&](const cadnext::Vector3& endpoint) {
+                                const gp_Vec offset(point(arc.center),point(endpoint));
+                                return std::atan2(offset.Dot(gp_Vec(circleFrame.YDirection())),
+                                                  offset.Dot(gp_Vec(circleFrame.XDirection())));
+                            };
+                            const double start=angle(arc.start);
+                            double end=angle(arc.end);
+                            if (arc.forward) {while(end<=start)end+=turn;sweep+=end-start;}
+                            else {while(end>=start)end-=turn;sweep+=start-end;}
+                        }
+                        if (!meridians || std::fabs(sweep-turn)>1e-6) {meridians=false;break;}
                         const gp_Vec offset(point(patch.origin), point(segment.center));
                         const double axial = offset.Dot(gp_Vec(frame.Direction()));
                         const gp_Vec radial = offset - gp_Vec(frame.Direction()) * axial;
@@ -3485,8 +3775,14 @@ cadnext::Result<ShapeHandle> OcctKernel::makeAnalyticSolid(
                 // across a blend) is left to the general trimming below.
                 bool latitudes = true;
                 for (const auto& loop : patch.loops)
-                    for (const auto& candidate : loop)
-                        latitudes = latitudes && candidate.kind == AnalyticEdgeKind::Circle;
+                    for (const auto& candidate : loop) {
+                        if(candidate.kind!=AnalyticEdgeKind::Circle) {latitudes=false;continue;}
+                        const gp_Vec offset(point(patch.origin),point(candidate.center));
+                        const double axial=offset.Dot(gp_Vec(frame.Direction()));
+                        latitudes=latitudes &&
+                            std::fabs(direction(candidate.normal).Dot(frame.Direction()))>1.0-1e-6 &&
+                            (offset-gp_Vec(frame.Direction())*axial).Magnitude()<1e-7;
+                    }
                 if (face.IsNull() && latitudes) {
                     std::vector<double> angles;
                     for (const auto& loop : patch.loops) {

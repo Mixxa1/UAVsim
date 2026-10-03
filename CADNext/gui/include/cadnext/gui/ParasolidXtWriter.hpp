@@ -5,6 +5,7 @@
 
 #include <string>
 #include <vector>
+#include <cstdint>
 
 // Parasolid transmit files written by CADNext: text .x_t or neutral binary .x_b, a part or an
 // assembly, the format SOLIDWORKS, Solid Edge, NX and Onshape use natively and AutoCAD and
@@ -41,6 +42,16 @@ struct ParasolidXtWriteReport {
     std::vector<std::string> warnings;
 };
 
+// Integer application attributes owned by a BODY. Their definitions have
+// class-1 propagation/merge actions and allow BODY ownership only. Some
+// native applications reserve an empty pointer field before the integer
+// field; that field is transmitted as null, as XT requires.
+struct ParasolidXtIntegerBodyAttribute {
+    std::string name;
+    std::vector<std::int32_t> values;
+    bool emptyPointerField = false;
+};
+
 // A product whose root holds one part at the identity is written as a part file (root BODY);
 // anything else as an assembly (root ASSEMBLY, INSTANCE and TRANSFORM nodes, each part's body once).
 cadnext::Result<ParasolidXtWriteReport> writeParasolidXtProduct(kernel::OcctKernel& kernel,
@@ -56,6 +67,14 @@ cadnext::Result<std::string> encodeParasolidXtProduct(kernel::OcctKernel& kernel
 // A current-state partition stream (WORLD root), the representation cached by a SOLIDWORKS
 // configuration. This is a Parasolid stream, not a complete .SLDPRT container or feature history.
 cadnext::Result<std::string> encodeParasolidXtPartition(kernel::OcctKernel& kernel,
-                                                       const kernel::ShapeHandle& shape);
+    const kernel::ShapeHandle& shape,
+    const std::vector<ParasolidXtIntegerBodyAttribute>& attributes = {});
+
+// One BODY-rooted neutral-binary transmit payload, without the printable .x_b
+// file header. Native stored-feature bodies use this, rather than the WORLD
+// partition above. The generated graph is decoded again before returning.
+cadnext::Result<std::string> encodeParasolidXtBodyStream(kernel::OcctKernel& kernel,
+    const kernel::ShapeHandle& shape,
+    const std::vector<ParasolidXtIntegerBodyAttribute>& attributes = {});
 
 } // namespace cadnext::gui

@@ -29,6 +29,8 @@
 // non-periodic spline, to the same points over the same domain, and `periodic` marks it.
 //
 // A full torus is similarly split into two exact bands at opposite meridians.
+// A boundaryless doubly closed NURBS surface is split into four exact parameter
+// rectangles, with shared iso curves and their original linear UV laws.
 // Refused, with the reason: sheet and wire bodies, offset and other procedural surfaces,
 // non-manifold edges.
 
@@ -75,12 +77,24 @@ struct DescribedEdge {
     double firstParameter = 0.0, lastParameter = 0.0; // retain the phase of closed conics
 };
 
+// Analytic boundary law on a plane, before rational spatial conversion.
+// Hyperbola: O + a*cosh(t)*X + b*sinh(t)*Y.
+// Parabola: O + t*t/(4*a)*X + t*Y, where a is the focal length.
+// UV coordinates are metres; the two axes retain the source frame's handedness.
+struct AnalyticPcurveDefinition {
+    enum class Kind { Hyperbola, Parabola } kind = Kind::Hyperbola;
+    cadnext::Vector3 origin, xAxis, yAxis;
+    double a = 0, b = 0;
+    double first = 0, last = 0;
+};
+
 struct DescribedCoedge {
     int edge = -1;
     bool forward = true; // traversed along the edge
     // The source boundary in the support's UV frame, in metres for length coordinates. Its
     // parameter runs along the 3D edge, independently of this coedge's traversal direction.
     std::optional<BSplineCurveDefinition> pcurve;
+    std::optional<AnalyticPcurveDefinition> analyticPcurve;
 };
 
 // Loops run with the face on their left, looking against the face normal.
@@ -107,6 +121,13 @@ struct ExactBRepDescription {
     double largestVertexGap = 0.0;
 };
 
-cadnext::Result<ExactBRepDescription> describeExactBRep(const OcctKernel& kernel, const ShapeHandle& shape);
+enum class ConeParameterization {
+    PositiveAngle, // XT convention: radius grows along the axis.
+    SourceFrame    // Preserve the reference circle and signed angle for C3D UV.
+};
+
+cadnext::Result<ExactBRepDescription> describeExactBRep(
+    const OcctKernel& kernel, const ShapeHandle& shape,
+    ConeParameterization coneParameterization = ConeParameterization::PositiveAngle);
 
 } // namespace cadnext::kernel

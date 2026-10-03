@@ -38,6 +38,7 @@
 #include <BRepBuilderAPI_MakeWire.hxx>
 #include <BRepBuilderAPI_NurbsConvert.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeTorus.hxx>
 #include <GeomConvert.hxx>
 #include <Geom_BSplineCurve.hxx>
@@ -273,6 +274,8 @@ void kernelModels() {
     const auto frustum = kernel.makeRevolvedProfile(cone);
     check(frustum.isOk(), "усечённый конус построен вращением");
     if (frustum.isOk()) roundTrip(kernel, frustum.value(), "усечённый конус");
+    const auto coneSector = kernel.adoptShape(BRepPrimAPI_MakeCone(.02, .008, .03, 1.1).Shape(), "cone-sector");
+    roundTrip(kernel, coneSector, "сектор конуса с UV-границами", 0, true);
 
     // Faces on extrusions go out as SWEPT_SURF and back through the reader's swept path: an
     // elliptic prism (volume pi a b h) and a prism with a B-spline side (volume = base area * h).

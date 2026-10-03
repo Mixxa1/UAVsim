@@ -247,7 +247,7 @@ AssemblyWindow::AssemblyWindow(QWidget* parent)
     fileMenu->addAction(tr("Сохранить как…"), this, [this]() { saveAssemblyAs(); });
     fileMenu->addSeparator();
     fileMenu->addAction(tr("Импорт сборки (STEP, Parasolid, SOLIDWORKS)…"), this, [this]() { importStepAssembly(); });
-    fileMenu->addAction(tr("Экспорт сборки (STEP, Parasolid)…"), this, [this]() { exportStepAssembly(); });
+    fileMenu->addAction(tr("Экспорт сборки (STEP, Parasolid, КОМПАС-3D)…"), this, [this]() { exportStepAssembly(); });
 
     QMenu* editMenu = menuBar()->addMenu(tr("Правка"));
     undoAction_ = editMenu->addAction(tr("Отменить"), QKeySequence::Undo, this,
@@ -510,14 +510,33 @@ void AssemblyWindow::exportStepAssembly() {
     const QString ap242 = tr("STEP AP242 — современный стандарт (*.step *.stp)");
     const QString xtText = tr("Parasolid, текст — SOLIDWORKS, Solid Edge, NX, КОМПАС-3D, AutoCAD (*.x_t)");
     const QString xtBinary = tr("Parasolid, двоичный (*.x_b)");
+    const QString kompas = tr("КОМПАС-3D, сборка и её детали (*.a3d)");
     QString stepPath = QFileDialog::getSaveFileName(
         this, tr("Экспорт сборки"),
         current.absoluteDir().filePath(current.completeBaseName() + QStringLiteral(".step")),
-        QStringList{ap214, ap242, xtText, xtBinary}.join(QStringLiteral(";;")), &selectedFilter);
+        QStringList{ap214, ap242, xtText, xtBinary, kompas}.join(QStringLiteral(";;")), &selectedFilter);
     if (stepPath.isEmpty()) {
         return;
     }
     QString suffix = QFileInfo(stepPath).suffix().toLower();
+    if (selectedFilter == kompas || suffix == QLatin1String("a3d")) {
+        if (suffix != QLatin1String("a3d")) stepPath += QStringLiteral(".a3d");
+        QApplication::setOverrideCursor(Qt::WaitCursor);
+        const Result<AssemblyExchangeReport> exported = exportAssemblyToKompas(currentFilePath_.toStdString(), stepPath.toStdString());
+        QApplication::restoreOverrideCursor();
+        const QString title = tr("Экспорт сборки в КОМПАС-3D");
+        if (!exported.isOk()) {
+            QMessageBox::warning(this, title, QString::fromStdString(exported.error().message));
+            return;
+        }
+        const AssemblyExchangeReport& report = exported.value();
+        const QString summary = tr("Записано: %1 деталей, %2 вхождений — %3").arg(report.parts).arg(report.occurrences).arg(stepPath);
+        statusBar()->showMessage(summary, 10000);
+        QStringList lines;
+        for (const std::string& warning : report.warnings) lines << QString::fromStdString(warning);
+        if (!lines.isEmpty()) QMessageBox::information(this, title, summary + QStringLiteral("\n\n") + lines.join(QStringLiteral("\n")));
+        return;
+    }
     const bool parasolid = selectedFilter == xtText || selectedFilter == xtBinary ||
                            suffix == QLatin1String("x_t") || suffix == QLatin1String("x_b");
     const bool binary = parasolid && (selectedFilter == xtBinary || suffix == QLatin1String("x_b"));

@@ -49,6 +49,11 @@ cadnext::Result<AssemblyExchangeReport> exportAssemblyToStep(const std::string& 
 cadnext::Result<AssemblyExchangeReport> exportAssemblyToParasolid(const std::string& cadasmPath, const std::string& xtPath,
                                                                   ParasolidXtEncoding encoding);
 
+// The same product as a KOMPAS-3D assembly (writeKompasNativeAssembly): each part placed a .m3d beside the
+// .a3d, each leaf occurrence a component — subassemblies flattened, their placements composed. At most
+// five occurrences (the KOMPAS writer's limit), refused otherwise.
+cadnext::Result<AssemblyExchangeReport> exportAssemblyToKompas(const std::string& cadasmPath, const std::string& a3dPath);
+
 // Returns the path of the top .cadasm written into `folder` (created when missing). The imports take an
 // optional progress: told of each part, and able to stop between parts (the reason then is
 // importCancelledReason()); they run on any thread, touching nothing but their own kernel and files.

@@ -56,6 +56,26 @@ const std::vector<ParasolidXtFieldSpec>& bodyFields() {
     return fields;
 }
 
+// LIST and its blocks carry the heads of per-definition attribute chains.
+// Use semantic fields through embedded edits, rather than transmitting the
+// obsolete V13 list bookkeeping words as if they still had a meaning.
+std::vector<ParasolidXtFieldSpec> nodeFields(quint16 type) {
+    if (type == 12) return bodyFields();
+    if (type == 70) return {
+        {"node_id", 'd', 1, false}, {"list_type", 'd', 1, false},
+        {"notransmit", 'l', 1, false}, {"owner", 'p', 1, false},
+        {"next", 'p', 1, false}, {"previous", 'p', 1, false},
+        {"list_length", 'd', 1, false}, {"block_length", 'd', 1, false},
+        {"finger_index", 'd', 1, false}, {"finger_block", 'p', 1, false},
+        {"list_block", 'p', 1, false}
+    };
+    if (type == 74) return {
+        {"n_entries", 'd', 1, false}, {"index_map_offset", 'd', 1, false},
+        {"next_block", 'p', 1, false}, {"entries", 'p', 1, true}
+    };
+    return parasolidXtBaseSchema(type);
+}
+
 class Graph {
 public:
     quint32 add(quint16 type) {
@@ -194,28 +214,47 @@ private:
 // The embedded schema of the first node of each type: 255 for "as the base", and for BODY the
 // edits Parasolid 19.1 transmits (copy the 23 base fields, append four).
 void writeSchema(Encoder& e, quint16 type) {
-    if (type != 12) {
+    if (type != 12 && type != 70 && type != 74) {
         e.byteValue(255);
         return;
     }
-    e.byteValue(27);
-    for (int i = 0; i < 23; ++i) e.character('C');
-    const auto append = [&](const QByteArray& name, int pointerClass, const QByteArray& scalar) {
-        e.character('A');
+    const auto field = [&](char edit, const QByteArray& name, int pointerClass, const QByteArray& scalar) {
+        e.character(edit);
         e.shortString(name);
         e.shortValue(pointerClass);
         e.index(0); // n_elts: a scalar
         if (pointerClass == 0) e.shortString(scalar);
     };
-    append("index_map_offset", 0, "d");
-    append("index_map", 82, {});
-    append("node_id_index_map", 82, {});
-    append("schema_embedding_map", 82, {});
+    if (type == 12) {
+        e.byteValue(27);
+        for (int i = 0; i < 23; ++i) e.character('C');
+        field('A', "index_map_offset", 0, "d");
+        field('A', "index_map", 82, {});
+        field('A', "node_id_index_map", 82, {});
+        field('A', "schema_embedding_map", 82, {});
+    } else if (type == 70) {
+        e.byteValue(11);
+        e.character('C'); // node_id
+        field('I', "list_type", 0, "d");
+        field('I', "notransmit", 0, "l");
+        for (int i = 0; i < 3; ++i) e.character('C'); // owner, next, previous
+        e.character('D'); // obsolete list-type word
+        e.character('C'); e.character('C'); // length and block length
+        e.character('D'); // obsolete size-of-entry word
+        field('I', "finger_index", 0, "d");
+        field('I', "finger_block", 74, {});
+        e.character('C'); // list_block
+    } else {
+        e.byteValue(4);
+        e.character('C'); // n_entries
+        field('I', "index_map_offset", 0, "d");
+        e.character('C'); e.character('C'); // next_block and entries
+    }
     e.character('Z');
 }
 
 bool writeNode(Encoder& e, const Node& node, QSet<quint16>& described, std::string& error) {
-    const std::vector<ParasolidXtFieldSpec> base = node.type == 12 ? bodyFields() : parasolidXtBaseSchema(node.type);
+    const std::vector<ParasolidXtFieldSpec> base = nodeFields(node.type);
     if (base.empty()) {
         error = "нет базовой схемы для узла типа " + std::to_string(node.type);
         return false;
@@ -365,9 +404,8 @@ quint32 writeBody(Graph& g, const kernel::ExactBRepDescription& d) {
     std::vector<int> uses(d.edges.size(), 0), uvUses(d.edges.size(), 0);
     std::vector<bool> surfaceEdges(d.edges.size(), false);
     for (const auto& face : d.faces) for (const auto& loop : face.loops) for (const auto& coedge : loop) {
-        const auto kind = d.surfaces[std::size_t(face.surface)].kind;
         ++uses[std::size_t(coedge.edge)];
-        if (coedge.pcurve && kind != kernel::DescribedSurface::Kind::Cone)
+        if (coedge.pcurve)
             ++uvUses[std::size_t(coedge.edge)];
     }
     for (std::size_t e = 0; e < d.edges.size(); ++e)
@@ -644,6 +682,13 @@ quint32 writeBody(Graph& g, const kernel::ExactBRepDescription& d) {
                     kernel::DescribedCurve boundary;
                     boundary.kind = kernel::DescribedCurve::Kind::BSpline;
                     boundary.bspline = *coedge.pcurve;
+                    const auto& support = d.surfaces[std::size_t(d.faces[f].surface)];
+                    if (support.kind == kernel::DescribedSurface::Kind::Cone) {
+                        // XT cone v is axial length; the source OCCT pcurve
+                        // uses length along the generator. This affine change
+                        // preserves even a rational UV curve without fitting.
+                        for (auto& pole : boundary.bspline.poles) pole.y *= support.cosHalfAngle;
+                    }
                     const quint32 planar = curveNode(boundary, true, false);
                     const quint32 sp = g.add(137), trimmed = g.add(133);
                     id(sp); id(trimmed);
@@ -718,6 +763,83 @@ quint32 writeBody(Graph& g, const kernel::ExactBRepDescription& d) {
     g.pointer(body, "edge", edges.empty() ? 0 : edges.front());
     g.pointer(body, "vertex", vertices.empty() ? 0 : vertices.front());
     return body;
+}
+
+std::string validateBodyAttributes(const std::vector<ParasolidXtIntegerBodyAttribute>& attributes) {
+    if (attributes.size() > 4096) return "слишком много атрибутов тела Parasolid XT";
+    QSet<QByteArray> names;
+    for (const auto& attribute : attributes) {
+        if (attribute.name.empty() || attribute.name.size() > 255 ||
+            std::any_of(attribute.name.begin(), attribute.name.end(), [](unsigned char c) {
+                return c < 0x20 || c > 0x7e;
+            }) || attribute.values.empty() || attribute.values.size() > 4096)
+            return "атрибут тела Parasolid XT должен иметь печатное ASCII-имя и от 1 до 4096 целых значений";
+        const QByteArray name = QByteArray::fromStdString(attribute.name);
+        if (names.contains(name)) return "имена атрибутов тела Parasolid XT должны быть уникальны";
+        names.insert(name);
+    }
+    return {};
+}
+
+// Returns the head of the definition chain (WORLD.attrib_def in a partition).
+quint32 writeBodyAttributes(Graph& g, quint32 body,
+                           const std::vector<ParasolidXtIntegerBodyAttribute>& attributes) {
+    if (attributes.empty()) return 0;
+    qint64 highestId = g.at(body).fields["highest_node_id"].integers.front();
+    std::vector<quint32> definitions, instances;
+    for (const auto& attribute : attributes) {
+        const quint32 definition = g.add(80), name = g.add(79), value = g.add(82), instance = g.add(81);
+        g.at(name).variableCount = quint32(attribute.name.size());
+        g.at(name).fields["String"].characters = QByteArray::fromStdString(attribute.name);
+        g.at(value).variableCount = quint32(attribute.values.size());
+        g.integers(value, "values", std::vector<qint64>(attribute.values.begin(), attribute.values.end()));
+        g.at(definition).variableCount = attribute.emptyPointerField ? 2 : 1;
+        g.pointer(definition, "identifier", name);
+        g.integer(definition, "type_id", 9000); // application-defined
+        g.integers(definition, "actions", {0, 0, 0, 0, 3, 5, 0, 0}); // class 1
+        std::vector<qint64> owners(14, 0);
+        owners[2] = 1; // SCH_by_owner
+        g.integers(definition, "legal_owners", std::move(owners));
+        g.integers(definition, "fields", attribute.emptyPointerField
+            ? std::vector<qint64>{9, 1} : std::vector<qint64>{1});
+        g.at(instance).variableCount = g.at(definition).variableCount;
+        g.integer(instance, "node_id", ++highestId);
+        g.pointer(instance, "definition", definition);
+        g.pointer(instance, "owner", body);
+        g.pointers(instance, "fields", attribute.emptyPointerField
+            ? std::vector<quint32>{0, value} : std::vector<quint32>{value});
+        definitions.push_back(definition);
+        instances.push_back(instance);
+    }
+    g.singleChain(definitions, "next");
+    g.chain(instances, "next", "previous");
+    g.pointer(body, "attributes_groups", instances.front());
+    g.integer(body, "highest_node_id", highestId);
+
+    const quint32 list = g.add(70);
+    g.pointer(body, "attribute_chains", list);
+    g.integer(list, "list_type", 4);
+    g.logical(list, "notransmit", true);
+    g.pointer(list, "owner", body);
+    g.integer(list, "list_length", instances.size());
+    g.integer(list, "block_length", 20);
+    g.integer(list, "finger_index", 1);
+    std::vector<quint32> blocks;
+    for (std::size_t begin = 0; begin < instances.size(); begin += 20) {
+        const quint32 block = g.add(74);
+        const std::size_t count = std::min<std::size_t>(20, instances.size() - begin);
+        g.at(block).variableCount = 20;
+        g.integer(block, "n_entries", count);
+        // index_map_offset and unused entries remain zero as specified by XT.
+        std::vector<quint32> entries(20, 0);
+        std::copy_n(instances.begin() + begin, count, entries.begin());
+        g.pointers(block, "entries", entries);
+        blocks.push_back(block);
+    }
+    g.singleChain(blocks, "next_block");
+    g.pointer(list, "list_block", blocks.front());
+    g.pointer(list, "finger_block", blocks.front());
+    return definitions.front();
 }
 
 // Row-major rotation of a unit quaternion (w, x, y, z): x' = R·x + t.
@@ -806,14 +928,19 @@ QByteArray encodeGraph(const Graph& g, bool text, bool partition, std::string& e
 } // namespace
 
 cadnext::Result<std::string> encodeParasolidXtPartition(kernel::OcctKernel& kernel,
-                                                       const kernel::ShapeHandle& shape) {
+    const kernel::ShapeHandle& shape,
+    const std::vector<ParasolidXtIntegerBodyAttribute>& attributes) {
     using R = cadnext::Result<std::string>;
+    if (const auto problem = validateBodyAttributes(attributes); !problem.empty())
+        return R::fail({ErrorCode::InvalidArgument, problem});
     const auto described = kernel::describeExactBRep(kernel, shape);
     if (!described.isOk()) return R::fail(described.error());
     Graph g;
     const quint32 world = g.add(101);
     const quint32 body = writeBody(g, described.value());
+    const quint32 definitions = writeBodyAttributes(g, body, attributes);
     g.pointer(world, "body", body);
+    g.pointer(world, "attrib_def", definitions);
     g.logical(world, "alive", true);
     g.integer(world, "highest_id", g.nodes.size());
     g.pointer(body, "owner", world);
@@ -823,6 +950,27 @@ cadnext::Result<std::string> encodeParasolidXtPartition(kernel::OcctKernel& kern
     ParasolidXtTopology topology;
     QString why;
     if (!readParasolidXtTopology(data, topology, why))
+        return R::fail({ErrorCode::SerializationFailed, why.toStdString()});
+    return R::ok(data.toStdString());
+}
+
+cadnext::Result<std::string> encodeParasolidXtBodyStream(kernel::OcctKernel& kernel,
+    const kernel::ShapeHandle& shape,
+    const std::vector<ParasolidXtIntegerBodyAttribute>& attributes) {
+    using R = cadnext::Result<std::string>;
+    if (const auto problem = validateBodyAttributes(attributes); !problem.empty())
+        return R::fail({ErrorCode::InvalidArgument, problem});
+    const auto described = kernel::describeExactBRep(kernel, shape);
+    if (!described.isOk()) return R::fail(described.error());
+    Graph graph;
+    const quint32 body = writeBody(graph, described.value());
+    writeBodyAttributes(graph, body, attributes);
+    std::string error;
+    const QByteArray data = encodeGraph(graph, false, false, error);
+    if (data.isEmpty()) return R::fail({ErrorCode::SerializationFailed, error});
+    ParasolidXtTopology topology;
+    QString why;
+    if (!readParasolidXtTransmitStream(data, topology, why))
         return R::fail({ErrorCode::SerializationFailed, why.toStdString()});
     return R::ok(data.toStdString());
 }

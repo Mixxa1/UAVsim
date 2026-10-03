@@ -609,14 +609,27 @@ void kompas(const QString& root) {
     // The five parts with a STEP twin (checked against it in cadnext_test_kompas_c3d), the parts of the five
     // assemblies (downloaded 2026-09-27, no twin of their own) and the assemblies.
     static const QStringList twinned{"e2b1766ddb7c4ed6a9d65030b639251d.m3d", "Nema Motor 17.m3d", "WYSE.m3d", "sfh551.m3d", "sfh756.m3d"};
-    int files = 0, metadata = 0, parts = 0, whole = 0, partial = 0, twinnedWhole = 0, assembliesWithout = 0;
+    // The six assemblies of KOMPAS-3D v24 (dolganin_SO_SPIDAR300, downloaded 2026-10-02 without their
+    // parts): the document's name, and how many distinct component names and files MetaProductInfo holds.
+    struct Product { const char* file; const char* name; int names; int externalFiles; };
+    // (Seven more assemblies of the same repository, downloaded 2026-10-03, are in its folder more/.)
+    static const Product products[] = {{"dolganin_SO_SPIDAR300/Antdroid.a3d", "Antdroid", 5, 5}, {"dolganin_SO_SPIDAR300/Arduino.a3d", "Arduino", 2, 2},
+                                       {"dolganin_SO_SPIDAR300/Cuerpo.a3d", "Cuerpo", 8, 8}, {"dolganin_SO_SPIDAR300/Pata.a3d", "Pata", 11, 11},
+                                       {"dolganin_SO_SPIDAR300/RaspberryPi_B.a3d", "RaspberryPi_B", 9, 9},
+                                       {"dolganin_SO_SPIDAR300/Raspberry_B1.a3d", "Raspberry_B1", 3, 3}};
+    int files = 0, metadata = 0, parts = 0, whole = 0, partial = 0, twinnedWhole = 0, assembliesWithout = 0, productsRead = 0;
     QDirIterator it(QDir(root).filePath("kompas"), {"*.m3d", "*.a3d"}, QDir::Files, QDirIterator::Subdirectories);
     while (it.hasNext()) {
         const QString path = it.next();
         ++files;
         KompasModelInfo info;
         QString error;
-        metadata += readKompasModelInfo(path, info, error) ? 1 : 0;
+        const bool described = readKompasModelInfo(path, info, error);
+        metadata += described ? 1 : 0;
+        for (const Product& product : products)
+            if (described && path.endsWith(QLatin1String("/kompas/") + QLatin1String(product.file)))
+                productsRead += info.name == QLatin1String(product.name) && info.objects.size() == product.names &&
+                                info.externalFiles.size() == product.externalFiles ? 1 : 0;
         kernel::OcctKernel kernel;
         KompasC3dResult solids;
         const bool built = readKompasC3dSolids(path, kernel, solids, error);
@@ -634,7 +647,9 @@ void kompas(const QString& root) {
                 files, metadata, parts, whole, partial, parts - whole - partial, assembliesWithout);
     check(files > 0 && metadata == files, "КОМПАС-3D: контейнер и метаданные всех моделей читаются");
     check(twinnedWhole == 5, "КОМПАС-3D: 5 деталей со STEP-двойником строятся целиком (сверка — cadnext_test_kompas_c3d)");
-    check(assembliesWithout == 5, "КОМПАС-3D: в 5 сборках своей геометрии нет — детали во внешних .m3d");
+    check(productsRead == 6, "КОМПАС-3D v24: состав шести сборок читается из MetaProductInfo (имя, компоненты, файлы): " +
+                             std::to_string(productsRead) + " из 6");
+    check(assembliesWithout == 18, "КОМПАС-3D: в 18 сборках своей геометрии нет — детали во внешних .m3d");
 }
 
 // What stands between each real part and an exact solid: its faces on surfaces, and edges on

@@ -13,7 +13,6 @@ option(CADNEXT_WITH_PYTHON "Build CADNext Python bindings" OFF)
 option(CADNEXT_WITH_NETGEN "Build the CAD solid mesher for structural analysis (needs OCCT; see tools/build_netgen.sh)" OFF)
 option(CADNEXT_BUILD_TESTS "Build CADNext tests" ON)
 option(CADNEXT_BUILD_APP "Build CADNext standalone application" OFF)
-option(CADNEXT_WITH_LIBREDWG "Build the optional DWG solid export executable (requires LibreDWG)" OFF)
 
 if(CADNEXT_BUILD_TESTS)
     enable_testing()

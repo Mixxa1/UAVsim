@@ -18,12 +18,17 @@
 //      must now export as two distinct parts with their own volumes.
 //   5. A component linking to a missing file is refused with its name and no STEP is written; the
 //      colour the STEP carried but the .cadnext cannot hold is named in the warnings.
+// Added before its first run:
+//   6. Those files → KOMPAS-3D (.a3d with its .m3d parts) → read back: the subassembly flattened into
+//      one assembly, the five occurrences where they were (1e-9 m, 1e-12 in the rotation matrix), two
+//      part files written, each part's volume to 1e-9.
 
 #include "cadnext/Document.hpp"
 #include "cadnext/DocumentSerializer.hpp"
 #include "cadnext/assembly/AssemblyModel.hpp"
 #include "cadnext/assembly/AssemblySerializer.hpp"
 #include "cadnext/gui/AssemblyStepExchange.hpp"
+#include "cadnext/gui/NativeKompasC3d.hpp"
 #include "cadnext/gui/ParasolidXtProduct.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
 #include "cadnext/kernel/StepProductStructure.hpp"
@@ -274,6 +279,42 @@ int main() {
         std::sort(want.begin(), want.end());
         check(volumes.size() == 2 && std::fabs(volumes[0] / want[0] - 1.0) <= 1e-9 && std::fabs(volumes[1] / want[1] - 1.0) <= 1e-9,
               "each part keeps its volume through CADNext → Parasolid → CADNext");
+    }
+
+    // --- 2c. CADNext files → KOMPAS-3D: the subassembly flattened, the parts as .m3d beside the .a3d.
+    std::printf("CADNext → KOMPAS-3D\n");
+    {
+        const fs::path kompasFolder = directory / "kompas";
+        fs::create_directories(kompasFolder);
+        const fs::path a3d = kompasFolder / "again.a3d";
+        const auto written = gui::exportAssemblyToKompas(top.value(), a3d.string());
+        check(written.isOk(), "the imported assembly is exported to KOMPAS-3D", written.isOk() ? "" : written.error().message);
+        if (written.isOk()) {
+            ProductStructure back;
+            QString error;
+            QStringList notes;
+            const bool read = gui::readKompasAssemblyProduct(QString::fromStdString(a3d.string()), kernel, back, error, notes);
+            check(read && back.assemblies.size() == 1 && filesWith(kompasFolder, ".m3d").size() == 2,
+                  "one KOMPAS assembly and two part files", read ? std::to_string(back.assemblies.size()) : error.toStdString());
+            if (read) {
+                ProductStructure named = back;
+                for (auto& part : named.parts) {
+                    const double v = kernel.volumeProperties(part.shape).value().volumeM3;
+                    part.name = std::fabs(v / shaftVolume - 1.0) <= 1e-9 ? "Вал" : "Корпус";
+                }
+                std::vector<World> got;
+                flatten(named, named.root, {1, 0, 0, 0}, {0, 0, 0}, got);
+                const auto [t, r] = compare(expected, got);
+                std::printf("  placements: worst %.3g m, %.3g in the rotation matrix\n", t, r);
+                check(t >= 0 && t <= 1e-9 && r <= 1e-12, "all five occurrences are where they were in the source STEP");
+                bool volumes = !back.parts.empty();
+                for (const auto& part : back.parts) {
+                    const double v = kernel.volumeProperties(part.shape).value().volumeM3;
+                    volumes = volumes && (std::fabs(v / shaftVolume - 1.0) <= 1e-9 || std::fabs(v / boxVolume - 1.0) <= 1e-9);
+                }
+                check(volumes, "each part keeps its volume through CADNext → KOMPAS-3D → CADNext");
+            }
+        }
     }
 
     // --- 4. Two bodies of one .cadnext, two different parts.

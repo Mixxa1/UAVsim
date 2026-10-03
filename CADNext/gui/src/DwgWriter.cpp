@@ -1,14 +1,14 @@
 #include "cadnext/gui/DwgWriter.hpp"
 #include "cadnext/gui/NativeDwgObjects.hpp"
+#include "cadnext/gui/NativeDwgR2000.hpp"
+#include "cadnext/gui/NativeKompasMesh.hpp"
+#include "cadnext/gui/NativeKompasPreview.hpp"
 
-#include <QCoreApplication>
-#include <QDir>
+#include <QDateTime>
 #include <QFile>
-#include <QFileInfo>
-#include <QProcess>
 #include <QSaveFile>
-#include <QStandardPaths>
 #include <QTemporaryDir>
+#include <QUuid>
 
 #ifdef CADNEXT_WITH_OCCT
 #include <BRepBndLib.hxx>
@@ -17,94 +17,92 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 
 namespace cadnext::gui {
-namespace {
-QString writerExecutable() {
-    const QString configured = qEnvironmentVariable("CADNEXT_DWG_WRITER");
-    if (!configured.isEmpty()) {
-        const QFileInfo file(configured);
-        return file.isFile() && file.isExecutable() ? file.absoluteFilePath() : QString();
-    }
-    const QString local = QDir(QCoreApplication::applicationDirPath()).filePath("cadnext_dwg_writer");
-    if (QFileInfo(local).isFile() && QFileInfo(local).isExecutable()) return local;
-    return QStandardPaths::findExecutable("cadnext_dwg_writer");
-}
-}
-
-bool dwgSolidWriterAvailable() { return !writerExecutable().isEmpty(); }
+bool dwgSolidWriterAvailable() { return true; }
 
 cadnext::Result<AcisSatWriteReport> writeDwgSolids(
     kernel::OcctKernel& kernel, const std::vector<kernel::NamedExchangeBody>& bodies,
     const QString& path) {
     using R = cadnext::Result<AcisSatWriteReport>;
     if (bodies.empty()) return R::fail({ErrorCode::InvalidArgument, "No bodies for DWG export"});
-    const QString executable = writerExecutable();
-    if (executable.isEmpty())
-        return R::fail({ErrorCode::KernelUnavailable,
-                       "DWG export requires cadnext_dwg_writer built with LibreDWG"});
 #ifndef CADNEXT_WITH_OCCT
     return R::fail({ErrorCode::KernelUnavailable, "DWG export requires OCCT"});
 #else
-    QTemporaryDir temporary;
-    if (!temporary.isValid()) return R::fail({ErrorCode::SerializationFailed, "Cannot create DWG staging directory"});
-    const QString output = temporary.filePath("model.dwg");
-    QStringList inputs;
-    std::vector<QByteArray> payloads;
+    DwgR2000SolidsDocument document;
     AcisSatWriteReport report;
     Bnd_Box bounds;
+    std::vector<kernel::ShapeHandle> placedBodies;
+    quint64 total = 0;
     for (std::size_t i = 0; i < bodies.size(); ++i) {
         AcisSatWriteReport part;
         const auto sat = encodeAcisSat(kernel, {bodies[i]}, part);
         if (!sat.isOk()) return R::fail(sat.error());
-        const QString input = temporary.filePath(QString("body_%1.sat").arg(i));
-        QFile file(input);
-        if (!file.open(QIODevice::WriteOnly) || file.write(sat.value()) != sat.value().size())
-            return R::fail({ErrorCode::SerializationFailed, "Cannot stage ACIS body for DWG export"});
-        file.close();
-        inputs.push_back(input);
-        payloads.push_back(sat.value());
+        total += quint64(sat.value().size());
+        if (total > 256ull * 1024 * 1024) return R::fail({ErrorCode::SerializationFailed, "ACIS data for DWG exceed 256 MiB"});
+        document.solids.push_back(sat.value());
         report.bodies += part.bodies;
         report.largestVertexGap = std::max(report.largestVertexGap, part.largestVertexGap);
         report.largestBoundaryTolerance = std::max(report.largestBoundaryTolerance, part.largestBoundaryTolerance);
         const auto placed = kernel.placeExchangeBody(bodies[i].body);
         if (!placed.isOk()) return R::fail(placed.error());
         BRepBndLib::AddOptimal(*kernel.findShape(placed.value()), bounds, false, false);
+        placedBodies.push_back(placed.value());
     }
     std::array<double, 6> extents{};
     bounds.Get(extents[0], extents[1], extents[2], extents[3], extents[4], extents[5]);
-    QStringList arguments{output};
-    for (const double coordinate : extents) arguments.push_back(QString::number(coordinate * 1000.0, 'g', 17));
-    arguments.append(inputs);
-    QProcess process;
-    process.start(executable, arguments);
-    if (!process.waitForStarted(10000))
-        return R::fail({ErrorCode::SerializationFailed, "Cannot start DWG writer: " + process.errorString().toStdString()});
-    if (!process.waitForFinished(300000)) {
-        process.kill();
-        process.waitForFinished(5000);
-        return R::fail({ErrorCode::SerializationFailed, "DWG writer timed out"});
+    for (double& coordinate : extents) coordinate *= 1000.0;
+    document.extents = extents;
+    // The time of saving as AutoCAD keeps it: the Julian day and the milliseconds into it (UTC).
+    const QDateTime now = QDateTime::currentDateTimeUtc();
+    document.created = {quint32(now.date().toJulianDay()), quint32(now.time().msecsSinceStartOfDay())};
+    document.fingerprint = QUuid::createUuid().toString(QUuid::WithBraces).toUpper().toLatin1();
+    document.version = QUuid::createUuid().toString(QUuid::WithBraces).toUpper().toLatin1();
+    // The picture AutoCAD 2000 keeps of the drawing: ours, the bodies shaded, 220 × 140 as in its files.
+    {
+        const double diagonal = std::sqrt((extents[3] - extents[0]) * (extents[3] - extents[0]) +
+                                          (extents[4] - extents[1]) * (extents[4] - extents[1]) +
+                                          (extents[5] - extents[2]) * (extents[5] - extents[2]));
+        const auto step = kompasMeshStep(diagonal);
+        std::vector<KompasMesh> meshes;
+        QString meshError;
+        bool meshed = true;
+        for (std::size_t i = 0; meshed && i < placedBodies.size(); ++i) {
+            KompasMesh mesh;
+            meshed = kompasBodyMesh(kernel, placedBodies[i], 1 + quint32(i), step, 0x909090, {}, mesh, meshError);
+            if (meshed) meshes.push_back(std::move(mesh));
+        }
+        if (meshed) {
+            const KompasPreviewImage image = renderKompasPreview(meshes, 0x909090, 220, 140);
+            document.preview.bitmap = dwgPreviewBitmap(image.width, image.height, image.rgb);
+        }
     }
-    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0)
-        return R::fail({ErrorCode::SerializationFailed,
-                       "DWG writer failed: " + QString::fromUtf8(process.readAllStandardError()).right(2000).toStdString()});
-    DwgModel restored;
+    QByteArray bytes;
     QString error;
-    if (!readDwgModel(output, restored, error) || restored.version != "AC1015" || restored.bodies.size() != payloads.size())
+    if (!encodeDwgR2000SolidsDocument(document, bytes, error))
+        return R::fail({ErrorCode::SerializationFailed, "DWG export: " + error.toStdString()});
+    if (bytes.size() > 256ll * 1024 * 1024) return R::fail({ErrorCode::SerializationFailed, "DWG output exceeds 256 MiB"});
+    // Read back with the independent reader before the destination is touched.
+    QTemporaryDir temporary;
+    if (!temporary.isValid()) return R::fail({ErrorCode::SerializationFailed, "Cannot create DWG staging directory"});
+    const QString staged = temporary.filePath("model.dwg");
+    {
+        QFile file(staged);
+        if (!file.open(QIODevice::WriteOnly) || file.write(bytes) != bytes.size())
+            return R::fail({ErrorCode::SerializationFailed, "Cannot stage DWG output"});
+    }
+    DwgModel restored;
+    if (!readDwgModel(staged, restored, error) || restored.version != "AC1015" || restored.bodies.size() != document.solids.size())
         return R::fail({ErrorCode::SerializationFailed, "DWG export readback: " + error.toStdString()});
     constexpr std::array<double, 16> identity{1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
-    for (std::size_t i = 0; i < payloads.size(); ++i) {
+    for (std::size_t i = 0; i < document.solids.size(); ++i) {
         const auto& body = restored.bodies[i];
         // Only trailing line endings may differ. Whitespace inside length-prefixed SAT
         // strings matters, and must not be normalised by the verification.
-        if (body.acis.trimmed() != payloads[i].trimmed() || body.millimetresPerUnit != 1.0 || body.placement != identity)
+        if (body.acis.trimmed() != document.solids[i].trimmed() || body.millimetresPerUnit != 1.0 || body.placement != identity)
             return R::fail({ErrorCode::SerializationFailed, "DWG writer changed the ACIS payload, units or placement"});
     }
-    QFile file(output);
-    if (!file.open(QIODevice::ReadOnly) || file.size() > 256ll * 1024 * 1024)
-        return R::fail({ErrorCode::SerializationFailed, "Cannot read DWG output, or it exceeds 256 MiB"});
-    const QByteArray bytes = file.readAll();
-    if (bytes.size() != file.size()) return R::fail({ErrorCode::SerializationFailed, "Incomplete DWG output"});
     QSaveFile destination(path);
     if (!destination.open(QIODevice::WriteOnly) || destination.write(bytes) != bytes.size() || !destination.commit())
         return R::fail({ErrorCode::SerializationFailed, "Cannot save DWG: " + destination.errorString().toStdString()});

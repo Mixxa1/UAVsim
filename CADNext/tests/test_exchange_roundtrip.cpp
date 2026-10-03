@@ -6,6 +6,7 @@
 #include "cadnext/bridge/UAVPartWriter.hpp"
 #include "cadnext/gui/AcisSatWriter.hpp"
 #include "cadnext/gui/DwgWriter.hpp"
+#include "cadnext/gui/NativeDwgR2000.hpp"
 #include "cadnext/gui/NativeAcisSat.hpp"
 #include "cadnext/gui/NativeCadImport.hpp"
 #include "cadnext/gui/NativeDwgObjects.hpp"
@@ -159,8 +160,6 @@ ProductStructure productOf(const std::vector<NamedExchangeBody>& bodies) {
 }
 
 void dwgBlockBoundaries(const QTemporaryDir& directory) {
-    const QString executable = qEnvironmentVariable("CADNEXT_DWG_WRITER");
-    if (executable.isEmpty() || !dwgSolidWriterAvailable()) return;
     OcctKernel kernel;
     const auto box = kernel.makeBox({.01, .02, .03});
     AcisSatWriteReport report;
@@ -171,15 +170,16 @@ void dwgBlockBoundaries(const QTemporaryDir& directory) {
         QByteArray payload = encoded.value();
         if (payload.size() > size) { check(false, "DWG block fixture unexpectedly large"); return; }
         payload.append(QByteArray(size - payload.size(), '\n'));
-        const QString input = directory.filePath("blocks.sat"), output = directory.filePath(QString("blocks_%1.dwg").arg(size));
-        QFile file(input);
-        if (!file.open(QIODevice::WriteOnly) || file.write(payload) != payload.size()) return;
+        const QString output = directory.filePath(QString("blocks_%1.dwg").arg(size));
+        DwgR2000SolidsDocument document;
+        document.solids = {payload};
+        document.extents = {-5, -10, -15, 5, 10, 15};
+        QByteArray drawing; QString error;
+        QFile file(output);
+        const bool written = encodeDwgR2000SolidsDocument(document, drawing, error) && file.open(QIODevice::WriteOnly) &&
+                             file.write(drawing) == drawing.size();
         file.close();
-        QProcess writer;
-        writer.start(executable, {output, "-5", "-10", "-15", "5", "10", "15", input});
-        const bool written = writer.waitForFinished(10000) && writer.exitStatus() == QProcess::NormalExit && writer.exitCode() == 0;
-        if (!written) { writer.kill(); writer.waitForFinished(1000); }
-        DwgModel restored; QString error;
+        DwgModel restored;
         check(written && readDwgModel(output, restored, error) && restored.bodies.size() == 1 &&
               restored.bodies.front().acis.trimmed() == payload.trimmed(),
               "DWG: exact SAT payload across " + std::to_string(size) + " bytes and 4096-byte blocks");
@@ -188,11 +188,9 @@ void dwgBlockBoundaries(const QTemporaryDir& directory) {
     QFile existing(protectedPath);
     if (!existing.open(QIODevice::WriteOnly) || existing.write("keep") != 4) return;
     existing.close();
-    qputenv("CADNEXT_DWG_WRITER", directory.filePath("missing_writer").toUtf8());
-    const auto failed = writeDwgSolids(kernel, {{"box", {box.value(), {}}}}, protectedPath);
-    qputenv("CADNEXT_DWG_WRITER", executable.toUtf8());
+    const auto failed = writeDwgSolids(kernel, {{"missing", {ShapeHandle{}, {}}}}, protectedPath);
     if (!existing.open(QIODevice::ReadOnly)) return;
-    check(!failed.isOk() && existing.readAll() == "keep", "DWG: missing backend preserves destination");
+    check(!failed.isOk() && existing.readAll() == "keep", "DWG: a failed export preserves destination");
 }
 
 void sketchRoundTrips(const QTemporaryDir& dir) {
@@ -783,10 +781,12 @@ int main(int argc, char** argv) {
     for (const auto& shape : expectedShapes) expectedParts.push_back(measure(*source.findShape(shape)));
     check(expected.solids==int(bodies.size()), "reference: twelve placed solids, uniform and nonuniform scales");
 
-    std::vector<std::string> formats{"step", "iges", "FCStd", "x_t", "x_b", "sat", "dxf"};
+    // "binary.dxf": the bodies of "dxf" as a binary DXF, written after it and compared with it.
+    std::vector<std::string> formats{"step", "iges", "FCStd", "x_t", "x_b", "sat", "dxf", "binary.dxf"};
     if (dwgSolidWriterAvailable()) formats.push_back("dwg");
     for (const std::string& ext : formats) {
         const QString path=dir.filePath(QString::fromStdString("model."+ext));
+        const bool binaryDxf=ext=="binary.dxf";
         bool written=false; std::string why; QString error;
         if (ext=="step") { const auto r=source.exportStepAssembly(bodies,path.toStdString()); written=r.isOk(); if (!written) why=r.error().message; }
         else if (ext=="iges") {
@@ -801,7 +801,7 @@ int main(int argc, char** argv) {
             const auto r=writeParasolidXtProduct(source,productOf(placedBodies),path.toStdString(),ext=="x_t"?ParasolidXtEncoding::Text:ParasolidXtEncoding::Binary);
             written=r.isOk(); if (!written) why=r.error().message;
         } else { const auto r=ext=="sat"?writeAcisSat(source,bodies,path)
-                            :ext=="dwg"?writeDwgSolids(source,bodies,path):writeDxfSolids(source,bodies,path);
+                            :ext=="dwg"?writeDwgSolids(source,bodies,path):writeDxfSolids(source,bodies,path,binaryDxf);
             written=r.isOk(); if (!written) why=r.error().message; }
         check(written, ext+": written"+(why.empty()?"":" — "+why)); if (!written) continue;
         OcctKernel restored; std::vector<ShapeHandle> shapes;
@@ -839,10 +839,40 @@ int main(int argc, char** argv) {
                 for (const auto& s:sat.solids) { const auto r=restored.transformShape(s.shape,b.placement); if (r.isOk()) shapes.push_back(r.value()); }
             }
             check(from.bodies.size()==bodies.size() && (ext=="dwg" ? from.version=="AC1015" : dxfHasAcisBodies(path)), ext+": actual 3DSOLID entities");
-            if (ext=="dxf") {
+            if (ext=="dxf" || binaryDxf) {
                 std::vector<DxfGroup> groups;
                 bool chunking=readDxfGroups(path,groups,error); for (const auto& g:groups) if (g.code==1 || g.code==3) chunking &= g.value.size()<255;
                 check(chunking, ext+": ACIS lines respect DXF group limits");
+                if (binaryDxf) {
+                    // The binary file is the ASCII one's groups, packed: the sentinel, then the same
+                    // codes and values, the bodies' handles and the units among them. The SAT differs
+                    // by its header's date alone when the two were written a second apart.
+                    QFile file(path); const bool opened=file.open(QIODevice::ReadOnly);
+                    const QByteArray bytes=opened?file.readAll():QByteArray();
+                    check(bytes.startsWith(QByteArray("AutoCAD Binary DXF\r\n\x1a\0",22)) && bytes.mid(22,10)==QByteArray("\0\0SECTION\0",10),
+                          ext+": the binary DXF sentinel, 16-bit group codes after it");
+                    std::vector<DxfGroup> ascii;
+                    bool same=readDxfGroups(dir.filePath("model.dxf"),ascii,error) && ascii.size()==groups.size();
+                    int strings=0, numbers=0, dated=0;
+                    for (std::size_t i=0; same && i<groups.size(); ++i) {
+                        same = ascii[i].code==groups[i].code;
+                        if (ascii[i].value==groups[i].value) { ++(groups[i].code==70 ? numbers : strings); continue; }
+                        // Only a SAT header line (group 1, the one that names the producer) may differ.
+                        same = same && groups[i].code==1 && ascii[i].value.size()==groups[i].value.size() &&
+                            ascii[i].value.left(20)==groups[i].value.left(20) && i>0 && groups[i-1].code==1; ++dated;
+                    }
+                    check(same && numbers==2+int(bodies.size()) && strings>numbers && dated<=int(bodies.size()),
+                          ext+": the groups of the ASCII DXF, code for code and value for value");
+                    QByteArray text="0\nSECTION\n2\nENTITIES\n0\n3DSOLID\n5\n1F\n70\n-2\n10\n0.1\n90\n-70000\n290\n1\n0\nEOF\n", packed;
+                    std::vector<DxfGroup> from, back;
+                    bool typed=encodeBinaryDxf(text,packed,error) && decodeDxfGroups(text,from,error) && decodeDxfGroups(packed,back,error) &&
+                        from.size()==back.size() && packed.size()==22+(2+8)+(2+9)+(2+8)+(2+3)+(2+2)+(2+8)+(2+4)+(2+1)+(2+4);
+                    for (std::size_t i=0; typed && i<from.size(); ++i) typed = from[i].code==back[i].code &&
+                        (from[i].code==10 ? from[i].value.toDouble()==back[i].value.toDouble() : from[i].value==back[i].value);
+                    check(typed, ext+": strings, 16- and 32-bit integers, doubles and booleans by their group codes");
+                    QByteArray none; check(!encodeBinaryDxf("0\nSECTION\n70\nx\n",none,error) && none.isEmpty() && !error.isEmpty(),
+                                           ext+": a value that is not of its code's type is refused");
+                }
             }
         }
         compare(restored,shapes,expected,ext,ext=="iges"?1e-6:1e-8,expectedParts);

@@ -522,11 +522,16 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
         quint32 definition = 0;
         quint32 owner = 0;
         std::vector<quint32> fields;
+        quint32 next = 0;
+        quint32 previous = 0;
+        quint32 nextOfType = 0;
+        quint32 previousOfType = 0;
     };
     std::vector<RawAttribute> rawAttributes;
     QHash<quint32, quint32> definitionNames; // ATTRIB_DEF -> its identifier string node
     QHash<quint32, QByteArray> strings;      // string and character-values nodes
     QHash<quint32, std::vector<double>> realValues;
+    QHash<quint32, std::vector<qint32>> integerValues;
     bool terminated = false;
     quint16 lastType = 0;
     qsizetype lastStart = 0;
@@ -568,6 +573,8 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
         char sense = 0;
         QByteArray text;
         std::vector<double> values;
+        std::vector<qint32> intValues;
+        ParasolidXtAttributeDefinition attributeDefinition;
         ParasolidXtTransform transform;
         quint8 kind = 0; // body_type of a BODY, type of an INSTANCE
         bool valid = true;
@@ -576,14 +583,16 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
             if (field.type == 'p') {
                 // An attribute's value nodes are a variable array, kept whatever its length.
                 const bool attributeFields = type == 81 && field.variable;
+                const bool listEntries = type == 74 && field.variable;
                 const bool keepArray = attributeFields ? count <= 4096
-                                                       : analyticGeometry(type) && count > 1 && count <= 16;
+                    : listEntries ? count <= 1'000'000
+                    : analyticGeometry(type) && count > 1 && count <= 16;
                 std::vector<quint32> targets;
                 if (keepArray) targets.reserve(count);
                 for (quint32 i = 0; i < count; ++i) {
                     quint32 target = 0;
                     if (!reader.index(target)) { valid = false; break; }
-                    if (count == 1 && !attributeFields) links.insert(field.name, target);
+                    if (count == 1 && !attributeFields && !listEntries) links.insert(field.name, target);
                     else if (keepArray)
                         targets.push_back(target);
                 }
@@ -677,10 +686,19 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
                         if (!std::isfinite(value)) valid = false;
                     realArrays.insert(field.name, reals64);
                 }
-                if (analyticGeometry(type) && (field.type == 'n' || field.type == 'd') &&
+                if ((analyticGeometry(type) || type == 12 || type == 70 || type == 74 || type == 80) &&
+                    (field.type == 'n' || field.type == 'd') &&
                     count == 1) {
                     integers.insert(field.name, numbers[0]);
                 }
+                if (type == 80 && field.type == 'u') {
+                    if (field.name == "actions" && count == 8)
+                        for (std::size_t i = 0; i < 8; ++i) attributeDefinition.actions[i] = quint8(characters[i]);
+                    else if (field.name == "fields")
+                        for (const char value : characters) attributeDefinition.fieldTypes.push_back(quint8(value));
+                }
+                if (type == 80 && field.name == "legal_owners" && field.type == 'l' && count == 14)
+                    for (std::size_t i = 0; i < 14; ++i) attributeDefinition.legalOwners[i] = characters[i] != 0;
                 if (type == 127 && field.type == 'n') integerArrays.insert(field.name, numbers);
                 // The points of an intersection curve's chart and limits (only an hvec's pvec is
                 // transmitted): what locates the branch, and a blend's spine, along the curve.
@@ -699,6 +717,10 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
                 if ((type == 79 || type == 84) && field.type == 'c')
                     text = QByteArray(characters.data(), qsizetype(characters.size()));
                 if (type == 83 && field.type == 'f') values = reals64;
+                if (type == 82 && field.type == 'd') {
+                    intValues.reserve(numbers.size());
+                    for (const auto value : numbers) intValues.push_back(qint32(value));
+                }
                 if (type == 100) {
                     if (field.name == "rotation_matrix" && field.type == 'f' && count == 9)
                         std::copy(reals64.begin(), reals64.end(), transform.rotation.begin());
@@ -722,7 +744,8 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
         ++topology.nodeCount;
         if (type == 12) {
             ++topology.bodyCount;
-            topology.bodies.push_back({nodeIndex, kind});
+            topology.bodies.push_back({nodeIndex, kind, links.value("attributes_groups"),
+                links.value("attribute_chains"), integers.value("highest_node_id")});
         } else if (type == 13) {
             ++topology.shellCount;
             topology.shellBodies.insert(nodeIndex, links.value("body"));
@@ -739,11 +762,27 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
             strings.insert(nodeIndex, text);
         } else if (type == 83) {
             realValues.insert(nodeIndex, std::move(values));
+        } else if (type == 82) {
+            integerValues.insert(nodeIndex, std::move(intValues));
         } else if (type == 80) {
             definitionNames.insert(nodeIndex, links.value("identifier"));
+            attributeDefinition.index = nodeIndex;
+            attributeDefinition.next = links.value("next");
+            attributeDefinition.typeId = integers.value("type_id");
+            topology.attributeDefinitions.push_back(std::move(attributeDefinition));
         } else if (type == 81) {
             rawAttributes.push_back({nodeIndex, links.value("definition"), links.value("owner"),
-                                     linkArrays.value("fields")});
+                linkArrays.value("fields"), links.value("next"), links.value("previous"),
+                links.value("next_of_type"), links.value("previous_of_type")});
+        } else if (type == 70) {
+            topology.attributeLists.push_back({nodeIndex, links.value("owner"),
+                integers.value("list_type", integers.value("legacy1")), integers.value("list_length"),
+                integers.value("block_length"), links.value("list_block")});
+        } else if (type == 74) {
+            topology.attributeListBlocks.push_back({nodeIndex, integers.value("n_entries"),
+                integers.value("index_map_offset"), links.value("next_block"), linkArrays.value("entries")});
+        } else if (type == 101) {
+            topology.worldAttributeDefinitionHead = links.value("attrib_def");
         }
         else if (type == 19) {
             ++topology.regionCount;
@@ -907,15 +946,26 @@ bool decodeXtNodes(XtReader& reader, quint16 maxType, ParasolidXtTopology& topol
         attribute.index = raw.index;
         attribute.ownerIndex = raw.owner;
         attribute.definition = strings.value(name.value());
+        attribute.definitionIndex = raw.definition;
+        attribute.next = raw.next;
+        attribute.previous = raw.previous;
+        attribute.nextOfType = raw.nextOfType;
+        attribute.previousOfType = raw.previousOfType;
+        attribute.fieldIndices = raw.fields;
         for (quint32 field : raw.fields) {
             if (strings.contains(field)) attribute.strings.push_back(strings.value(field));
             else if (realValues.contains(field)) {
                 const auto& reals = realValues[field];
                 attribute.reals.insert(attribute.reals.end(), reals.begin(), reals.end());
+            } else if (integerValues.contains(field)) {
+                const auto& values = integerValues[field];
+                attribute.integers.insert(attribute.integers.end(), values.begin(), values.end());
             }
         }
         topology.attributes.push_back(std::move(attribute));
     }
+    for (auto& definition : topology.attributeDefinitions)
+        definition.name = strings.value(definitionNames.value(definition.index));
     topology.nodeTypes = std::move(types);
     error.clear();
     return true;
@@ -973,6 +1023,33 @@ bool readParasolidXtFile(const QByteArray& file, ParasolidXtTopology& topology, 
     XtHeader header;
     if (!readXtHeader(reader, header, error)) return false;
     return decodeXtNodes(reader, header.maxType, topology, error);
+}
+
+bool readParasolidXtTransmitStream(const QByteArray& stream,
+                                  ParasolidXtTopology& topology, QString& error) {
+    topology = {};
+    if (!stream.startsWith(QByteArray("PS\0\0", 4))) {
+        error = QObject::tr("Это не нейтральный двоичный поток передачи Parasolid XT.");
+        return false;
+    }
+    XtReader reader(stream, false);
+    XtHeader header;
+    if (!readXtHeader(reader, header, error)) return false;
+    quint16 root = 0;
+    const auto at = reader.position();
+    if (header.partition || !reader.i16(root) || (root != 12 && root != 10)) {
+        error = QObject::tr("Поток передачи Parasolid XT должен иметь корень BODY или ASSEMBLY.");
+        return false;
+    }
+    reader.seek(at);
+    ParasolidXtTopology staged;
+    if (!decodeXtNodes(reader, header.maxType, staged, error)) return false;
+    if (staged.nodeTypes.value(1) != root) {
+        error = QObject::tr("Неверный идентификатор корня потока передачи Parasolid XT.");
+        return false;
+    }
+    topology = std::move(staged);
+    return true;
 }
 
 std::vector<ParasolidXtFieldSpec> parasolidXtBaseSchema(quint16 type) {

@@ -1,7 +1,9 @@
 #include "cadnext/gui/NativeKompasC3d.hpp"
 
 #include "cadnext/gui/NativeCadImport.hpp"
+#include "cadnext/gui/NativeKompasCatalog.hpp"
 #include "cadnext/gui/NativeKompasGeometry.hpp"
+#include "NativeKompasNurbsCurve.hpp"
 
 #include <QDir>
 #include <QFileInfo>
@@ -43,6 +45,7 @@ enum : quint16 {
     kTrimmed2 = 0x537d,
     kContour2 = 0x0c74,
     kHermite2 = 0x1e16,
+    kNurbs2 = 0x7505,
     kLine3 = 0x3b01,
     kArc3 = 0x232c,
     kNurbs3 = 0x464f,
@@ -67,12 +70,14 @@ struct Obj {
     Obj* s2 = nullptr;
     Obj* c2 = nullptr;
     int flag = 0; // a face: its normal the surface's (1); an intersection: running with its edge (1)
+    int buildType = 0; // native MbeCurveBuildType of an intersection
     std::vector<double> points, params, vectors; // a Hermite spline; a spline surface's poles (points)
     // A spline surface: its grid of poles, rows along v and columns along u, each row's poles in turn
     // (points), their weights, orders and knots (all of them, repeats written out).
     quint64 rows = 0, columns = 0, uOrder = 0, vOrder = 0;
     bool closedU = false, closedV = false;
     std::vector<double> weights, uKnots, vKnots;
+    detail::KompasNurbs2 nurbs2;
 };
 
 struct Stream {
@@ -222,7 +227,7 @@ struct Stream {
             return topology(depth) && reals(o.d, 4);
         case kIntersection: {
             Obj* cached = nullptr;
-            return surfaceCurve(o.s1, o.c1, depth) && surfaceCurve(o.s2, o.c2, depth) && u8(byte) && u8(byte) && reals(o.d, 8) &&
+            return surfaceCurve(o.s1, o.c1, depth) && surfaceCurve(o.s2, o.c2, depth) && u8(byte) && u8(o.buildType) && reals(o.d, 8) &&
                    pointer(cached, depth) && u8(o.flag);
         }
         case kPlane: return reals(o.d, 22);
@@ -267,6 +272,11 @@ struct Stream {
             return true;
         }
         case kLine2: return reals(o.d, 4);
+        case kNurbs2: {
+            qsizetype consumed=0;QString error;
+            if(!detail::decodeKompasNurbs2Data(bytes,at,o.nurbs2,consumed,error))return fail(error);
+            at+=consumed;return true;
+        }
         case kArc2: return reals(o.d, 10) && skip(6);
         case kTrimmed2:
             // Its basis, reversed or not, the two parameters. (Read before as t1, the byte, t2: the same bytes
@@ -436,6 +446,15 @@ kernel::BSplineCurveDefinition isoCurve(const Obj& s, bool alongV, double t) {
     }
     c.degree = int(alongV ? s.vOrder : s.uOrder) - 1;
     knotsOf(alongV ? s.vKnots : s.uKnots, c.knots, c.multiplicities);
+    if (alongV ? s.closedV : s.closedU) {
+        // The iso curve keeps the surface's periodic direction. A clamped
+        // one-period curve cannot trim an edge that crosses the parameter seam.
+        if (c.multiplicities.front() != c.degree + 1 || c.multiplicities.back() != c.degree + 1)
+            return {};
+        c.poles.pop_back(); c.weights.pop_back();
+        --c.multiplicities.front(); --c.multiplicities.back();
+        c.periodic = true;
+    }
     return c;
 }
 
@@ -471,6 +490,10 @@ bool curveRange(const Obj& c, double& t0, double& t1) {
         return true;
     }
     case kHermite2: t0 = c.params.front(), t1 = c.params.back(); return true;
+    case kNurbs2:
+        t0=c.nurbs2.knots[std::size_t(c.nurbs2.order-1)];
+        t1=c.nurbs2.knots[c.nurbs2.poles.size()+(c.nurbs2.closed?std::size_t(c.nurbs2.order-1):0)];
+        return true;
     default: return false;
     }
 }
@@ -533,6 +556,16 @@ bool curvePoint(const Obj& c, double t, double& u, double& v) {
             return true;
         }
         return false;
+    }
+    case kNurbs2: {
+        double first=0,last=0;
+        if(!curveRange(c,first,last))return false;
+        const double slack=1e-12*std::max({1.,std::fabs(first),std::fabs(last)});
+        if(t<first-slack || t>last+slack)return false;
+        try {
+            const auto point=detail::pointOnKompasNurbs2(c.nurbs2,std::clamp(t,first,last));
+            u=point[0];v=point[1];return true;
+        } catch(const std::exception&) {return false;}
     }
     default: return false;
     }
@@ -634,6 +667,8 @@ struct Conic {
     double major = 0, minor = 0;
     bool counterclockwise = true;
     kernel::BSplineCurveDefinition bspline; // kind BSpline: a spline surface's parameter line, millimetres
+    double splineFirst = 0, splineLast = 0;
+    bool planarNurbs = false;
 };
 
 bool conicOf(const Obj& surface, const Obj& curve, Conic& out) {
@@ -653,14 +688,61 @@ bool conicOf(const Obj& surface, const Obj& curve, Conic& out) {
                 (out.kind != E::Line && (distance(piece.center, out.center) > 1e-9 * size || distance(piece.normal, out.normal) > 1e-12 ||
                                          std::fabs(piece.major - out.major) > 1e-9 * size || std::fabs(piece.minor - out.minor) > 1e-9 * size)))
                 return false;
+            if (out.kind == E::BSpline) {
+                // Only contiguous intervals of the same iso curve make one
+                // spline edge. Its UV direction and range must survive, too.
+                if (out.bspline.degree != piece.bspline.degree || out.bspline.periodic != piece.bspline.periodic ||
+                    out.bspline.knots != piece.bspline.knots || out.bspline.multiplicities != piece.bspline.multiplicities ||
+                    out.bspline.weights != piece.bspline.weights || out.bspline.poles.size() != piece.bspline.poles.size() ||
+                    out.splineLast != piece.splineFirst) return false;
+                for (std::size_t j=0;j<out.bspline.poles.size();++j) {
+                    const auto& a=out.bspline.poles[j];const auto& b=piece.bspline.poles[j];
+                    if(a.x!=b.x || a.y!=b.y || a.z!=b.z)return false;
+                }
+                out.splineLast=piece.splineLast;
+            }
         }
         return true;
     }
     const Obj* c = basis(&curve);
     if (!c) return false;
+    if (c->cls == kHermite2 && c->points.size() >= 4 && !c->flag) {
+        // Straight UV boundaries may retain the common edge parameter through
+        // Hermite derivatives rather than through a line's metric parameter.
+        const auto& p=c->points;
+        const double du=p[p.size()-2]-p[0], dv=p.back()-p[1];
+        const double squared=du*du+dv*dv;
+        const double first=c->params.front(),span=c->params.back()-first;
+        bool straight=squared>0 && span>0;
+        for(std::size_t i=0;i<p.size()/2 && straight;++i) {
+            const double x=p[2*i]-p[0], y=p[2*i+1]-p[1];
+            const double tx=c->vectors[2*i],ty=c->vectors[2*i+1];
+            const double fraction=(c->params[i]-first)/span;
+            const double slack=1e-12*std::max(1.0,std::sqrt(squared));
+            straight=std::hypot(x-fraction*du,y-fraction*dv)<=slack &&
+                std::hypot(tx-du/span,ty-dv/span)<=slack/span;
+        }
+        if(straight) {
+            Obj line; line.cls=kLine2; line.d={p[0],p[1],p[p.size()-2],p.back()};
+            return conicOf(surface,line,out);
+        }
+    }
     const Frame f = frameOf(surface);
     if (surface.cls == kPlane) {
         if (c->cls == kLine2) return out.kind = E::Line, true;
+        if(c->cls==kNurbs2) {
+            const auto native=detail::unwrapKompasNurbs2(c->nurbs2);
+            auto& b=out.bspline;b={};b.degree=int(native.order-1);
+            b.weights=native.weights;
+            for(const auto& pole:native.poles)
+                b.poles.push_back(plus(f.origin,plus(times(f.x,pole[0]),times(f.y,pole[1]))));
+            for(const auto knot:native.knots) {
+                if(b.knots.empty() || knot!=b.knots.back()) {b.knots.push_back(knot);b.multiplicities.push_back(1);}
+                else ++b.multiplicities.back();
+            }
+            out.kind=E::BSpline;out.planarNurbs=true;
+            return curveRange(curve,out.splineFirst,out.splineLast);
+        }
         if (c->cls != kArc2) return false;
         const Vector3 x = plus(times(f.x, c->d[2]), times(f.y, c->d[3])), y = plus(times(f.x, c->d[4]), times(f.y, c->d[5]));
         Vector3 centre;
@@ -685,11 +767,17 @@ bool conicOf(const Obj& surface, const Obj& curve, Conic& out) {
         // two poles. The edge is the part between its vertices.
         bool alongV = false;
         double at = 0.0;
-        if (c->cls == kLine2) {
-            const double du = c->d[2] - c->d[0], dv = c->d[3] - c->d[1], l = std::hypot(du, dv);
+        const bool affineNurbs = c->cls == kNurbs2 && !c->nurbs2.closed && c->nurbs2.order == 2 &&
+            c->nurbs2.poles.size() == 2 && c->nurbs2.weights[0] == c->nurbs2.weights[1];
+        if (c->cls == kLine2 || affineNurbs) {
+            const double u0 = affineNurbs ? c->nurbs2.poles[0][0] : c->d[0];
+            const double v0 = affineNurbs ? c->nurbs2.poles[0][1] : c->d[1];
+            const double du = (affineNurbs ? c->nurbs2.poles[1][0] : c->d[2]) - u0;
+            const double dv = (affineNurbs ? c->nurbs2.poles[1][1] : c->d[3]) - v0;
+            const double l = std::hypot(du, dv);
             if (!(l > 0.0)) return false;
-            if (std::fabs(du) <= 1e-12 * l) alongV = true, at = c->d[0];
-            else if (std::fabs(dv) <= 1e-12 * l) alongV = false, at = c->d[1];
+            if (std::fabs(du) <= 1e-12 * l) alongV = true, at = u0;
+            else if (std::fabs(dv) <= 1e-12 * l) alongV = false, at = v0;
             else return false;
         } else if (c->cls == kHermite2) {
             const std::size_t n = c->points.size() / 2;
@@ -714,7 +802,18 @@ bool conicOf(const Obj& surface, const Obj& curve, Conic& out) {
             return false;
         }
         out.bspline = isoCurve(surface, alongV, at);
-        out.kind = out.bspline.degree == 1 && out.bspline.poles.size() == 2 ? E::Line : E::BSpline;
+        out.kind = !out.bspline.periodic && out.bspline.degree == 1 && out.bspline.poles.size() == 2 ? E::Line : E::BSpline;
+        // A straight UV NURBS on a curved or rational iso support can have
+        // a different parameter law from the extracted spatial curve.
+        // Recognize only affine spatial lines; retain other surface curves.
+        if (affineNurbs && (out.kind != E::Line || out.bspline.weights[0] != out.bspline.weights[1]))
+            return false;
+        if(out.kind==E::BSpline) {
+            double first,last,u0,v0,u1,v1;
+            if(!curveRange(curve,first,last) || !curvePoint(curve,first,u0,v0) || !curvePoint(curve,last,u1,v1))return false;
+            out.splineFirst=alongV?v0:u0;out.splineLast=alongV?v1:u1;
+            out.counterclockwise=out.splineLast>out.splineFirst;
+        }
         return true;
     }
     if (c->cls != kLine2) return false;
@@ -804,6 +903,18 @@ bool surfaceCurveOf(const Obj& surface, const Obj& curve, kernel::AnalyticEdgeSe
     case kTorus:
     case kSpline: break;
     default: return false;
+    }
+    const Obj* nativeCurve=basis(&curve);
+    if(nativeCurve && nativeCurve->cls==kNurbs2) {
+        const auto native=detail::unwrapKompasNurbs2(nativeCurve->nurbs2);
+        auto& b=seg.bspline;b={};b.degree=int(native.order-1);b.weights=native.weights;
+        for(const auto& pole:native.poles)b.poles.push_back({pole[0]*su,pole[1]*sv,0});
+        for(const auto knot:native.knots) {
+            if(b.knots.empty() || knot!=b.knots.back()) {b.knots.push_back(knot);b.multiplicities.push_back(1);}
+            else ++b.multiplicities.back();
+        }
+        seg.kind=kernel::AnalyticEdgeKind::SurfaceCurve;
+        return curveRange(curve,seg.curveFirst,seg.curveLast);
     }
     // The curve as cubic Bézier arcs over its own parameter: a line (or a trimmed one: its two points over its
     // two parameters) as one, a Hermite spline's segments as they are, a composite's pieces one after
@@ -1012,7 +1123,8 @@ bool sphereCylinderOf(const Obj& curve, Conic& out) {
 }
 
 // An oriented edge of a loop as the builder's segment.
-bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QString& why, CurveEdges* curveEdges = nullptr) {
+bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QString& why,
+               CurveEdges* curveEdges = nullptr, const Obj* faceSurface = nullptr) {
     const Obj& curve = *edge.curve;
     if (curve.cls != kIntersection || !curve.s1 || !curve.c1 || !curve.s2 || !curve.c2)
         return why = QObject::tr("кривая ребра C3D — не пересечение поверхностей"), false;
@@ -1038,22 +1150,167 @@ bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QS
     if (!closed && (distance(first, from) > std::max(exact, slack) || distance(first, from) >= distance(first, to)))
         return why = QObject::tr("кривая ребра C3D не выходит из его вершины (%1 мм)").arg(distance(first, from)), false;
     const double off = closed ? distance(first, b) : std::max(distance(first, from), distance(last, to));
+    // A coincident endpoint does not cancel the precision declared by its
+    // native vertex. The two faces can carry different tolerant boundaries
+    // between their endpoints, even when both endpoints are exact.
+    seg.tolerance = std::max(edge.begin->d[3], edge.end->d[3]) * kMetre;
     if (std::max(gap, off) > exact) seg.tolerance = std::max({gap, off, edge.begin->d[3], edge.end->d[3]}) * kMetre;
     seg.start = metres(along ? b : e);
     seg.end = metres(along ? e : b);
     seg.hasEndpoints = !closed;
+    const auto transferBoundary = [&](const Obj& sourceSurface, const Obj& sourceCurve, bool pairedParameter=false) {
+        const auto* firstBasis=basis(curve.c1);
+        const auto* secondBasis=basis(curve.c2);
+        const bool nurbsPair=(firstBasis && firstBasis->cls==kNurbs2) ||
+                             (secondBasis && secondBasis->cls==kNurbs2);
+        if (!faceSurface || (faceSurface!=&sourceSurface && faceSurface->cls!=kPlane && !nurbsPair && !pairedParameter)) return;
+        const Obj* boundaryCurve = faceSurface == curve.s1 ? curve.c1 : faceSurface == curve.s2 ? curve.c2 : nullptr;
+        if (!boundaryCurve) return;
+        kernel::AnalyticEdgeSegment boundary;
+        if (!surfaceCurveOf(*faceSurface, *boundaryCurve, boundary)) return;
+        double sourceFirst, sourceLast, boundaryFirst, boundaryLast;
+        if (!curveRange(sourceCurve, sourceFirst, sourceLast) ||
+            !curveRange(*boundaryCurve, boundaryFirst, boundaryLast) ||
+            !(sourceLast > sourceFirst) || !(boundaryLast > boundaryFirst)) return;
+        const double allowed = std::max(1e-7, seg.tolerance);
+        for (int sample = 0; sample <= 32; ++sample) {
+            const double f = sample / 32.0;
+            double su, sv, bu, bv;
+            Vector3 sourcePoint, boundaryPoint;
+            if (!curvePoint(sourceCurve, sourceFirst + (sourceLast - sourceFirst) * f, su, sv) ||
+                !surfacePoint(sourceSurface, su, sv, sourcePoint) ||
+                !curvePoint(*boundaryCurve, boundaryFirst + (boundaryLast - boundaryFirst) * f, bu, bv) ||
+                !surfacePoint(*faceSurface, bu, bv, boundaryPoint) ||
+                distance(sourcePoint, boundaryPoint) * kMetre > allowed) return;
+        }
+        // Both native curves follow the same edge fraction. Keep that law
+        // when their stored parameter origins or lengths differ.
+        if (sourceFirst != boundaryFirst || sourceLast != boundaryLast)
+            for (double& knot : boundary.bspline.knots)
+                knot = sourceFirst + (knot - boundaryFirst) * (sourceLast - sourceFirst) /
+                                      (boundaryLast - boundaryFirst);
+        seg.pcurve = std::move(boundary.bspline);
+    };
     Conic conic;
-    if (conicOf(*curve.s1, *curve.c1, conic) || conicOf(*curve.s2, *curve.c2, conic) || sectionOf(curve, conic) || coaxialOf(curve, conic) ||
+    const Obj* conicSurface=nullptr;
+    const Obj* conicCurve=nullptr;
+    const auto nativeConic=[&] {
+        for(const auto pair:{std::make_pair(curve.s1,curve.c1),std::make_pair(curve.s2,curve.c2)})
+            if(conicOf(*pair.first,*pair.second,conic)) {
+                conicSurface=pair.first;conicCurve=pair.second;return true;
+            }
+        return false;
+    };
+    if (nativeConic() || sectionOf(curve, conic) || coaxialOf(curve, conic) ||
         sphereCylinderOf(curve, conic)) {
         seg.kind = conic.kind;
         if (conic.kind == kernel::AnalyticEdgeKind::BSpline) {
+            const Obj* plane = curve.s1->cls == kPlane ? curve.s1 : curve.s2->cls == kPlane ? curve.s2 : nullptr;
+            const Obj* spline = curve.s1->cls == kSpline ? curve.s1 : curve.s2->cls == kSpline ? curve.s2 : nullptr;
+            if (!conic.planarNurbs && plane && spline) {
+                const Obj& planeCurve = plane == curve.s1 ? *curve.c1 : *curve.c2;
+                const Obj& splineCurve = spline == curve.s1 ? *curve.c1 : *curve.c2;
+                double a, z, sa, sz, u0, v0, u1, v1;
+                bool matches = curveRange(planeCurve, a, z) && curveRange(splineCurve, sa, sz) &&
+                    curvePoint(splineCurve, sa, u0, v0) && curvePoint(splineCurve, sz, u1, v1);
+                bool paired = matches;
+                const double allowed = std::max(1e-7, seg.tolerance);
+                for (int sample = 0; sample <= 32 && (matches || paired); ++sample) {
+                    const double fraction = sample / 32.0;
+                    double pu, pv, su, sv;
+                    Vector3 onPlane, onSpline, onPairedSpline;
+                    // The extracted iso curve uses the surface coordinate as
+                    // its parameter. Check that same affine law, rather than
+                    // assuming the native 2D curve uses it too.
+                    const bool on = curvePoint(planeCurve, a + (z - a) * fraction, pu, pv) &&
+                        surfacePoint(*plane, pu, pv, onPlane);
+                    matches = matches && on && surfacePoint(*spline,
+                        u0 + (u1 - u0) * fraction, v0 + (v1 - v0) * fraction, onSpline) &&
+                        distance(onPlane, onSpline) * kMetre <= allowed;
+                    paired = paired && on && curvePoint(splineCurve, sa + (sz - sa) * fraction, su, sv) &&
+                        surfacePoint(*spline, su, sv, onPairedSpline) &&
+                        distance(onPlane, onPairedSpline) * kMetre <= allowed;
+                }
+                kernel::AnalyticEdgeSegment boundary;
+                if ((matches || paired) && surfaceCurveOf(*plane, planeCurve, boundary)) {
+                    if (!matches && paired) {
+                        // The native pair has a common parameter, but it is
+                        // not the iso curve's affine surface coordinate. Use
+                        // that pair's planar boundary as the spatial source,
+                        // rather than projecting away its parameter law.
+                        seg.kind = boundary.kind;
+                        seg.bspline = std::move(boundary.bspline);
+                        seg.intersectionSurfaces = std::move(boundary.intersectionSurfaces);
+                        seg.curveFirst = boundary.curveFirst;
+                        seg.curveLast = boundary.curveLast;
+                        seg.forward = withEdge ? along : !along;
+                        transferBoundary(*plane, planeCurve);
+                        return true;
+                    }
+                    if (plane == faceSurface) seg.pcurve = std::move(boundary.bspline);
+                }
+            }
+            if(!plane && conicSurface && conicCurve) {
+                double a,z,u0,v0,u1,v1;
+                bool affine=curveRange(*conicCurve,a,z) && curvePoint(*conicCurve,a,u0,v0) &&
+                    curvePoint(*conicCurve,z,u1,v1);
+                for(int sample=1;sample<32 && affine;++sample) {
+                    double u,v;const double f=sample/32.;
+                    affine=curvePoint(*conicCurve,a+(z-a)*f,u,v) &&
+                        std::hypot(u-u0-(u1-u0)*f,v-v0-(v1-v0)*f)<=1e-12*std::max(1.,std::hypot(u1-u0,v1-v0));
+                }
+                // The iso curve is exact as a locus, but its coordinate is
+                // not necessarily the native intersection's parameter. Keep
+                // that common nonlinear law through a surface curve instead.
+                if(!affine) {
+                    bool paired=true;const double allowed=std::max(1e-7,seg.tolerance);
+                    for(int sample=0;sample<=32 && paired;++sample) {
+                        double u,v,su,sv;Vector3 p,q;const double f=sample/32.;
+                        paired=curvePoint(*curve.c1,t0+(t1-t0)*f,u,v) && surfacePoint(*curve.s1,u,v,p) &&
+                            curvePoint(*curve.c2,s0+(s1-s0)*f,su,sv) && surfacePoint(*curve.s2,su,sv,q) &&
+                            distance(p,q)*kMetre<=allowed;
+                    }
+                    const bool second=curve.s1->cls==kSpline && curve.s2->cls!=kSpline;
+                    const Obj& sourceSurface=second ? *curve.s2 : *curve.s1;
+                    const Obj& sourceCurve=second ? *curve.c2 : *curve.c1;
+                    kernel::AnalyticEdgeSegment boundary;
+                    if(paired && surfaceCurveOf(sourceSurface,sourceCurve,boundary)) {
+                        seg.kind=boundary.kind;seg.bspline=std::move(boundary.bspline);
+                        seg.intersectionSurfaces=std::move(boundary.intersectionSurfaces);
+                        seg.curveFirst=boundary.curveFirst;seg.curveLast=boundary.curveLast;
+                        seg.forward=withEdge ? along : !along;
+                        transferBoundary(sourceSurface,sourceCurve,true);
+                        return true;
+                    }
+                }
+            }
             seg.bspline = std::move(conic.bspline);
             for (Vector3& pole : seg.bspline.poles) pole = metres(pole);
-            seg.forward = along; // cut at its vertices, however it runs
+            seg.forward = conic.counterclockwise == withEdge ? along : !along;
+            seg.curveFirst=std::min(conic.splineFirst,conic.splineLast);
+            seg.curveLast=std::max(conic.splineFirst,conic.splineLast);
+            if(conic.planarNurbs && plane)
+                transferBoundary(*plane, plane==curve.s1 ? *curve.c1 : *curve.c2);
+            else if(!plane && conicSurface && conicCurve) {
+                double a,z,u0,v0,u1,v1;
+                bool affine=curveRange(*conicCurve,a,z) && curvePoint(*conicCurve,a,u0,v0) &&
+                    curvePoint(*conicCurve,z,u1,v1);
+                for(int sample=1;sample<32 && affine;++sample) {
+                    double u,v;const double f=sample/32.;
+                    affine=curvePoint(*conicCurve,a+(z-a)*f,u,v) &&
+                        std::hypot(u-u0-(u1-u0)*f,v-v0-(v1-v0)*f)<=1e-12*std::max(1.,std::hypot(u1-u0,v1-v0));
+                }
+                if(affine)transferBoundary(*conicSurface,*conicCurve);
+            }
             return true;
         }
         if (conic.kind == kernel::AnalyticEdgeKind::Line) {
             if (closed) return why = QObject::tr("замкнутое прямое ребро C3D"), false;
+            const auto* firstBasis = basis(curve.c1);
+            const auto* secondBasis = basis(curve.c2);
+            if (conicSurface && conicCurve &&
+                ((firstBasis && firstBasis->cls == kNurbs2) || (secondBasis && secondBasis->cls == kNurbs2)))
+                transferBoundary(*conicSurface, *conicCurve);
             return true;
         }
         // Its vertices off the exact curve (inexact ones, 6-3.m3d: 1.7e-4 mm) within the edge's tolerance.
@@ -1075,6 +1332,15 @@ bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QS
         // Counterclockwise about the normal along the curve; the edge with or against the curve; the loop
         // with or against the edge.
         seg.forward = conic.counterclockwise == withEdge ? along : !along;
+        // A recognized spatial conic can still have a tolerant NURBS
+        // boundary on its other face. Preserve that stored UV law after
+        // validating the native pair; deriving it again from the circle or
+        // ellipse would change the adjacent face's enclosed area.
+        const auto* firstBasis = basis(curve.c1);
+        const auto* secondBasis = basis(curve.c2);
+        const bool nurbsPair = (firstBasis && firstBasis->cls == kNurbs2) ||
+                              (secondBasis && secondBasis->cls == kNurbs2);
+        if (nurbsPair && conicSurface && conicCurve) transferBoundary(*conicSurface, *conicCurve);
         return true;
     }
     // Crossing a spline surface off its parameter lines (a thread's run-out): OCCT's intersection of the two
@@ -1082,9 +1348,19 @@ bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QS
     // curve in the parameters of the other surface (the first, both splines), its tolerance the largest
     // distance between its two curves along it (at 33 points where both run over the same parameters, at
     // its ends otherwise) and its vertices' own.
-    if (curve.s1->cls == kSpline || curve.s2->cls == kSpline) {
+    const auto* firstUvBasis=basis(curve.c1);
+    const auto* secondUvBasis=basis(curve.c2);
+    const bool nativeNurbsBoundary=(firstUvBasis && firstUvBasis->cls==kNurbs2) ||
+                                   (secondUvBasis && secondUvBasis->cls==kNurbs2);
+    if (curve.s1->cls == kSpline || curve.s2->cls == kSpline || nativeNurbsBoundary) {
         const bool second = curve.s1->cls == kSpline && curve.s2->cls != kSpline;
-        if (surfaceCurveOf(second ? *curve.s2 : *curve.s1, second ? *curve.c2 : *curve.c1, seg)) {
+        const Obj& curveSurface = second ? *curve.s2 : *curve.s1;
+        if (surfaceCurveOf(curveSurface, second ? *curve.c2 : *curve.c1, seg)) {
+            // This is the boundary from which the spatial edge is built, in
+            // this plane's own frame and parameter. Retain it on that face:
+            // deriving a fresh pcurve from BuildCurve3d's result can change
+            // the area of a tolerant spline boundary. Other supports still
+            // need their own boundary; this UV curve cannot be reused there.
             double apart = gap, run = 0.0, sine = 1.0;
             const bool together =
                 std::fabs(t0 - s0) <= 1e-12 * std::max(1.0, std::fabs(t1)) && std::fabs(t1 - s1) <= 1e-12 * std::max(1.0, std::fabs(t1));
@@ -1112,7 +1388,8 @@ bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QS
             }
             seg.tolerance = std::max({seg.tolerance, apart * kMetre, edge.begin->d[3] * kMetre, edge.end->d[3] * kMetre});
             seg.forward = along;
-            if (curveEdges && curveEdges->seen.insert(&edge).second) {
+            if (curveEdges && (curve.s1->cls == kSpline || curve.s2->cls == kSpline) &&
+                curveEdges->seen.insert(&edge).second) {
                 ++curveEdges->count;
                 curveEdges->largestGap = std::max(curveEdges->largestGap, apart);
                 // The edge lies on one surface and within `apart` of the other; where they meet at an angle θ
@@ -1121,6 +1398,7 @@ bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QS
                 curveEdges->sliver += sine > 1e-9 ? apart * apart * run / sine : std::numeric_limits<double>::infinity();
                 curveEdges->smallestSine = std::min(curveEdges->smallestSine, sine);
             }
+            transferBoundary(curveSurface, second ? *curve.c2 : *curve.c1);
             return true;
         }
         seg.intersectionSurfaces = {};
@@ -1149,10 +1427,40 @@ bool segmentOf(const Obj& edge, bool along, kernel::AnalyticEdgeSegment& seg, QS
 
 bool readKompasC3dSolids(const QString& path, kernel::OcctKernel& kernel, KompasC3dResult& result, QString& error,
                          ParasolidXtBuildReport* report) {
+    result = {};
+    error.clear();
     QByteArray contents;
     if (!readKompasContents(path, contents, error)) return false;
     KompasContentsRecords records;
     if (!decodeKompasContentsRecords(contents, records, error)) return false;
+
+    // The directory owns body records independently of their geometry. Two
+    // named bodies may have identical vertices or even share their faces.
+    // Read the math registry in physical order, but select the current bodies
+    // from /170/300 instead of treating history copies as additional bodies.
+    std::set<std::size_t> bodyOwners;
+    bool catalogBodies = false;
+    if (records.tail.startsWith(QByteArray::fromHex("804330"))) {
+        std::vector<KompasRecordLocation> locations;
+        quint64 cluster = 0;
+        for (const auto& record : records.records) {
+            const quint64 count = (quint64(record.compressedSize) + 4095) / 4096;
+            locations.push_back({record.offset, record.compressedSize, cluster, count});
+            cluster += count;
+        }
+        KompasCatalog catalog;
+        if (!decodeKompasCatalog(records.tail, locations, catalog, error)) return false;
+        for (const auto& model : catalog.entries) {
+            if (!model.directory || model.numericName != 170) continue;
+            for (const auto& bodies : model.children) {
+                if (!bodies.directory || bodies.numericName != 300) continue;
+                catalogBodies = true;
+                if (!model.enabled || !bodies.enabled) continue;
+                for (const auto& body : bodies.children)
+                    if (!body.directory) bodyOwners.insert(body.recordIndex);
+            }
+        }
+    }
 
     // Every face shell of the stream, the records read in order with one set of numbered objects. The part's
     // bodies are listed in records of their own — 01, the body's number (a word), ff ff ff ff, then its shell,
@@ -1165,9 +1473,11 @@ bool readKompasC3dSolids(const QString& path, kernel::OcctKernel& kernel, Kompas
     std::vector<std::pair<quint32, Obj*>> listed;
     QStringList unread, history, failed;
     bool anyListed = false;
-    for (const KompasContentsRecord& record : records.records) {
+    for (std::size_t recordIndex = 0; recordIndex < records.records.size(); ++recordIndex) {
+        const auto& record = records.records[recordIndex];
         const QByteArray& bytes = record.decoded;
-        const bool bodyRecord = bytes.size() > 13 && uchar(bytes[0]) == 1 && std::memcmp(bytes.constData() + 5, "\xff\xff\xff\xff", 4) == 0 &&
+        const bool bodyRecord = (!catalogBodies || bodyOwners.count(recordIndex)) &&
+                                bytes.size() > 13 && uchar(bytes[0]) == 1 && std::memcmp(bytes.constData() + 5, "\xff\xff\xff\xff", 4) == 0 &&
                                 uchar(bytes[9]) == 2 && uchar(bytes[11]) == 0x39 && uchar(bytes[12]) == 0x62;
         quint32 number = 0;
         if (bodyRecord) std::memcpy(&number, bytes.constData() + 1, 4);
@@ -1200,7 +1510,7 @@ bool readKompasC3dSolids(const QString& path, kernel::OcctKernel& kernel, Kompas
             if (line.contains(QObject::tr("которого ещё не было"))) line += QObject::tr(" (раньше в потоке: %1)").arg(history.join(QStringLiteral("; ")));
     std::vector<const Obj*> chosen;
     for (const auto& entry : listed) chosen.push_back(entry.second);
-    if (!anyListed) {
+    if (!anyListed && !catalogBodies) {
         // No list of bodies (not met in the samples): every distinct shell, as the file holds them.
         chosen.assign(shells.begin(), shells.end());
         if (!chosen.empty()) result.notes << QObject::tr("Списка тел в файле нет: взяты все оболочки потока");
@@ -1212,8 +1522,8 @@ bool readKompasC3dSolids(const QString& path, kernel::OcctKernel& kernel, Kompas
         return false;
     }
 
-    // One body per distinct set of faces; a shell naming faces of a body already taken is that body again,
-    // and so is a shell written anew with the same number of faces and the same vertices, bit for bit.
+    // Without named body owners, retain the older heuristic for legacy streams.
+    // With a catalog, geometry equality cannot erase a distinct document body.
     std::set<const Obj*> taken;
     std::set<std::pair<std::size_t, std::vector<std::array<double, 3>>>> bodyVertices;
     const QString stem = QFileInfo(path).completeBaseName();
@@ -1222,7 +1532,7 @@ bool readKompasC3dSolids(const QString& path, kernel::OcctKernel& kernel, Kompas
     for (const Obj* shell : chosen) {
         bool seen = false;
         for (const Obj* face : shell->list) seen = seen || taken.count(face);
-        if (seen) continue;
+        if (seen && !catalogBodies) continue;
         for (const Obj* face : shell->list) taken.insert(face);
         std::set<std::array<double, 3>> vertices;
         for (const Obj* face : shell->list)
@@ -1230,7 +1540,7 @@ bool readKompasC3dSolids(const QString& path, kernel::OcctKernel& kernel, Kompas
                 for (const auto& entry : loop->entries)
                     for (const Obj* vertex : {entry.first->begin, entry.first->end})
                         vertices.insert({vertex->d[0], vertex->d[1], vertex->d[2]});
-        if (!bodyVertices.insert({shell->list.size(), {vertices.begin(), vertices.end()}}).second) {
+        if (!catalogBodies && !bodyVertices.insert({shell->list.size(), {vertices.begin(), vertices.end()}}).second) {
             ++copies;
             continue;
         }
@@ -1265,7 +1575,7 @@ bool readKompasC3dSolids(const QString& path, kernel::OcctKernel& kernel, Kompas
                 for (const auto& [edge, direction] : loop->entries) {
                     if (uses[edge] > 1) continue;
                     kernel::AnalyticEdgeSegment seg;
-                    if (!segmentOf(*edge, direction == 1, seg, why, &curveEdges)) break;
+                    if (!segmentOf(*edge, direction == 1, seg, why, &curveEdges, face->surface)) break;
                     // A cone's apex: a closed edge of no length (a circle of radius 0) the face runs up to.
                     if (edge->begin == edge->end && seg.kind == kernel::AnalyticEdgeKind::Circle && !(seg.radius > 1e-9)) {
                         if (patch.kind == kernel::AnalyticFacePatch::Kind::Cone) patch.holdsApex = true;

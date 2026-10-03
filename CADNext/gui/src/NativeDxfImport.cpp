@@ -54,6 +54,10 @@ bool readBinaryGroups(const QByteArray& bytes, std::vector<Group>& groups,
         return false;
     }
     qsizetype at = sentinelSize;
+    // Before AutoCAD R13 a group code is one byte, 255 announcing a two-byte code (extended data);
+    // since R13 it is two bytes. A DXF opens with group 0 and a name ("SECTION"): 00 then a letter
+    // is the old form, 00 00 the new one.
+    const bool narrow = bytes.size() > sentinelSize + 1 && bytes[sentinelSize] == '\0' && bytes[sentinelSize + 1] != '\0';
     const auto integer = [&](int size, quint64& value) -> bool {
         if (size > bytes.size() - at) return false;
         value = 0;
@@ -64,7 +68,7 @@ bool readBinaryGroups(const QByteArray& bytes, std::vector<Group>& groups,
     };
     while (at < bytes.size()) {
         quint64 rawCode = 0;
-        if (!integer(2, rawCode) || rawCode > 1071) {
+        if (!integer(narrow ? 1 : 2, rawCode) || (narrow && rawCode == 255 && !integer(2, rawCode)) || rawCode > 1071) {
             error = QObject::tr("Некорректный групповой код бинарного DXF.");
             return false;
         }
@@ -440,7 +444,23 @@ bool readDxfGroups(const QString& path, std::vector<DxfGroup>& groups, QString& 
         error = QObject::tr("Не удалось открыть DXF или файл слишком велик.");
         return false;
     }
-    QByteArray bytes = file.readAll();
+    return decodeDxfGroups(file.readAll(), groups, error);
+}
+
+bool encodeBinaryDxf(const QByteArray& ascii, QByteArray& binary, QString& error) {
+    error.clear();
+    if (encodeBinaryGroups(ascii, binary, error)) return true;
+    if (error.isEmpty()) error = QObject::tr("Не удалось закодировать бинарный DXF.");
+    binary.clear();
+    return false;
+}
+
+bool decodeDxfGroups(QByteArray bytes, std::vector<DxfGroup>& groups, QString& error) {
+    groups.clear();
+    if (bytes.size() > kMaxDxfBytes) {
+        error = QObject::tr("Не удалось открыть DXF или файл слишком велик.");
+        return false;
+    }
     if (bytes.startsWith("AutoCAD Binary DXF")) {
         std::vector<Group> binary;
         if (!readBinaryGroups(bytes, binary, error)) return false;

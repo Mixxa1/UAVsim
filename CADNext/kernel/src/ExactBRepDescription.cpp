@@ -12,6 +12,8 @@
 #include <Geom2d_Curve.hxx>
 #include <Geom2d_BSplineCurve.hxx>
 #include <Geom2d_Line.hxx>
+#include <Geom2d_Hyperbola.hxx>
+#include <Geom2d_Parabola.hxx>
 #include <Geom2d_TrimmedCurve.hxx>
 #include <gp_Pnt2d.hxx>
 #include <BRepTools.hxx>
@@ -59,7 +61,8 @@ namespace cadnext::kernel {
 
 #ifndef CADNEXT_WITH_OCCT
 
-cadnext::Result<ExactBRepDescription> describeExactBRep(const OcctKernel&, const ShapeHandle&) {
+cadnext::Result<ExactBRepDescription> describeExactBRep(
+    const OcctKernel&, const ShapeHandle&, ConeParameterization) {
     return cadnext::Result<ExactBRepDescription>::fail(
         {cadnext::ErrorCode::UnsupportedOperation, "описание точного BRep требует сборки с OCCT"});
 }
@@ -265,7 +268,9 @@ Handle(Geom_Curve) curveOf(const DescribedCurve& c) {
 
 } // namespace
 
-cadnext::Result<ExactBRepDescription> describeExactBRep(const OcctKernel& kernel, const ShapeHandle& handle) {
+cadnext::Result<ExactBRepDescription> describeExactBRep(
+    const OcctKernel& kernel, const ShapeHandle& handle,
+    ConeParameterization coneParameterization) {
     const TopoDS_Shape* shape = kernel.findShape(handle);
     if (!shape || shape->IsNull()) return R::fail({cadnext::ErrorCode::ShapeInvalid, "нет такой формы"});
     try {
@@ -452,6 +457,21 @@ cadnext::Result<ExactBRepDescription> describeExactBRep(const OcctKernel& kernel
                 const gp_Cone c = adaptor.Cone();
                 const gp_Ax3 p = c.Position();
                 const double angle = c.SemiAngle();
+                if (coneParameterization == ConeParameterization::SourceFrame) {
+                    // C3D can retain the signed angle. Keeping the reference
+                    // circle avoids translating UV knots/poles and rebuilding
+                    // periodic seams on an already trimmed tolerant support.
+                    const gp_Dir axis = p.XDirection().Crossed(p.YDirection());
+                    const double signedAngle = p.Direction().Dot(axis) < 0 ? -angle : angle;
+                    s.kind = DescribedSurface::Kind::Cone;
+                    s.origin = vec(p.Location().XYZ());
+                    s.axis = vec(axis.XYZ());
+                    s.xAxis = vec(p.XDirection().XYZ());
+                    s.radius = c.RefRadius();
+                    s.sinHalfAngle = std::sin(signedAngle);
+                    s.cosHalfAngle = std::cos(signedAngle);
+                    return true;
+                }
                 const gp_Dir axis = angle > 0.0 ? p.Direction() : p.Direction().Reversed();
                 const double half = std::fabs(angle);
                 double u1, u2, v1, v2;
@@ -678,11 +698,23 @@ cadnext::Result<ExactBRepDescription> describeExactBRep(const OcctKernel& kernel
                 bool used = false;
             };
             std::vector<Piece> pieces;
+            TopTools_IndexedMapOfShape faceEdges;
+            std::vector<int> edgeUses;
+            for (TopExp_Explorer it(face, TopAbs_EDGE); it.More(); it.Next()) {
+                const int key=faceEdges.Add(it.Current());
+                if(edgeUses.size()<std::size_t(key))edgeUses.resize(std::size_t(key),0);
+                ++edgeUses[std::size_t(key-1)];
+            }
             int wireIndex = 0;
             for (TopExp_Explorer wires(face, TopAbs_WIRE); wires.More(); wires.Next(), ++wireIndex) {
                 for (BRepTools_WireExplorer it(TopoDS::Wire(wires.Current()), face); it.More(); it.Next()) {
                     const TopoDS_Edge& edge = it.Current();
-                    if (BRep_Tool::Degenerated(edge) || BRep_Tool::IsClosed(edge, face)) continue;
+                    // Two pcurves on a common support can belong to two
+                    // different faces. Only an edge used twice by this face
+                    // is its seam; dropping a shared boundary opens the wire.
+                    const bool seam=BRep_Tool::IsClosed(edge,face) &&
+                        edgeUses.at(std::size_t(faceEdges.FindIndex(edge)-1))>1;
+                    if (BRep_Tool::Degenerated(edge) || seam) continue;
                     if (edge.Orientation() != TopAbs_FORWARD && edge.Orientation() != TopAbs_REVERSED) {
                         failure = "внутреннее или внешнее ребро в контуре грани";
                         return false;
@@ -726,6 +758,24 @@ cadnext::Result<ExactBRepDescription> describeExactBRep(const OcctKernel& kernel
                             d.knots = {first, last}; d.multiplicities = {2, 2};
                             d.poles = {{a.X(), a.Y(), 0}, {b.X(), b.Y(), 0}}; d.weights = {1, 1};
                             piece.coedge.pcurve = std::move(d);
+                        }
+                        if (!piece.coedge.pcurve && surface.kind==DescribedSurface::Kind::Plane) {
+                            AnalyticPcurveDefinition d;bool conic=false;
+                            gp_Ax22d frame;
+                            if(const auto hyperbola=Handle(Geom2d_Hyperbola)::DownCast(pcurve)) {
+                                d.kind=AnalyticPcurveDefinition::Kind::Hyperbola;
+                                d.a=hyperbola->MajorRadius();d.b=hyperbola->MinorRadius();
+                                frame=hyperbola->Position();conic=true;
+                            } else if(const auto parabola=Handle(Geom2d_Parabola)::DownCast(pcurve)) {
+                                d.kind=AnalyticPcurveDefinition::Kind::Parabola;
+                                d.a=parabola->Focal();frame=parabola->Position();conic=true;
+                            }
+                            if(conic) {
+                                d.origin={frame.Location().X(),frame.Location().Y(),0};
+                                d.xAxis={frame.XDirection().X(),frame.XDirection().Y(),0};
+                                d.yAxis={frame.YDirection().X(),frame.YDirection().Y(),0};
+                                d.first=first;d.last=last;piece.coedge.analyticPcurve=d;
+                            }
                         }
                         if (piece.coedge.pcurve && surface.kind != DescribedSurface::Kind::BSpline &&
                             surface.kind != DescribedSurface::Kind::Plane) {
@@ -841,6 +891,68 @@ cadnext::Result<ExactBRepDescription> describeExactBRep(const OcctKernel& kernel
                     if (!describeLoops(face, surface, described.loops))
                         return R::fail({cadnext::ErrorCode::UnsupportedOperation, what("грань", faceMap.Extent()) + ": " + failure});
                     if (described.loops.empty()) {
+                        if(surface.kind==DescribedSurface::Kind::BSpline) {
+                            const Handle(Geom_Surface) support=asRead(surface);
+                            double ua,uz,va,vz;BRepTools::UVBounds(face,ua,uz,va,vz);
+                            if(!support.IsNull() && support->IsUClosed() && support->IsVClosed() &&
+                               std::isfinite(ua) && std::isfinite(uz) && std::isfinite(va) && std::isfinite(vz) &&
+                               uz>ua && vz>va) {
+                                // A boundaryless doubly closed support has toroidal
+                                // topology. Four exact parameter rectangles have
+                                // genuine shared edges, with no self-used seams.
+                                const double u[3]={ua,(ua+uz)/2,uz},v[3]={va,(va+vz)/2,vz};
+                                int vertices[2][2],horizontal[2][2],vertical[2][2];
+                                for(int i=0;i<2;++i)for(int j=0;j<2;++j) {
+                                    vertices[i][j]=int(out.vertices.size());
+                                    out.vertices.push_back(vec(support->Value(u[i],v[j]).XYZ()));
+                                }
+                                const auto addIso=[&](bool alongU,int i,int j) {
+                                    const Handle(Geom_Curve) iso=alongU ? support->VIso(v[j]) : support->UIso(u[i]);
+                                    const double a=alongU ? u[i] : v[j],z=alongU ? u[i+1] : v[j+1];
+                                    Handle(Geom_BSplineCurve) spline=Handle(Geom_BSplineCurve)::DownCast(iso);
+                                    if(!spline.IsNull())spline=Handle(Geom_BSplineCurve)::DownCast(spline->Copy());
+                                    else spline=GeomConvert::CurveToBSplineCurve(new Geom_TrimmedCurve(iso,a,z));
+                                    if(spline.IsNull())throw Standard_Failure("Closed surface iso curve is not a spline");
+                                    spline->Segment(a,z);
+                                    if(spline->IsPeriodic())spline->SetNotPeriodic();
+                                    DescribedCurve curve;curve.kind=DescribedCurve::Kind::BSpline;
+                                    curve.bspline=definitionOf(spline);
+                                    DescribedEdge edge;edge.curve=int(out.curves.size());
+                                    edge.start=vertices[i][j];
+                                    edge.end=alongU ? vertices[(i+1)%2][j] : vertices[i][(j+1)%2];
+                                    edge.firstParameter=a;edge.lastParameter=z;
+                                    edge.tolerance=std::max(1e-12,BRep_Tool::Tolerance(face));
+                                    const int id=int(out.edges.size());
+                                    out.curves.push_back(std::move(curve));out.edges.push_back(edge);return id;
+                                };
+                                for(int i=0;i<2;++i)for(int j=0;j<2;++j) {
+                                    horizontal[i][j]=addIso(true,i,j);
+                                    vertical[i][j]=addIso(false,i,j);
+                                }
+                                const auto use=[&](int edge,bool forward,double u0,double v0,double u1,double v1) {
+                                    DescribedCoedge coedge;coedge.edge=edge;coedge.forward=forward;
+                                    BSplineCurveDefinition pc;pc.degree=1;
+                                    pc.poles={{u0,v0,0},{u1,v1,0}};pc.weights={1,1};pc.multiplicities={2,2};
+                                    pc.knots={out.edges[std::size_t(edge)].firstParameter,out.edges[std::size_t(edge)].lastParameter};
+                                    coedge.pcurve=std::move(pc);return coedge;
+                                };
+                                for(int i=0;i<2;++i)for(int j=0;j<2;++j) {
+                                    DescribedFace patch=described;patch.surface=int(out.surfaces.size());
+                                    patch.loops={{
+                                        use(horizontal[i][j],true,u[i],v[j],u[i+1],v[j]),
+                                        use(vertical[(i+1)%2][j],true,u[i+1],v[j],u[i+1],v[j+1]),
+                                        use(horizontal[i][(j+1)%2],false,u[i],v[j+1],u[i+1],v[j+1]),
+                                        use(vertical[i][j],false,u[i],v[j],u[i],v[j+1])}};
+                                    if(patch.reversed) {
+                                        std::reverse(patch.loops[0].begin(),patch.loops[0].end());
+                                        for(auto& coedge:patch.loops[0])coedge.forward=!coedge.forward;
+                                    }
+                                    out.surfaces.push_back(surface);faces.push_back(int(out.faces.size()));
+                                    out.faces.push_back(std::move(patch));
+                                }
+                                continue;
+                            }
+                        }
                         if (surface.kind == DescribedSurface::Kind::Torus && surface.majorRadius > surface.minorRadius) {
                             // Split a closed torus at two opposite meridians. The two analytic
                             // bands share their exact circles and retain the entire periodic surface.

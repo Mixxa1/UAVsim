@@ -1,8 +1,23 @@
 #include "cadnext/gui/NativeCadImport.hpp"
+#include "cadnext/gui/NativeCompoundFile.hpp"
 #include "cadnext/gui/NativeParasolidXt.hpp"
 #include "cadnext/gui/NativeSolidWorksGeometry.hpp"
+#include "cadnext/gui/NativeSolidWorksWriter.hpp"
+#include "cadnext/gui/NativeSolidWorksConfiguration.hpp"
+#include "cadnext/gui/NativeSolidWorksDocument.hpp"
+#include "cadnext/gui/NativeSolidWorksFeatureBodies.hpp"
+#include "cadnext/gui/NativeKompasC3d.hpp"
+#include "cadnext/gui/NativeKompasGeometry.hpp"
+#include "cadnext/gui/NativeKompasWriter.hpp"
+#include "cadnext/gui/NativeKompasModel.hpp"
+#include "cadnext/gui/NativeKompasProperties.hpp"
+#include "cadnext/gui/NativeKompasDocument.hpp"
+#include "cadnext/gui/NativeKompasStorage.hpp"
+#include "cadnext/gui/NativeKompasCatalog.hpp"
+#include "../gui/src/NativeKompasSplineSurface.hpp"
 #include "cadnext/gui/ParasolidXtWriter.hpp"
 #include "cadnext/kernel/GeometryEvaluator.hpp"
+#include "cadnext/kernel/ExactBRepDescription.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
 
 #include <QCoreApplication>
@@ -14,6 +29,26 @@
 #include <zlib.h>
 
 #include <BRepAdaptor_Surface.hxx>
+#include <BRepAdaptor_Curve.hxx>
+#include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Common.hxx>
+#include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepBuilderAPI_NurbsConvert.hxx>
+#include <BRepBuilderAPI_Transform.hxx>
+#include <BRepBuilderAPI_MakeEdge.hxx>
+#include <BRepBuilderAPI_MakeFace.hxx>
+#include <BRepBuilderAPI_MakeWire.hxx>
+#include <BRepBuilderAPI_MakeSolid.hxx>
+#include <BRepBuilderAPI_MakePolygon.hxx>
+#include <BRepBuilderAPI_Sewing.hxx>
+#include <BRepLib.hxx>
+#include <BRep_Tool.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
+#include <BRepPrimAPI_MakePrism.hxx>
+#include <Geom_BSplineCurve.hxx>
+#include <Geom2d_BSplineCurve.hxx>
+#include <GeomAPI_ProjectPointOnCurve.hxx>
 #include <BRepGProp.hxx>
 #include <GProp_GProps.hxx>
 #include <GeomAbs_CurveType.hxx>
@@ -24,7 +59,9 @@
 
 #include <cassert>
 #include <cmath>
+#include <limits>
 #include <map>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -87,6 +124,52 @@ void put16be(QByteArray& bytes, quint16 number) {
 void put32be(QByteArray& bytes, quint32 number) {
     put16be(bytes, quint16(number >> 16));
     put16be(bytes, quint16(number & 65535));
+}
+
+// Independently specified neutral-binary XT graph: one BODY with a placeholder
+// FACE, one integer attribute, its definition/name and its value array.
+QByteArray integerAttributeBodyFixture() {
+    QByteArray b("PS\0\0", 4);
+    const QByteArray modeller(": TRANSMIT FILE created by modeller version 1901315");
+    put16be(b, modeller.size()); b += modeller;
+    const QByteArray schema("SCH_1901315_19011_13006");
+    put32be(b, schema.size()); b += schema;
+    put16be(b, 205); put32be(b, 0);
+    const auto pointer = [&](quint16 id) { put16be(b, id + 1); };
+    const auto node = [&](quint16 type, quint16 id, int count = -1) {
+        put16be(b, type); b += char(255); // unchanged public base schema
+        if (count >= 0) put32be(b, quint32(count));
+        pointer(id);
+    };
+    node(12, 1);
+    put32be(b, 2); pointer(2); // highest_node_id, attributes_groups
+    for (int i = 0; i < 5; ++i) pointer(0); // attribute_chains and geometry chains
+    put32be(b, 0x408f4000); put32be(b, 0); // res_size = 1000
+    put32be(b, 0x3e45798e); put32be(b, 0xe2308c3a); // res_linear = 1e-8
+    for (int i = 0; i < 3; ++i) pointer(0);
+    b += char(1); pointer(0); b += char(1); b += char(1);
+    for (int i = 0; i < 7; ++i) pointer(0);
+    node(81, 2, 1);
+    put32be(b, 1); pointer(3); pointer(1);
+    for (int i = 0; i < 4; ++i) pointer(0);
+    pointer(5);
+    node(80, 3, 1);
+    pointer(0); pointer(4); put32be(b, 9000);
+    b += QByteArray(8, '\0'); pointer(0);
+    for (int i = 0; i < 14; ++i) b += char(i == 2); // BODY is a legal owner
+    b += char(1); // integer field
+    const QByteArray name("CADNext_Test_ID");
+    node(79, 4, name.size()); b += name;
+    node(82, 5, 3);
+    put32be(b, 0xffffffffu); put32be(b, 17); put32be(b, 0x7fffffffu);
+    node(14, 6);
+    put32be(b, 2); pointer(0);
+    put32be(b, 0); put32be(b, 0); // zero face tolerance
+    for (int i = 0; i < 5; ++i) pointer(0);
+    b += char('+');
+    for (int i = 0; i < 5; ++i) pointer(0);
+    put16be(b, 1); pointer(0);
+    return b;
 }
 
 struct Member {
@@ -244,19 +327,1628 @@ QByteArray configurationNames(const std::vector<std::pair<quint32, QString>>& na
     for (std::size_t i = 0; i < names.size(); ++i) {
         if (i == 0) objectClass("dmConfigHeader_c");
         else put16(data, 0x8003);
-        put32(data, 1); string(names[i].second); put32(data, names[i].first);
+        put32(data, i == 0); string(names[i].second); put32(data, names[i].first);
         put32(data, 0); string(names[i].second); put32(data, 0xffffffff); put32(data, 0);
         string({}); string({}); put32(data, 0); put32(data, 0);
     }
+    put32(data, 0); put32(data, 2); // manager timestamp and format, outside the entries
     return data;
+}
+
+void verifyNativeSolidWorksConfigurationHeader() {
+    using namespace cadnext::gui;
+    // Independently specified archive: inactive Latin-1 root id 17, active
+    // Unicode child id 29, two native stamps each, and the manager footer.
+    const auto fixture = QByteArray::fromHex(
+        "ffff01001300646d436f6e6669674d67724865616465725f630200ffff010010"
+        "00646d436f6e6669674865616465725f63000000000141110000000500000001"
+        "41ffffffff000000000000000140800000000003000000020000000380010000"
+        "00fffeff0111041d00000006000000fffeff0111041100000000000000fffeff"
+        "011404014ec00140800100000004000000020000007856341202000000443322"
+        "11");
+    SolidWorksConfigurationHeader header;
+    QString error;
+    QByteArray encoded;
+    assert(decodeSolidWorksConfigurationHeader(fixture, header, error));
+    assert(header.entries.size() == 2 && header.extendedStamps);
+    assert(header.savedAt == 0x12345678 && header.trailingField == 0x11223344);
+    assert(!header.entries[0].mostRecent && header.entries[0].id == 17);
+    assert(header.entries[0].name == "A" && !header.entries[0].unicodeStrings[0]);
+    assert(header.entries[0].modifiedStamp == 5 && header.entries[0].nativeStamps[0] == 3);
+    assert(header.entries[1].mostRecent && header.entries[1].parentId == 17);
+    assert(header.entries[1].name == QStringLiteral("Б") && header.entries[1].description == QStringLiteral("Д"));
+    assert(header.entries[1].alternatePartName == "N" && header.entries[1].nativeField == 1);
+    assert(encodeSolidWorksConfigurationHeader(header, encoded, error) && encoded == fixture);
+    const auto source = header;
+    for (qsizetype n = 0; n < fixture.size(); ++n) {
+        // The trailing native word is optional; its complete removal is valid.
+        const bool ok = decodeSolidWorksConfigurationHeader(fixture.left(n), header, error);
+        assert(ok == (n == fixture.size() - 4));
+        if (!ok) assert(header.entries.empty() && !error.isEmpty());
+    }
+    auto malformed = fixture; malformed[2] = 2;
+    assert(!decodeSolidWorksConfigurationHeader(malformed, header, error));
+    malformed = fixture; malformed[49] = 2; // mostRecent is Boolean, not schema/version
+    assert(!decodeSolidWorksConfigurationHeader(malformed, header, error));
+    malformed = fixture + char(0);
+    assert(!decodeSolidWorksConfigurationHeader(malformed, header, error));
+    for (int kind = 0; kind < 7; ++kind) {
+        auto invalid = source;
+        if (kind == 0) invalid.entries[1].id = 17;
+        if (kind == 1) invalid.entries[1].name = "A";
+        if (kind == 2) invalid.entries[1].parentId = 999;
+        if (kind == 3) invalid.entries[0].parentId = 29;
+        if (kind == 4) invalid.entries[0].mostRecent = true;
+        if (kind == 5) invalid.entries[1].unicodeStrings[0] = false;
+        if (kind == 6) invalid.entries[1].description.append(QChar(u'\0'));
+        encoded = "stale";
+        assert(!encodeSolidWorksConfigurationHeader(invalid, encoded, error));
+        assert(encoded.isEmpty() && !error.isEmpty());
+    }
+    auto shortHeader = source;
+    shortHeader.extendedStamps = false; shortHeader.trailingField.reset();
+    for (auto& e : shortHeader.entries) e.nativeStamps = {};
+    assert(encodeSolidWorksConfigurationHeader(shortHeader, encoded, error));
+    assert(decodeSolidWorksConfigurationHeader(encoded, header, error));
+    assert(!header.extendedStamps && !header.trailingField && header.entries[1].parentId == 17);
+    assert(header.entries[0].name == "A" && header.entries[1].name == QStringLiteral("Б"));
+    shortHeader.managerFooter = false; shortHeader.savedAt = 0;
+    shortHeader.entries[0].nativeField = 0x12345678;
+    assert(encodeSolidWorksConfigurationHeader(shortHeader, encoded, error));
+    assert(decodeSolidWorksConfigurationHeader(encoded, header, error));
+    assert(!header.managerFooter && !header.extendedStamps && header.entries[0].nativeField == 0x12345678);
+}
+
+void verifyNativeSolidWorksDocumentHeader() {
+    using namespace cadnext::gui;
+    // Independently specified archive: two authors, two stamps, one external
+    // part, a current assembly, and an actual shared title handle (object 19).
+    // MFC class ids: arrays 3, list 6, logs 8, stamps 10, external list 13,
+    // external object 15, string handles 17. No production encoder builds it.
+    const auto fixture = QByteArray::fromHex(
+        "ffff01000a006d6f4865616465725f63ffff00000f0073755f43537472696e67"
+        "417272617902000141fffeff0111040380010000ffff0100080073754f624c"
+        "6973740100ffff010008006d6f4c6f67735f630200ffff010009006d6f537461"
+        "6d705f630000000000000100000001430a8001000100010002000000fffeff"
+        "01140401000000fffeff0122040100000003000000ffff010011006d6f457874"
+        "4f626a6563744c6973745f630100ffff01000d006d6f4578744f626a6563745f"
+        "63ffff010011006d6f43537472696e6748616e646c655f630b706172742e736c"
+        "647072741180fffeff0614043504420430043b044c040200000300000000fffe"
+        "ff000004000000010000000000000000000000fffeff074400650066006100"
+        "75006c007400070000000000000005000000090000000f8011800f61737365"
+        "6d626c792e736c6461736d13000300000600000000fffeff00000800000001"
+        "00000000000000fffffffffffeff0121041100000000000000000000000a00"
+        "000000000000000000000900000000000000000000001000000000000200"
+        "000004000000010000000680000000000000000000000100000000000000"
+        "0000000000000000000000000000000000000000000000000000f03f000000"
+        "00000000400000000000000840000000000000f0bf00000000000000c00000"
+        "0000000008c0000000000000104002000000ffffffffffffffff01000000");
+    SolidWorksDocumentHeader header;
+    QString error;
+    QByteArray encoded;
+    assert(decodeSolidWorksDocumentHeader(fixture, header, error));
+    assert(header.layout == SolidWorksDocumentHeaderLayout::Standard);
+    assert(header.authors.size() == 2 && header.authors[0].text == "A" && !header.authors[0].unicode);
+    assert(header.authors[1].text == QStringLiteral("Б") && header.authors[1].unicode);
+    assert(header.logs.size() == 1 && header.logs[0].featureId == 1);
+    assert(header.logs[0].featureName.text == QStringLiteral("Т") && header.logs[0].stamps.size() == 2);
+    assert(header.logs[0].stamps[1].nativeAction == 0x10001 && header.logs[0].stamps[1].authorIndex == 1);
+    assert(header.nextFeatureId == 3 && header.modifiedStamp == 9);
+    assert(header.references.size() == 1 && header.references[0].configurationId == 7);
+    assert(header.currentDocument.documentType == 3 && header.currentDocument.configurationId == 17);
+    assert(header.currentDocument.configurationName.text == QStringLiteral("С"));
+    assert(header.references[0].title == header.currentDocument.title);
+    assert(header.references[0].path != header.currentDocument.path);
+    assert(header.nativeBounds && (*header.nativeBounds)[9] == 4 && (*header.nativeBounds)[7] == -2);
+    assert(header.nativeFields[6] == 16 && header.nativeCounters[0] == 2);
+    assert(encodeSolidWorksDocumentHeader(header, encoded, error) && encoded == fixture);
+    const auto source = header;
+    auto prefixed = fixture; prefixed.insert(16, QByteArray::fromHex("01000000"));
+    assert(decodeSolidWorksDocumentHeader(prefixed, header, error) && header.nativePrefixWord == 1);
+    assert(encodeSolidWorksDocumentHeader(header, encoded, error) && encoded == prefixed);
+    prefixed[16] = 2;
+    assert(!decodeSolidWorksDocumentHeader(prefixed, header, error));
+    for (qsizetype n = 0; n < fixture.size(); ++n) {
+        // This complete older layout ends immediately after bounds, with no
+        // sixteen-byte trailer; removing its trailer is not a truncation.
+        if (n == fixture.size() - 16 || n == fixture.size() - 4) {
+            assert(decodeSolidWorksDocumentHeader(fixture.left(n), header, error));
+            assert(header.layout == (n == fixture.size() - 16 ? SolidWorksDocumentHeaderLayout::StandardCompact :
+                SolidWorksDocumentHeaderLayout::StandardLegacy));
+            assert(header.nativeTrailer.has_value() == (n == fixture.size() - 4));
+            assert(encodeSolidWorksDocumentHeader(header, encoded, error) && encoded == fixture.left(n));
+            continue;
+        }
+        assert(!decodeSolidWorksDocumentHeader(fixture.left(n), header, error));
+        assert(header.logs.empty() && header.references.empty() && !error.isEmpty());
+    }
+    auto malformed = fixture; malformed[2] = 2;
+    assert(!decodeSolidWorksDocumentHeader(malformed, header, error));
+    malformed = fixture; malformed[47] = 2; // class 2 is an object, not the CStringArray class 3
+    assert(!decodeSolidWorksDocumentHeader(malformed, header, error));
+    malformed = fixture; malformed[37] = 1; malformed[38] = 0x10; // 4097 authors
+    assert(!decodeSolidWorksDocumentHeader(malformed, header, error));
+    const auto sharedAt = fixture.indexOf(QByteArray::fromHex("130003000006000000"));
+    assert(sharedAt > 0);
+    malformed = fixture; malformed[sharedAt] = 22; // forward/unwritten string handle
+    assert(!decodeSolidWorksDocumentHeader(malformed, header, error));
+    malformed = fixture + char(0);
+    assert(!decodeSolidWorksDocumentHeader(malformed, header, error));
+    for (int kind = 0; kind < 12; ++kind) {
+        auto invalid = source;
+        if (kind == 0) invalid.logs[0].stamps[0].authorIndex = 2;
+        if (kind == 1) invalid.logs[0].featureId = 4;
+        if (kind == 2) invalid.currentDocument.path.reset();
+        if (kind == 3) invalid.currentDocument.nativeFields[3] = 0;
+        if (kind == 4) invalid.references[0].nativeFields[3] = 0xffffffff;
+        if (kind == 5) invalid.authors[1].unicode = false;
+        if (kind == 6) invalid.authors[0].text.append(QChar(u'\0'));
+        if (kind == 7) (*invalid.nativeBounds)[0] = std::numeric_limits<double>::infinity();
+        if (kind == 8) invalid.currentDocument.auxiliaryStrings.clear();
+        if (kind == 9) invalid.nativeTrailer.reset();
+        if (kind == 10) invalid.nativeExtension.push_back(1);
+        if (kind == 11) invalid.nativePrefixWord = 2;
+        encoded = "stale";
+        assert(!encodeSolidWorksDocumentHeader(invalid, encoded, error));
+        assert(encoded.isEmpty() && !error.isEmpty());
+    }
+    auto highWater = source; highWater.nextFeatureId = highWater.logs[0].featureId;
+    assert(encodeSolidWorksDocumentHeader(highWater, encoded, error));
+    assert(decodeSolidWorksDocumentHeader(encoded, header, error));
+    assert(header.nextFeatureId == header.logs[0].featureId);
+    for (const auto layout : {SolidWorksDocumentHeaderLayout::Classic, SolidWorksDocumentHeaderLayout::Extended,
+                             SolidWorksDocumentHeaderLayout::ExtendedByte, SolidWorksDocumentHeaderLayout::StandardCompact,
+                             SolidWorksDocumentHeaderLayout::ExtendedByteModern, SolidWorksDocumentHeaderLayout::StandardLegacy}) {
+        auto varied = source; varied.layout = layout;
+        const bool classic = layout == SolidWorksDocumentHeaderLayout::Classic;
+        const bool compact = layout == SolidWorksDocumentHeaderLayout::StandardCompact;
+        const bool modern = layout == SolidWorksDocumentHeaderLayout::ExtendedByteModern;
+        const bool legacy = layout == SolidWorksDocumentHeaderLayout::StandardLegacy;
+        const bool extra = layout == SolidWorksDocumentHeaderLayout::ExtendedByte || modern;
+        if (extra) varied.nativePrefixWord = 1;
+        for (auto* ref : {&varied.references[0], &varied.currentDocument}) {
+            ref->auxiliaryStrings.resize(classic ? 1 : compact || legacy ? 2 : 3);
+            ref->extendedByte = extra ? 1 : 0;
+            if (modern) ref->nativeField3 = 0x12345678;
+        }
+        if (modern) varied.references[0].documentType = 5;
+        if (classic || compact) varied.nativeTrailer.reset();
+        if (legacy) (*varied.nativeTrailer)[3] = 0;
+        varied.nativeExtension.assign(classic || compact || legacy ? 0 : modern ? 16 : extra ? 7 : 6, 0);
+        varied.allocatedEmptyList = false;
+        varied.nativeBounds.reset();
+        varied.authors[0].text = QString(300, QChar(u'Ж')); varied.authors[0].unicode = true;
+        assert(encodeSolidWorksDocumentHeader(varied, encoded, error));
+        assert(decodeSolidWorksDocumentHeader(encoded, header, error));
+        assert(header.layout == layout && !header.allocatedEmptyList && !header.nativeBounds);
+        assert(header.authors[0].text == varied.authors[0].text && header.nativeExtension.size() == varied.nativeExtension.size());
+        assert(header.currentDocument.extendedByte == (extra ? 1 : 0));
+        assert(header.references[0].title == header.currentDocument.title);
+        assert(header.currentDocument.nativeField3 == varied.currentDocument.nativeField3);
+        QByteArray repeated;
+        assert(encodeSolidWorksDocumentHeader(header, repeated, error) && repeated == encoded);
+        if (modern) {
+            varied.references[0].nativeField3.reset();
+            assert(!encodeSolidWorksDocumentHeader(varied, repeated, error) && repeated.isEmpty());
+        }
+        if (legacy) {
+            (*varied.nativeTrailer)[3] = 1;
+            assert(!encodeSolidWorksDocumentHeader(varied, repeated, error) && repeated.isEmpty());
+        }
+    }
+}
+
+cadnext::kernel::ShapeHandle verifyNativeC3dBody(cadnext::kernel::OcctKernel& kernel, const char* name,
+                 const cadnext::kernel::ShapeHandle& source) {
+    using namespace cadnext::gui;
+    const std::pair<const char*,cadnext::kernel::ShapeHandle> item{name,source};
+    // Geometry, storage and the named record catalog are authored from scratch.
+    // Application objects are absent; this is not a complete CAD document.
+    std::vector<QByteArray> records; QString error;quint32 lastObjectId=0;
+    if (!encodeKompasBodyRecords(kernel,{item.second},records,error,&lastObjectId))
+        qFatal("Native C3D write %s: %s",item.first,qPrintable(error));
+    assert(lastObjectId>0 && lastObjectId<=65535);
+    KompasStoragePrefix prefix; KompasStorageImage storage;
+    assert(prepareKompasStorageRecords(records,prefix,error));
+    KompasCatalog catalog;
+    catalog.lastObjectId=lastObjectId;
+    KompasCatalogEntry directory;directory.numericName=170;directory.directory=true;
+    KompasCatalogEntry bodies;bodies.numericName=300;bodies.directory=true;
+    KompasCatalogEntry bodyStream;bodyStream.textName=QStringLiteral("1");bodyStream.recordIndex=0;
+    bodies.children.push_back(bodyStream);directory.children.push_back(bodies);catalog.entries.push_back(directory);
+    QByteArray catalogBytes;
+    assert(encodeKompasCatalog(catalog,prefix,catalogBytes,error));
+    assert(finishKompasStorage(prefix,catalogBytes,storage,error));
+    QTemporaryDir dir; assert(dir.isValid());
+    const auto path=dir.filePath(QString::fromLatin1(item.first)+".m3d");
+    const auto fixture=zip({{"Contents",storage.contents},{"SysInfo",storage.sysInfo}});
+    QFile out(path); assert(out.open(QIODevice::WriteOnly)); assert(out.write(fixture)==fixture.size()); out.close();
+    KompasC3dResult restored;
+    if (!readKompasC3dSolids(path,kernel,restored,error))
+        qFatal("Native C3D read %s: %s",item.first,qPrintable(error));
+    assert(restored.solids.size()==1 && kernel.isShapeValid(restored.solids[0].shape));
+    GProp_GProps v1,v2,a1,a2;
+    BRepGProp::VolumePropertiesGK(*kernel.findShape(item.second),v1,1e-12,true,false,true);
+    BRepGProp::VolumePropertiesGK(*kernel.findShape(restored.solids[0].shape),v2,1e-12,true,false,true);
+    BRepGProp::SurfaceProperties(*kernel.findShape(item.second),a1,1e-14,true);
+    BRepGProp::SurfaceProperties(*kernel.findShape(restored.solids[0].shape),a2,1e-14,true);
+    if(std::fabs(v2.Mass()/v1.Mass()-1)>1e-9 || std::fabs(a2.Mass()/a1.Mass()-1)>1e-9)
+        qFatal("Native C3D geometry %s: V %.15g/%.15g, A %.15g/%.15g",item.first,v2.Mass(),v1.Mass(),a2.Mass(),a1.Mass());
+    assert(v1.CentreOfMass().Distance(v2.CentreOfMass())<1e-9);
+    return restored.solids[0].shape;
+}
+
+void verifyNativeC3dSplinePeriods() {
+    using namespace cadnext;
+    using gui::detail::prepareKompasSplineSurface;
+    // Independent OCCT surfaces: smooth rational periods in U, V and both,
+    // with a nonzero parameter origin. Compare the clamped native grid to the
+    // original surface and its derivatives, including several seam crossings.
+    for (int directions=1;directions<=3;++directions) {
+        const bool closedU=(directions&1)!=0,closedV=(directions&2)!=0;
+        TColgp_Array2OfPnt poles(1,4,1,3);
+        TColStd_Array2OfReal weights(1,4,1,3);
+        for(int u=1;u<=4;++u)for(int v=1;v<=3;++v) {
+            poles.SetValue(u,v,{.02*std::cos(u*1.7)*(1+.1*v),.03*std::sin(v*2.1)+.002*u,.01*std::sin(u+v)});
+            weights.SetValue(u,v,1+.03*u+.07*v);
+        }
+        TColStd_Array1OfReal uk(1,closedU?5:2),vk(1,closedV?4:2);
+        TColStd_Array1OfInteger um(1,uk.Length()),vm(1,vk.Length());
+        for(int i=1;i<=uk.Length();++i) {uk.SetValue(i,closedU?2+i:(i==1?3:7));um.SetValue(i,closedU?1:4);}
+        for(int i=1;i<=vk.Length();++i) {vk.SetValue(i,closedV?-3+i:(i==1?-2:1));vm.SetValue(i,closedV?1:3);}
+        const Handle(Geom_BSplineSurface) original=new Geom_BSplineSurface(poles,weights,uk,vk,um,vm,3,2,closedU,closedV);
+        const Handle(Geom_BSplineSurface) unwrapped=Handle(Geom_BSplineSurface)::DownCast(original->Copy());
+        if(closedU)unwrapped->SetUNotPeriodic();
+        if(closedV)unwrapped->SetVNotPeriodic();
+        kernel::DescribedSurface source;source.kind=kernel::DescribedSurface::Kind::BSpline;
+        source.uPeriodic=closedU;source.vPeriodic=closedV;
+        auto& b=source.bspline;
+        b.uDegree=3;b.vDegree=2;b.uPoleCount=unwrapped->NbUPoles();b.vPoleCount=unwrapped->NbVPoles();
+        for(int u=1;u<=b.uPoleCount;++u)for(int v=1;v<=b.vPoleCount;++v) {
+            const auto p=unwrapped->Pole(u,v);b.poles.push_back({p.X(),p.Y(),p.Z()});b.weights.push_back(unwrapped->Weight(u,v));
+        }
+        for(int i=1;i<=unwrapped->NbUKnots();++i) {b.uKnots.push_back(unwrapped->UKnot(i));b.uMultiplicities.push_back(unwrapped->UMultiplicity(i));}
+        for(int i=1;i<=unwrapped->NbVKnots();++i) {b.vKnots.push_back(unwrapped->VKnot(i));b.vMultiplicities.push_back(unwrapped->VMultiplicity(i));}
+        const auto native=prepareKompasSplineSurface(source);
+        assert(native.closedU==closedU && native.closedV==closedV);
+        const auto& g=native.grid;
+        assert(native.uKnots.size()==std::size_t(g.uPoleCount+g.uDegree+1+(closedU?g.uDegree:0)));
+        assert(native.vKnots.size()==std::size_t(g.vPoleCount+g.vDegree+1+(closedV?g.vDegree:0)));
+        TColgp_Array2OfPnt grid(1,g.uPoleCount,1,g.vPoleCount);
+        TColStd_Array2OfReal gw(1,g.uPoleCount,1,g.vPoleCount);
+        for(int u=1;u<=g.uPoleCount;++u)for(int v=1;v<=g.vPoleCount;++v) {
+            const auto i=std::size_t((u-1)*g.vPoleCount+v-1);const auto& p=g.poles[i];grid.SetValue(u,v,{p.x,p.y,p.z});gw.SetValue(u,v,g.weights[i]);
+        }
+        TColStd_Array1OfReal gu(1,int(g.uKnots.size())),gv(1,int(g.vKnots.size()));
+        TColStd_Array1OfInteger gum(1,gu.Length()),gvm(1,gv.Length());
+        for(int i=1;i<=gu.Length();++i){gu.SetValue(i,g.uKnots[i-1]);gum.SetValue(i,g.uMultiplicities[i-1]);}
+        for(int i=1;i<=gv.Length();++i){gv.SetValue(i,g.vKnots[i-1]);gvm.SetValue(i,g.vMultiplicities[i-1]);}
+        const Handle(Geom_BSplineSurface) clamped=new Geom_BSplineSurface(grid,gw,gu,gv,gum,gvm,3,2,false,false);
+        for(int i=-32;i<=64;++i)for(int j=-16;j<=32;++j) {
+            double u=3+4*i/32.0,v=-2+3*j/16.0;
+            if(!closedU&&(u<3||u>7))continue;
+            if(!closedV&&(v<-2||v>1))continue;
+            gp_Pnt p,q;gp_Vec pu,pv,qu,qv;
+            original->D1(u,v,p,pu,pv);
+            native.support->D1(u,v,q,qu,qv);
+            assert(p.Distance(q)<1e-13 && (pu-qu).Magnitude()<1e-12 && (pv-qv).Magnitude()<1e-12);
+            original->PeriodicNormalization(u,v);
+            clamped->D1(u,v,q,qu,qv);
+            assert(p.Distance(q)<1e-13 && (pu-qu).Magnitude()<1e-12 && (pv-qv).Magnitude()<1e-12);
+        }
+        auto damaged=source;
+        if(closedU)damaged.bspline.weights[std::size_t((b.uPoleCount-1)*b.vPoleCount)]+=1e-12;
+        else damaged.bspline.weights[std::size_t(b.vPoleCount-1)]+=1e-12;
+        bool rejected=false;
+        try{prepareKompasSplineSurface(damaged);}catch(const std::runtime_error&){rejected=true;}
+        assert(rejected);
+    }
+}
+
+cadnext::kernel::ShapeHandle rationalProfileSolid(cadnext::kernel::OcctKernel& kernel) {
+    // This weight is deliberately different from a circular conic. Green's
+    // integral gives the profile area 1/3 + 2*pi/(9*sqrt(3)), scaled by L^2.
+    constexpr double size=.02,height=.03;
+    TColgp_Array1OfPnt poles(1,3);poles.SetValue(1,{size,0,0});
+    poles.SetValue(2,{size,size,0});poles.SetValue(3,{0,size,0});
+    TColStd_Array1OfReal weights(1,3),knots(1,2);weights.Init(1);weights.SetValue(2,.5);
+    knots.SetValue(1,0);knots.SetValue(2,1);
+    TColStd_Array1OfInteger multiplicities(1,2);multiplicities.Init(3);
+    const Handle(Geom_BSplineCurve) curve=new Geom_BSplineCurve(poles,weights,knots,multiplicities,2,false);
+    BRepBuilderAPI_MakeWire wire;
+    wire.Add(BRepBuilderAPI_MakeEdge(curve).Edge());
+    wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(0,size,0),gp_Pnt(0,0,0)).Edge());
+    wire.Add(BRepBuilderAPI_MakeEdge(gp_Pnt(0,0,0),gp_Pnt(size,0,0)).Edge());
+    const auto face=BRepBuilderAPI_MakeFace(wire.Wire(),true).Face();
+    const auto prism=BRepPrimAPI_MakePrism(face,gp_Vec(0,0,height)).Shape();
+    TColgp_Array2OfPnt grid(1,3,1,2);TColStd_Array2OfReal gridWeights(1,3,1,2);
+    for(int u=1;u<=3;++u)for(int v=1;v<=2;++v) {
+        auto p=poles.Value(u);p.SetZ((v-1)*height);grid.SetValue(u,v,p);
+        gridWeights.SetValue(u,v,weights.Value(u));
+    }
+    TColStd_Array1OfInteger vMult(1,2);vMult.Init(2);
+    const Handle(Geom_BSplineSurface) lateral=new Geom_BSplineSurface(
+        grid,gridWeights,knots,knots,multiplicities,vMult,2,1,false,false);
+    BRepBuilderAPI_Sewing sewing(1e-10);
+    for(TopExp_Explorer it(prism,TopAbs_FACE);it.More();it.Next()) {
+        if(BRepAdaptor_Surface(TopoDS::Face(it.Current())).GetType()==GeomAbs_SurfaceOfExtrusion)
+            sewing.Add(BRepBuilderAPI_MakeFace(lateral,0,1,0,1,1e-10).Face());
+        else sewing.Add(it.Current());
+    }
+    sewing.Perform();assert(sewing.SewedShape().ShapeType()==TopAbs_SHELL);
+    auto solid=BRepBuilderAPI_MakeSolid(TopoDS::Shell(sewing.SewedShape())).Solid();
+    assert(BRepLib::OrientClosedSolid(solid));
+    const auto handle=kernel.adoptShape(solid,"rational-profile");
+    assert(kernel.isShapeValid(handle));
+    GProp_GProps volume;BRepGProp::VolumePropertiesGK(solid,volume,1e-12,true);
+    const double expected=size*size*height*(1.0/3+2*M_PI/(9*std::sqrt(3.)));
+    if(std::fabs(volume.Mass()/expected-1)>1e-12)
+        qFatal("Rational profile volume %.17g, expected %.17g",volume.Mass(),expected);
+    return handle;
+}
+
+cadnext::kernel::ShapeHandle periodicSplineSolid(cadnext::kernel::OcctKernel& kernel) {
+    // Two lateral faces share one smooth periodic support. Their genuine
+    // common edges carry two pcurves; they are not seams of either face. One
+    // face and its cap edges cross the support's period boundary at u=7.
+    TColgp_Array2OfPnt poles(1,4,1,2);
+    TColStd_Array2OfReal weights(1,4,1,2);
+    const gp_Pnt corners[4]={{.01,.01,0},{-.01,.01,0},{-.01,-.01,0},{.01,-.01,0}};
+    for(int u=1;u<=4;++u)for(int v=1;v<=2;++v) {
+        poles.SetValue(u,v,{corners[u-1].X(),corners[u-1].Y(),.03*(v-1)});weights.SetValue(u,v,1);
+    }
+    TColStd_Array1OfReal uk(1,5),vk(1,2);
+    TColStd_Array1OfInteger um(1,5),vm(1,2);
+    for(int i=1;i<=5;++i){uk.SetValue(i,2+i);um.SetValue(i,1);}
+    vk.SetValue(1,0);vk.SetValue(2,1);vm.Init(2);
+    const Handle(Geom_BSplineSurface) surface=new Geom_BSplineSurface(poles,weights,uk,vk,um,vm,3,1,true,false);
+    BRepBuilderAPI_Sewing sewing(1e-10);
+    sewing.Add(BRepBuilderAPI_MakeFace(surface,3.25,5.25,0,1,1e-10).Face());
+    sewing.Add(BRepBuilderAPI_MakeFace(surface,5.25,7.25,0,1,1e-10).Face());
+    for(double v:{0.,1.}) {
+        const auto ring=surface->VIso(v);
+        BRepBuilderAPI_MakeWire wire;
+        wire.Add(BRepBuilderAPI_MakeEdge(ring,3.25,5.25).Edge());
+        wire.Add(BRepBuilderAPI_MakeEdge(ring,5.25,7.25).Edge());
+        sewing.Add(BRepBuilderAPI_MakeFace(wire.Wire(),true).Face());
+    }
+    sewing.Perform();
+    assert(sewing.SewedShape().ShapeType()==TopAbs_SHELL);
+    auto solid=BRepBuilderAPI_MakeSolid(TopoDS::Shell(sewing.SewedShape())).Solid();
+    assert(BRepLib::OrientClosedSolid(solid));
+    const auto handle=kernel.adoptShape(solid,"periodic-spline");
+    assert(kernel.isShapeValid(handle));
+    return handle;
+}
+
+cadnext::kernel::ShapeHandle mixedUvSplineSolid(cadnext::kernel::OcctKernel& kernel,
+                                              bool nonlinearParameter=false,
+                                              double delta=3e-8, double nativeTolerance=1e-7) {
+    using namespace cadnext;
+    using namespace cadnext::kernel;
+    // A triangular extrusion with a cubic side. The top cap's boundary is
+    // 30 nm away from the shared spatial curve between its exact endpoints,
+    // within the declared 100 nm precision. Only that curved cap edge has an
+    // explicit UV boundary; two straight edges complete its wire.
+    constexpr double height=.03;
+    const auto spline=[nonlinearParameter](double z) {
+        BSplineCurveDefinition d;
+        d.degree=3;
+        d.poles={{0,0,z},{.005,.01,z},{.015,.01,z},{.02,0,z}};
+        if(nonlinearParameter)
+            d.poles={{0,0,z},{.02/6,0,z},{.02/3,0,z},{.02,0,z}};
+        d.weights={1,1,1,1};d.knots={3,7};d.multiplicities={4,4};
+        return d;
+    };
+    const Vector3 a{0,0,0}, b{.02,0,0}, c{.01,-.01,0};
+    const Vector3 ah{0,0,height}, bh{.02,0,height}, ch{.01,-.01,height};
+    const auto line=[nativeTolerance](Vector3 from,Vector3 to) {
+        AnalyticEdgeSegment e;e.start=from;e.end=to;e.tolerance=nativeTolerance;return e;
+    };
+    const auto curve=[&](double z,bool forward) {
+        AnalyticEdgeSegment e;e.kind=AnalyticEdgeKind::BSpline;e.bspline=spline(z);
+        e.start={forward?0:.02,0,z};e.end={forward?.02:0,0,z};e.forward=forward;
+        e.curveFirst=3;e.curveLast=7;e.tolerance=nativeTolerance;
+        return e;
+    };
+    AnalyticFacePatch bottom;
+    bottom.kind=AnalyticFacePatch::Kind::Plane;bottom.normal={0,0,-1};bottom.xAxis={1,0,0};
+    bottom.loops={{curve(0,true),line(b,c),line(c,a)}};
+    AnalyticFacePatch top;
+    top.kind=AnalyticFacePatch::Kind::Plane;top.origin={0,0,height};
+    top.normal={0,0,1};top.xAxis={1,0,0};
+    top.loops={{line(ah,ch),line(ch,bh),curve(height,false)}};
+    auto uv=spline(0);
+    if(!nonlinearParameter) {uv.poles[1].y+=delta;uv.poles[2].y+=delta;}
+    top.loops[0][2].pcurve=std::move(uv);
+    AnalyticFacePatch ac;
+    ac.kind=AnalyticFacePatch::Kind::Plane;ac.normal={-1,-1,0};ac.xAxis={1,-1,0};
+    ac.loops={{line(a,c),line(c,ch),line(ch,ah),line(ah,a)}};
+    AnalyticFacePatch cb;
+    cb.kind=AnalyticFacePatch::Kind::Plane;cb.origin=c;cb.normal={1,-1,0};cb.xAxis={1,1,0};
+    cb.loops={{line(c,b),line(b,bh),line(bh,ch),line(ch,c)}};
+    AnalyticFacePatch lateral;
+    lateral.kind=AnalyticFacePatch::Kind::BSpline;lateral.reversed=true;
+    lateral.normal={0,0,1};lateral.xAxis={1,0,0};
+    auto& s=lateral.bspline;
+    s.uDegree=nonlinearParameter?2:3;s.vDegree=1;
+    s.uPoleCount=nonlinearParameter?3:4;s.vPoleCount=2;
+    const std::vector<Vector3> supportPoles=nonlinearParameter
+        ? std::vector<Vector3>{{0,0,0},{.01,0,0},{.02,0,0}} : spline(0).poles;
+    for(const auto& p:supportPoles) {
+        s.poles.push_back(p);s.poles.push_back({p.x,p.y,height});
+        s.weights.push_back(1);s.weights.push_back(1);
+    }
+    s.uKnots={3,7};s.vKnots={0,1};
+    s.uMultiplicities={s.uDegree+1,s.uDegree+1};s.vMultiplicities={2,2};
+    lateral.loops={{curve(0,true),line(b,bh),curve(height,false),line(ah,a)}};
+    const auto result=kernel.makeAnalyticSolid({bottom,top,ac,cb,lateral});
+    if(!result.isOk())qFatal("Mixed UV solid: %s",result.error().message.c_str());
+    assert(kernel.isShapeValid(result.value()));
+    bool found=false;
+    for(TopExp_Explorer f(*kernel.findShape(result.value()),TopAbs_FACE);f.More();f.Next()) {
+        const BRepAdaptor_Surface surface(TopoDS::Face(f.Current()));
+        if(surface.GetType()!=GeomAbs_Plane ||
+           std::fabs(surface.Plane().Location().Z()-height)>1e-10)continue;
+        GProp_GProps area;BRepGProp::SurfaceProperties(f.Current(),area,1e-14,true);
+        // Green's integral of the cubic plus the two lines, evaluated
+        // analytically. Projecting the cap back onto the spatial curve loses
+        // .0105*delta square metres and must fail this check.
+        const double expected=nonlinearParameter?.0001:.0001+.0105*(.01+delta);
+        assert(std::fabs(area.Mass()/expected-1)<1e-12);
+        found=true;
+    }
+    assert(found);
+    return result.value();
 }
 } // namespace
 
 int main(int argc, char** argv) {
     QCoreApplication app(argc, argv);
     cadnext::kernel::OcctKernel kernel;
+    verifyNativeSolidWorksConfigurationHeader();
+    verifyNativeSolidWorksDocumentHeader();
+    verifyNativeC3dSplinePeriods();
     const auto box = kernel.makeBox({1000, 1000, 1000});
     assert(box.isOk());
+    {
+        cadnext::gui::ParasolidXtTopology topology;
+        QString error;
+        const auto fixture = integerAttributeBodyFixture();
+        if (!cadnext::gui::readParasolidXtTransmitStream(fixture, topology, error))
+            qFatal("Integer attribute fixture: %s", qPrintable(error));
+        assert(topology.bodies.size() == 1 && topology.attributes.size() == 1);
+        const auto& attribute = topology.attributes.front();
+        assert(attribute.ownerIndex == topology.bodies.front().index);
+        assert(attribute.definition == "CADNext_Test_ID");
+        assert((attribute.integers == std::vector<qint32>{-1, 17, 0x7fffffff}));
+        assert(attribute.strings.empty() && attribute.reals.empty());
+        assert(attribute.definitionIndex == 3 && attribute.fieldIndices == std::vector<quint32>{5});
+        assert(topology.bodies.front().attributeHead == 2);
+        assert(topology.attributeDefinitions.size() == 1);
+        const auto& definition = topology.attributeDefinitions.front();
+        assert(definition.index == 3 && definition.name == "CADNext_Test_ID" && definition.typeId == 9000);
+        assert(definition.fieldTypes == std::vector<quint8>{1});
+        for (std::size_t i = 0; i < definition.legalOwners.size(); ++i)
+            assert(definition.legalOwners[i] == (i == 2));
+        for (const auto action : definition.actions) assert(action == 0);
+        assert(!cadnext::gui::readParasolidXtTransmitStream(fixture + char(0), topology, error));
+        assert(topology.nodeTypes.isEmpty() && topology.attributes.empty() && topology.attributeDefinitions.empty());
+    }
+    {
+        using namespace cadnext::gui;
+        // More than one native list block, both attribute-field layouts,
+        // and signed extrema. The expected list structure follows XT's
+        // specification independently of the writer's internal graph.
+        std::vector<ParasolidXtIntegerBodyAttribute> attributes;
+        for (int i = 0; i < 21; ++i)
+            attributes.push_back({"CADNext_Test_" + std::to_string(i),
+                {std::numeric_limits<std::int32_t>::min(), i, std::numeric_limits<std::int32_t>::max()}, i % 2 == 0});
+        for (const bool partition : {false, true}) {
+            const auto encoded = partition ? encodeParasolidXtPartition(kernel, box.value(), attributes)
+                                           : encodeParasolidXtBodyStream(kernel, box.value(), attributes);
+            if (!encoded.isOk()) qFatal("Body attributes: %s", encoded.error().message.c_str());
+            ParasolidXtTopology graph;
+            QString error;
+            const auto bytes = QByteArray::fromStdString(encoded.value());
+            assert(partition ? readParasolidXtTopology(bytes, graph, error)
+                             : readParasolidXtTransmitStream(bytes, graph, error));
+            assert(graph.bodies.size() == 1 && graph.attributes.size() == 21 &&
+                graph.attributeDefinitions.size() == 21 && graph.attributeLists.size() == 1 &&
+                graph.attributeListBlocks.size() == 2);
+            const auto& body = graph.bodies.front();
+            const auto& list = graph.attributeLists.front();
+            assert(body.attributeHead == graph.attributes.front().index && body.attributeChains == list.index);
+            assert(list.owner == body.index && list.type == 4 && list.length == 21 && list.blockLength == 20);
+            assert(list.firstBlock == graph.attributeListBlocks[0].index);
+            for (std::size_t i = 0; i < 21; ++i) {
+                const auto& actual = graph.attributes[i];
+                const auto& definition = graph.attributeDefinitions[i];
+                assert(actual.ownerIndex == body.index && actual.definitionIndex == definition.index);
+                assert(actual.definition.toStdString() == attributes[i].name && definition.name == actual.definition);
+                assert(actual.integers == attributes[i].values && actual.strings.empty() && actual.reals.empty());
+                assert(actual.previous == (i ? graph.attributes[i - 1].index : 0));
+                assert(actual.next == (i + 1 < 21 ? graph.attributes[i + 1].index : 0));
+                assert(actual.nextOfType == 0 && actual.previousOfType == 0);
+                assert(definition.next == (i + 1 < 21 ? graph.attributeDefinitions[i + 1].index : 0));
+                assert(definition.typeId == 9000);
+                const std::array<quint8, 8> actions{0, 0, 0, 0, 3, 5, 0, 0};
+                assert(definition.actions == actions);
+                for (std::size_t owner = 0; owner < 14; ++owner)
+                    assert(definition.legalOwners[owner] == (owner == 2));
+                assert(definition.fieldTypes == (i % 2 == 0 ? std::vector<quint8>{9, 1} : std::vector<quint8>{1}));
+                assert(actual.fieldIndices.size() == definition.fieldTypes.size());
+                if (i % 2 == 0) assert(actual.fieldIndices.front() == 0);
+                assert(graph.nodeTypes.value(actual.fieldIndices.back()) == 82);
+            }
+            for (std::size_t block = 0; block < 2; ++block) {
+                const auto& actual = graph.attributeListBlocks[block];
+                assert(actual.count == (block ? 1 : 20) && actual.entries.size() == 20 && actual.indexMapOffset == 0);
+                assert(actual.next == (block ? 0 : graph.attributeListBlocks[1].index));
+                for (std::size_t entry = 0; entry < 20; ++entry)
+                    assert(actual.entries[entry] == (entry < actual.count
+                        ? graph.attributes[block * 20 + entry].index : 0));
+            }
+            assert(graph.worldAttributeDefinitionHead == (partition ? graph.attributeDefinitions.front().index : 0));
+            cadnext::kernel::ShapeHandle restored;
+            assert(buildParasolidXtAnalyticSolid(graph, kernel, restored, error));
+            const auto mass = kernel.volumeProperties(restored);
+            assert(mass.isOk() && std::fabs(mass.value().volumeM3 / 1e9 - 1) < 1e-12);
+        }
+        auto invalid = attributes;
+        invalid.back().name = invalid.front().name;
+        assert(!encodeParasolidXtBodyStream(kernel, box.value(), invalid).isOk());
+        invalid = attributes; invalid.front().values.clear();
+        assert(!encodeParasolidXtPartition(kernel, box.value(), invalid).isOk());
+        invalid = attributes; invalid.front().name += '\0';
+        assert(!encodeParasolidXtBodyStream(kernel, box.value(), invalid).isOk());
+    }
+    {
+        using namespace cadnext::gui;
+        constexpr double angle = 1.1;
+        const auto cone = kernel.adoptShape(BRepPrimAPI_MakeCone(.02, .008, .03, angle).Shape(),
+            "native-cone-uv");
+        const auto stream = encodeParasolidXtBodyStream(kernel, cone);
+        assert(stream.isOk());
+        ParasolidXtTopology topology;
+        QString error;
+        assert(readParasolidXtTransmitStream(QByteArray::fromStdString(stream.value()), topology, error));
+        QHash<quint32, const ParasolidXtAnalyticGeometry*> nodes;
+        for (const auto& node : topology.analyticGeometry) nodes[node.index] = &node;
+        int coneBoundaries = 0;
+        for (const auto& node : topology.analyticGeometry) {
+            if (node.type != 137) continue;
+            const auto* surface = nodes.value(node.links.value("surface"), nullptr);
+            if (!surface || surface->type != 52) continue;
+            ++coneBoundaries;
+            const auto* curve = nodes.value(node.links.value("b_curve"), nullptr);
+            assert(curve);
+            const auto* nurbs = nodes.value(curve->links.value("nurbs"), nullptr);
+            assert(nurbs && nurbs->integers.value("degree") == 1 &&
+                nurbs->integers.value("n_vertices") == 2 && nurbs->integers.value("vertex_dim") == 2);
+            const auto* vertices = nodes.value(nurbs->links.value("bspline_vertices"), nullptr);
+            assert(vertices);
+            const auto uv = vertices->realArrays.value("vertices");
+            const auto origin = surface->vectors.value("pvec"), axis = surface->vectors.value("axis");
+            for (int end = 0; end < 2; ++end) {
+                // Independent native-coordinate check against the primitive:
+                // both generator endpoints are at z=0 or .03, with the exact
+                // corresponding radius. Mutually inverse writer/reader errors
+                // must not be able to pass merely by cancelling one another.
+                const double axial = uv.at(std::size_t(2 * end + 1));
+                const double z = origin[2] + axis[2] * axial;
+                assert(std::min(std::fabs(z), std::fabs(z - .03)) < 1e-12);
+                const double radius = surface->reals.value("radius") + axial *
+                    surface->reals.value("sin_half_angle") / surface->reals.value("cos_half_angle");
+                assert(std::fabs(radius - (.02 - z * .012 / .03)) < 1e-12);
+            }
+        }
+        assert(coneBoundaries == 2);
+        cadnext::kernel::ShapeHandle restored;
+        assert(buildParasolidXtAnalyticSolid(topology, kernel, restored, error));
+        assert(kernel.isShapeValid(restored));
+        const auto mass = kernel.volumeProperties(restored);
+        const double expected = angle * .03 * (.02 * .02 + .02 * .008 + .008 * .008) / 6;
+        assert(mass.isOk() && std::fabs(mass.value().volumeM3 / expected - 1) < 1e-12);
+    }
+    {
+        using namespace cadnext::gui;
+        const auto small = kernel.makeCylinder({12, 35});
+        assert(small.isOk());
+        const QString name = QStringLiteral("Импорт 🚀 ") + QString(255, QChar(u'я'));
+        SolidWorksWriteSection section;
+        QString error;
+        assert(encodeSolidWorksImportedFeatureBodySection(kernel, 17, name,
+            {box.value(), small.value()}, section, error, SolidWorksFeatureBodyLayout::GroupedBodies,
+            {{17, 201}, {17, 202}}));
+        assert(section.name == "Config-17-FeatureBodies/LocalBodies");
+        std::vector<SolidWorksFeatureBodies> features;
+        assert(decodeSolidWorksFeatureBodies(section.data, features, error));
+        assert(features.size() == 1 && features[0].featureName == name && features[0].bodies.size() == 2);
+        const std::vector<cadnext::kernel::ShapeHandle> originals{box.value(), small.value()};
+        for (std::size_t i = 0; i < originals.size(); ++i) {
+            ParasolidXtTopology topology;
+            assert(readParasolidXtTransmitStream(features[0].bodies[i].parasolid, topology, error));
+            assert(topology.bodyCount == 1);
+            assert(topology.attributes.size() == 2);
+            std::map<QByteArray, qint32> ids;
+            for (const auto& attribute : topology.attributes) {
+                assert(attribute.ownerIndex == topology.bodies.front().index && attribute.integers.size() == 1);
+                assert(attribute.fieldIndices.size() == 2 && attribute.fieldIndices.front() == 0);
+                ids[attribute.definition] = attribute.integers.front();
+            }
+            assert(ids.at("ATOM_ID_2001") == 201 + qint32(i) && ids.at("LAST_BODY_MODIFYING_FEATURE_ID") == 17);
+            assert(topology.nodeTypes.value(1) == 12 && !topology.nodeTypes.values().contains(101));
+            ParasolidXtTopology wrongRepresentation;
+            assert(!readParasolidXtTopology(features[0].bodies[i].parasolid, wrongRepresentation, error));
+            cadnext::kernel::ShapeHandle restored;
+            assert(buildParasolidXtAnalyticSolid(topology, kernel, restored, error));
+            const auto before = kernel.volumeProperties(originals[i]);
+            const auto after = kernel.volumeProperties(restored);
+            assert(before.isOk() && after.isOk());
+            assert(std::fabs(after.value().volumeM3 / before.value().volumeM3 - 1) < 1e-12);
+        }
+        const auto partition = encodeParasolidXtPartition(kernel, box.value());
+        assert(partition.isOk());
+        ParasolidXtTopology wrongRepresentation;
+        assert(!readParasolidXtTransmitStream(QByteArray::fromStdString(partition.value()),
+            wrongRepresentation, error));
+        assert(wrongRepresentation.bodyCount == 0);
+        assert(!readParasolidXtTransmitStream(features[0].bodies[0].parasolid.left(100),
+            wrongRepresentation, error) && wrongRepresentation.nodeTypes.isEmpty());
+        // Independent fixture: two features, nested wrapper extents, an ANSI
+        // name and non-default scalar metadata. No native CAD binary is stored
+        // in the repository. Geometry was produced by our own XT writer above.
+        QByteArray fixture; put32(fixture, 2);
+        QByteArray singleFixture; put32(singleFixture, 2);
+        for (unsigned i = 0; i < 2; ++i) {
+            const auto entryStart = fixture.size();
+            fixture += char(1); fixture += char('A' + i);
+            put32(fixture, 19 + i); put32(fixture, 1);
+            const auto& body = features[0].bodies[i].parasolid;
+            uLongf packedSize = compressBound(body.size());
+            QByteArray packed(qsizetype(packedSize), '\0');
+            assert(compress2(reinterpret_cast<Bytef*>(packed.data()), &packedSize,
+                reinterpret_cast<const Bytef*>(body.constData()), body.size(), Z_BEST_SPEED) == Z_OK);
+            packed.resize(qsizetype(packedSize));
+            put32(fixture, 27 + i); fixture += char(2);
+            put32(fixture, packedSize + 37); fixture += char(3); put32(fixture, packedSize + 32);
+            fixture += QByteArray::fromHex("231dd571da8148a2a85898b21b89ef99");
+            put32(fixture, body.size()); put32(fixture, packedSize); fixture += packed;
+            put32(fixture, 41 + i); put32(fixture, 51 + i);
+            // The older layout has the same named body wrapper, without the
+            // eight-byte group field and body count preceding it.
+            singleFixture += fixture.mid(entryStart, 2);
+            singleFixture += fixture.mid(entryStart + 10);
+        }
+        SolidWorksFeatureBodyLayout layout;
+        assert(decodeSolidWorksFeatureBodies(fixture, features, error, &layout));
+        assert(layout == SolidWorksFeatureBodyLayout::GroupedBodies);
+        assert(features.size() == 2 && features[1].featureName == "B" && !features[1].unicodeName);
+        assert(features[0].nativeField == 19 && features[1].bodies[0].nativeField == 28);
+        assert(features[0].bodies[0].nativeByte == 2 && features[0].bodies[0].wrapperByte == 3);
+        assert(features[1].bodies[0].nativeTrailer[1] == 52);
+        QByteArray encoded;
+        assert(encodeSolidWorksFeatureBodies(features, encoded, error));
+        std::vector<SolidWorksFeatureBodies> restored;
+        assert(decodeSolidWorksFeatureBodies(encoded, restored, error));
+        assert(restored[1].bodies[0].parasolid == features[1].bodies[0].parasolid);
+        assert(restored[0].bodies[0].nativeTrailer == features[0].bodies[0].nativeTrailer);
+        std::vector<SolidWorksFeatureBodies> singles;
+        assert(decodeSolidWorksFeatureBodies(singleFixture, singles, error, &layout));
+        assert(layout == SolidWorksFeatureBodyLayout::SingleBodyEntries && singles.size() == 2);
+        assert(singles[0].nativeField == 0 && singles[0].bodies[0].nativeField == 27);
+        assert(singles[1].bodies[0].parasolid == features[1].bodies[0].parasolid);
+        assert(encodeSolidWorksFeatureBodies(singles, encoded, error, layout));
+        assert(decodeSolidWorksFeatureBodies(encoded, restored, error, &layout));
+        assert(layout == SolidWorksFeatureBodyLayout::SingleBodyEntries);
+        assert(restored[1].bodies[0].nativeTrailer == singles[1].bodies[0].nativeTrailer);
+        singles[0].nativeField = 1;
+        assert(!encodeSolidWorksFeatureBodies(singles, encoded, error, layout) && encoded.isEmpty());
+        auto bad = fixture; bad[21] ^= 1; // first outer length
+        assert(!decodeSolidWorksFeatureBodies(bad, restored, error) && restored.empty());
+        bad = fixture; bad[26] ^= 1; // inner length
+        assert(!decodeSolidWorksFeatureBodies(bad, restored, error));
+        bad = fixture; bad[30] ^= 1; // wrapper GUID
+        assert(!decodeSolidWorksFeatureBodies(bad, restored, error));
+        bad = fixture; bad[fixture.size() - 9] ^= 1; // final zlib checksum
+        assert(!decodeSolidWorksFeatureBodies(bad, restored, error));
+        bad = fixture; bad.chop(1);
+        assert(!decodeSolidWorksFeatureBodies(bad, restored, error));
+        bad = fixture; bad += char(0);
+        assert(!decodeSolidWorksFeatureBodies(bad, restored, error));
+        features[1].featureName = features[0].featureName;
+        assert(!encodeSolidWorksFeatureBodies(features, encoded, error) && encoded.isEmpty());
+        assert(!encodeSolidWorksImportedFeatureBodySection(kernel, 17, name, {}, section, error));
+        assert(section.name.isEmpty() && section.data.isEmpty());
+        assert(!encodeSolidWorksImportedFeatureBodySection(kernel, 17, name, {{}}, section, error));
+        assert(encodeSolidWorksImportedFeatureBodySection(kernel, 17, name, {small.value()}, section, error,
+            SolidWorksFeatureBodyLayout::SingleBodyEntries));
+        assert(decodeSolidWorksFeatureBodies(section.data, restored, error, &layout));
+        assert(layout == SolidWorksFeatureBodyLayout::SingleBodyEntries);
+        assert(!encodeSolidWorksImportedFeatureBodySection(kernel, 17, name,
+            {box.value(), small.value()}, section, error, SolidWorksFeatureBodyLayout::SingleBodyEntries));
+        for (const std::vector<SolidWorksImportedBodyIdentity> invalid : {
+            std::vector<SolidWorksImportedBodyIdentity>{{17, 201}},
+            {{17, 201}, {17, 201}}, {{17, 201}, {18, 202}}, {{17, 201}, {17, 0}}}) {
+            assert(!encodeSolidWorksImportedFeatureBodySection(kernel, 17, name,
+                {box.value(), small.value()}, section, error, SolidWorksFeatureBodyLayout::GroupedBodies, invalid));
+            assert(section.name.isEmpty() && section.data.isEmpty());
+        }
+    }
+    // The native writer builds every configuration's own current geometry and
+    // CMgrHdr2, including MFC string lengths that cannot fit into one byte.
+    // This deliberately synthetic envelope tests the sections; it does not
+    // stand in for a complete native SOLIDWORKS document.
+    {
+        using namespace cadnext::gui;
+        const auto small = kernel.makeBox({20, 30, 40});
+        assert(small.isOk());
+        const QString name = QStringLiteral("Конфигурация 🚀 ") + QString(255, QChar(u'я'));
+        const QString longName(4096, QChar(u'ж'));
+        std::vector<SolidWorksWriteSection> sections;
+        QString error;
+        const std::vector<SolidWorksWriteConfiguration> configs{
+            {17, name, box.value(), SolidWorksImportedBodyIdentity{17, 201}},
+            {29, longName, small.value(), SolidWorksImportedBodyIdentity{18, 202}}};
+        assert(encodeSolidWorksConfigurationSections(kernel, configs, sections, error));
+        assert(sections.size() == 3 && sections.front().name == "Contents/CMgrHdr2");
+        assert(sections[1].data.mid(4, 16) == QByteArray::fromHex("231dd571da8148a2a85898b21b89ef99"));
+        QByteArray fixture(16, '\0');
+        fixture[7] = 4;
+        for (const auto& section : sections) fixture += solidWorksMember(section.name, section.data);
+        QTemporaryDir dir;
+        assert(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("native-sections.SLDPRT"));
+        QFile out(path);
+        assert(out.open(QIODevice::WriteOnly) && out.write(fixture) == fixture.size());
+        out.close();
+        std::vector<SolidWorksConfiguration> readConfigs;
+        assert(readSolidWorksPartConfigurations(path, readConfigs, error));
+        assert(readConfigs.size() == 2 && readConfigs[0].id == "17" && readConfigs[0].name == name);
+        assert(readConfigs[1].id == "29" && readConfigs[1].name == longName);
+        std::vector<SolidWorksBodyStream> streams;
+        assert(readSolidWorksPartBodyStreams(path, streams, error));
+        assert(streams.size() == 2);
+        for (std::size_t i = 0; i < streams.size(); ++i) {
+            ParasolidXtTopology graph;
+            assert(readParasolidXtTopology(streams[i].parasolid, graph, error));
+            std::map<QByteArray, qint32> ids;
+            for (const auto& attribute : graph.attributes) {
+                assert(attribute.ownerIndex == graph.bodies.front().index && attribute.integers.size() == 1);
+                ids[attribute.definition] = attribute.integers.front();
+            }
+            assert(ids.at("ATOM_ID_2001") == 201 + qint32(i) && ids.at("LAST_BODY_MODIFYING_FEATURE_ID") == 17 + qint32(i));
+        }
+        for (const auto& config : configs) {
+            cadnext::kernel::ShapeHandle restored;
+            assert(readSolidWorksAnalyticPart(path, kernel, restored, error, nullptr, config.name));
+            assert(kernel.isShapeValid(restored));
+            const auto expected = kernel.volumeProperties(config.shape);
+            const auto actual = kernel.volumeProperties(restored);
+            assert(expected.isOk() && actual.isOk());
+            assert(std::fabs(actual.value().volumeM3 / expected.value().volumeM3 - 1.0) < 1e-12);
+        }
+        // The same own sections in a complete CFB storage container. Its
+        // application graph remains a component fixture, not a native document.
+        CompoundFile compound;
+        compound.entries.push_back({"Contents",CompoundFileEntry::Kind::Storage});
+        for(const auto& section:sections)
+            compound.entries.push_back({QString::fromUtf8(section.name),CompoundFileEntry::Kind::Stream,section.data});
+        QByteArray compoundBytes;assert(encodeCompoundFile(compound,compoundBytes,error));
+        const auto compoundPath=dir.filePath("compound-sections.SLDPRT");QFile compoundOut(compoundPath);
+        assert(compoundOut.open(QIODevice::WriteOnly) && compoundOut.write(compoundBytes)==compoundBytes.size());compoundOut.close();
+        assert(readSolidWorksPartConfigurations(compoundPath,readConfigs,error) && readConfigs.size()==2);
+        for(std::size_t i=0;i<configs.size();++i) {
+            assert(readConfigs[i].id==QString::number(configs[i].id) && readConfigs[i].name==configs[i].name);
+            cadnext::kernel::ShapeHandle restored;
+            assert(readSolidWorksAnalyticPart(compoundPath,kernel,restored,error,nullptr,configs[i].name));
+            const auto expected=kernel.volumeProperties(configs[i].shape),actual=kernel.volumeProperties(restored);
+            assert(kernel.isShapeValid(restored) && expected.isOk() && actual.isOk());
+            assert(std::fabs(actual.value().volumeM3/expected.value().volumeM3-1)<1e-12);
+        }
+        const QString authoredPath=dir.filePath("authored-configuration-container.SLDPRT");
+        assert(writeSolidWorksConfigurationContainer(kernel,configs,authoredPath,error));
+        QFile authored(authoredPath);assert(authored.open(QIODevice::ReadOnly));
+        assert(authored.read(8)==QByteArray::fromHex("d0cf11e0a1b11ae1"));authored.close();
+        assert(readSolidWorksPartConfigurations(authoredPath,readConfigs,error) && readConfigs.size()==2);
+        auto invalid = configs;
+        invalid[1].id = invalid[0].id;
+        assert(!encodeSolidWorksConfigurationSections(kernel, invalid, sections, error));
+        assert(sections.empty() && !error.isEmpty());
+        invalid = configs; invalid[1].name = invalid[0].name;
+        assert(!encodeSolidWorksConfigurationSections(kernel, invalid, sections, error));
+        invalid = configs; invalid[1].name.append(QChar(u'\0'));
+        assert(!encodeSolidWorksConfigurationSections(kernel, invalid, sections, error));
+        invalid = configs; invalid[1].name += QChar(u'ж');
+        assert(!encodeSolidWorksConfigurationSections(kernel, invalid, sections, error));
+        invalid = configs; invalid[1].shape = {};
+        assert(!encodeSolidWorksConfigurationSections(kernel, invalid, sections, error));
+        assert(sections.empty());
+        invalid = configs; invalid[0].importedBody = SolidWorksImportedBodyIdentity{0, 201};
+        assert(!encodeSolidWorksConfigurationSections(kernel, invalid, sections, error));
+        assert(sections.empty());
+        assert(!encodeSolidWorksConfigurationSections(kernel, {}, sections, error));
+    }
+    {
+        using namespace cadnext::gui;
+        const auto outer = kernel.makeBox({20, 30, 40});
+        const auto tool = kernel.makeBox({10, 10, 50});
+        assert(outer.isOk() && tool.isOk());
+        const auto placedTool = kernel.transformShape(tool.value(),
+            {1,0,0,0, 0,1,0,0, 0,0,1,0, .005,.01,-.005,1});
+        assert(placedTool.isOk());
+        const auto hole = kernel.booleanCut(outer.value(), placedTool.value());
+        assert(hole.isOk());
+        const double angle = .37, c = std::cos(angle), s = std::sin(angle);
+        const auto placed = kernel.transformShape(hole.value(),
+            {c,s,0,0, -s,c,0,0, 0,0,1,0, .01,-.02,.03,1});
+        assert(placed.isOk());
+        const std::vector<cadnext::kernel::ShapeHandle> source{outer.value(), placed.value()};
+        std::vector<QByteArray> records;
+        QString error;
+        assert(encodeKompasPlanarBodyRecords(kernel, source, records, error));
+        assert(records.size() == 2);
+        KompasStoragePrefix prefix;
+        assert(prepareKompasStorageRecords(records, prefix, error));
+        KompasStorageImage storage;
+        // Opaque placeholder for a document catalog: this fixture tests native
+        // storage addressing plus BRep, not document object ownership.
+        assert(finishKompasStorage(prefix, QByteArray(17, char(0x80)), storage, error));
+        KompasStorageIndex index;
+        assert(decodeKompasStorageIndex(storage.contents, storage.sysInfo, index, error));
+        assert(index.records.size() == source.size());
+        // Synthetic test envelope only: no claim of a complete KOMPAS document.
+        const QByteArray fixture = zip({{"Contents", storage.contents},
+                                       {"SysInfo", storage.sysInfo},
+                                       {"MetaInfo", "<document><part name=\"synthetic\"/></document>"}});
+        QTemporaryDir dir;
+        assert(dir.isValid());
+        const QString path = dir.filePath(QStringLiteral("native-c3d-records.m3d"));
+        QFile out(path);
+        assert(out.open(QIODevice::WriteOnly) && out.write(fixture) == fixture.size());
+        out.close();
+        KompasC3dResult restored;
+        if (!readKompasC3dSolids(path, kernel, restored, error)) qFatal("Native C3D records: %s", qPrintable(error));
+        assert(restored.solids.size() == source.size());
+        for (std::size_t i = 0; i < source.size(); ++i) {
+            assert(kernel.isShapeValid(restored.solids[i].shape));
+            const auto* before = kernel.findShape(source[i]);
+            const auto* after = kernel.findShape(restored.solids[i].shape);
+            assert(before && after);
+            GProp_GProps v1, v2, a1, a2;
+            BRepGProp::VolumeProperties(*before, v1); BRepGProp::VolumeProperties(*after, v2);
+            BRepGProp::SurfaceProperties(*before, a1); BRepGProp::SurfaceProperties(*after, a2);
+            assert(std::fabs(v2.Mass() / v1.Mass() - 1.0) < 1e-12);
+            assert(std::fabs(a2.Mass() / a1.Mass() - 1.0) < 1e-12);
+            assert(v1.CentreOfMass().Distance(v2.CentreOfMass()) < 1e-12);
+        }
+        const auto cylinder = kernel.makeCylinder({10, 20});
+        assert(cylinder.isOk());
+        assert(!encodeKompasPlanarBodyRecords(kernel, {source[0], cylinder.value()}, records, error));
+        assert(records.empty() && !error.isEmpty());
+        assert(!encodeKompasPlanarBodyRecords(kernel, {{}}, records, error));
+        assert(records.empty());
+        assert(!encodeKompasPlanarBodyRecords(kernel, {}, records, error));
+    }
+    {
+        using namespace cadnext::gui;
+        const auto duplicate = kernel.makeBox({20,30,40});
+        const auto history = kernel.makeCylinder({10,30});
+        assert(duplicate.isOk() && history.isOk());
+        std::vector<QByteArray> records;
+        QString error;
+        quint32 lastObjectId = 0;
+        KompasBodyOwnership ownership;
+        assert(encodeKompasBodyRecords(kernel,{history.value(),duplicate.value(),duplicate.value()},
+                                      records,error,&lastObjectId,&ownership));
+        assert(ownership.records.size()==3);
+        std::map<quint16,quint16> mathRegistry;
+        for(const auto& [id,cls]:ownership.registry) {
+            assert(id<=lastObjectId);
+            if(cls!=0x7c69 && cls!=0x1408 && cls!=0x110f)mathRegistry.emplace(id,cls);
+        }
+        std::set<quint16> proxyIds, mathIds;
+        for(std::size_t i=0;i<ownership.records.size();++i) {
+            KompasTopologyTables tables;qsizetype consumed=0;
+            assert(decodeKompasTopologyTables(ownership.records[i],0,mathRegistry,tables,consumed,error));
+            assert(consumed==ownership.records[i].size());
+            std::array<std::size_t,3> counts{};
+            for(std::size_t kind=0;kind<3;++kind)
+                for(const auto& group:tables.groups[kind])
+                    for(const auto& proxy:group.proxies) {
+                        ++counts[kind];
+                        assert(proxy.bodyNumber==i+1 && proxy.mathId);
+                        assert(proxyIds.insert(proxy.id).second && mathIds.insert(*proxy.mathId).second);
+                        assert(proxy.name.words.size()==1 && proxy.name.words[0]==group.mainName);
+                    }
+            if(i>0)assert((counts==std::array<std::size_t,3>{8,12,6}));
+        }
+        assert(ownership.registry.rbegin()->first==lastObjectId);
+        // Whole body records now carry their own application state around the
+        // ownership tables. The enclosing fixture still omits model and
+        // operation/controller records and is not a complete native document.
+        std::vector<KompasBodyApplicationState> states(3);
+        states[0].nativeName=101;states[1].nativeName=202;states[2].nativeName=303;
+        states[1].nativeFlags[1]=1;states[2].nativeFooterFlags1={1,1,0,0};
+        std::vector<QByteArray> applicationRecords;
+        std::vector<QByteArray> applicationLinks;
+        quint32 applicationLastId=0;
+        assert(encodeKompasApplicationBodyRecords(kernel,
+            {history.value(),duplicate.value(),duplicate.value()},states,
+            applicationRecords,error,&applicationLastId,&applicationLinks));
+        assert(applicationRecords.size()==records.size() && applicationLastId==lastObjectId);
+        assert(applicationLinks.size()==records.size());
+        for(std::size_t i=0;i<records.size();++i) {
+            assert(applicationRecords[i].startsWith(records[i]));
+            KompasBodyApplication application;qsizetype consumed=0;
+            assert(decodeKompasBodyApplication(applicationRecords[i],records[i].size(),
+                                               mathRegistry,application,consumed,error));
+            assert(consumed==applicationRecords[i].size()-records[i].size());
+            assert(application.state.nativeName==states[i].nativeName);
+            quint32 linkedName=0;
+            assert(decodeKompasBodyApplicationLink(applicationLinks[i],linkedName,error));
+            assert(linkedName==application.state.nativeName);
+            assert(application.state.nativeFlags==states[i].nativeFlags);
+            assert(application.state.nativeFooterFlags1==states[i].nativeFooterFlags1);
+            QByteArray encoded;
+            assert(encodeKompasBodyApplication(application,mathRegistry,encoded,error));
+            assert(encoded==applicationRecords[i].mid(records[i].size()));
+            for(const auto& groups:application.topology.groups)
+                for(const auto& group:groups) for(const auto& proxy:group.proxies)
+                    assert(proxy.bodyNumber==i+1 && proxy.mathId);
+        }
+        const auto verifyApplicationFailure=[&](auto invalidStates) {
+            std::vector<QByteArray> output{QByteArray("stale")},links{QByteArray("stale")};quint32 id=999;
+            assert(!encodeKompasApplicationBodyRecords(kernel,
+                {history.value(),duplicate.value(),duplicate.value()},invalidStates,output,error,&id,&links));
+            assert(output.empty() && links.empty() && id==0 && !error.isEmpty());
+        };
+        auto invalidStates=states;invalidStates.pop_back();verifyApplicationFailure(invalidStates);
+        invalidStates=states;invalidStates[2].nativeName=101;verifyApplicationFailure(invalidStates);
+        invalidStates=states;invalidStates[1].nativeFlags[0]=2;verifyApplicationFailure(invalidStates);
+        invalidStates=states;invalidStates[2].nativeName=0;verifyApplicationFailure(invalidStates);
+        std::vector<QByteArray> aliased{QByteArray("stale")};quint32 aliasedId=999;
+        assert(!encodeKompasApplicationBodyRecords(kernel,{duplicate.value()},{states[0]},
+            aliased,error,&aliasedId,&aliased));
+        assert(aliased.empty() && aliasedId==0);
+        // A document can serialize model/controller objects before the body.
+        // Every new math/proxy ID continues after that existing registry.
+        std::vector<QByteArray> continuedRecords;
+        KompasBodyOwnership continuedOwnership;quint32 continuedLastId=0;
+        assert(encodeKompasBodyRecords(kernel,
+            {history.value(),duplicate.value(),duplicate.value()},continuedRecords,error,
+            &continuedLastId,&continuedOwnership,42));
+        assert(continuedLastId==lastObjectId+41);
+        assert(continuedOwnership.registry.size()==ownership.registry.size());
+        for(const auto& [id,cls]:ownership.registry)
+            assert(continuedOwnership.registry.at(quint16(id+41))==cls);
+        assert((quint16(uchar(continuedRecords[0][14])) |
+                (quint16(uchar(continuedRecords[0][15]))<<8))==42);
+        std::vector<QByteArray> continuedApplications,continuedLinks;
+        assert(encodeKompasApplicationBodyRecords(kernel,
+            {history.value(),duplicate.value(),duplicate.value()},states,
+            continuedApplications,error,&continuedLastId,&continuedLinks,42));
+        assert(continuedLastId==applicationLastId+41 && continuedLinks==applicationLinks);
+        std::map<quint16,quint16> continuedMath;
+        for(const auto& [id,cls]:continuedOwnership.registry)
+            if(cls!=0x7c69 && cls!=0x1408 && cls!=0x110f)continuedMath.emplace(id,cls);
+        for(std::size_t i=0;i<continuedRecords.size();++i) {
+            assert(continuedApplications[i].startsWith(continuedRecords[i]));
+            KompasBodyApplication application;qsizetype consumed=0;
+            assert(decodeKompasBodyApplication(continuedApplications[i],continuedRecords[i].size(),
+                                               continuedMath,application,consumed,error));
+            assert(consumed==continuedApplications[i].size()-continuedRecords[i].size());
+            for(const auto& groups:application.topology.groups)
+                for(const auto& group:groups)for(const auto& proxy:group.proxies)
+                    assert(proxy.id>=42 && proxy.mathId && *proxy.mathId>=42);
+        }
+        for(const quint32 firstId:{0u,65535u,65536u}) {
+            continuedApplications={QByteArray("stale")};continuedLinks={QByteArray("stale")};continuedLastId=999;
+            assert(!encodeKompasApplicationBodyRecords(kernel,
+                {history.value(),duplicate.value(),duplicate.value()},states,
+                continuedApplications,error,&continuedLastId,&continuedLinks,firstId));
+            assert(continuedApplications.empty() && continuedLinks.empty() && continuedLastId==0);
+        }
+        KompasStoragePrefix prefix;
+        assert(prepareKompasStorageRecords(applicationRecords,prefix,error));
+        KompasCatalog catalog;
+        catalog.lastObjectId=lastObjectId;
+        KompasCatalogEntry model;model.numericName=170;model.directory=true;
+        KompasCatalogEntry historyStream;historyStream.numericName=130;historyStream.recordIndex=0;
+        model.children.push_back(historyStream);
+        KompasCatalogEntry bodies;bodies.numericName=300;bodies.directory=true;
+        for(std::size_t i=1;i<3;++i) {
+            KompasCatalogEntry body;body.textName=QString::number(i+1);body.recordIndex=i;
+            bodies.children.push_back(body);
+        }
+        model.children.push_back(bodies);catalog.entries.push_back(model);
+        QByteArray catalogBytes;
+        assert(encodeKompasCatalog(catalog,prefix,catalogBytes,error));
+        QTemporaryDir folder;assert(folder.isValid());
+        const auto path=folder.filePath(QStringLiteral("named-bodies.m3d"));
+        const auto saveFixture=[&](const QByteArray& directory) {
+            KompasStorageImage storage;
+            assert(finishKompasStorage(prefix,directory,storage,error));
+            const auto fixture=zip({{"Contents",storage.contents},{"SysInfo",storage.sysInfo}});
+            QFile file(path);assert(file.open(QIODevice::WriteOnly));
+            assert(file.write(fixture)==fixture.size());
+        };
+        // Geometry/catalog fixture only. Equal bodies have distinct named
+        // owners; an operation-history shell must not become a third body.
+        saveFixture(catalogBytes);
+        KompasC3dResult restored;
+        assert(readKompasC3dSolids(path,kernel,restored,error));
+        assert(restored.solids.size()==2 && restored.notes.isEmpty());
+        const auto expected=kernel.volumeProperties(duplicate.value());
+        assert(expected.isOk());
+        for(const auto& body:restored.solids) {
+            const auto actual=kernel.volumeProperties(body.shape);
+            assert(actual.isOk() && kernel.isShapeValid(body.shape));
+            assert(std::fabs(actual.value().volumeM3/expected.value().volumeM3-1)<1e-12);
+        }
+        // A recognized native catalog must validate completely: corrupt
+        // ownership cannot fall back to scanning every shell in the stream.
+        catalogBytes.chop(1);saveFixture(catalogBytes);
+        assert(!readKompasC3dSolids(path,kernel,restored,error));
+        assert(restored.solids.empty() && !error.isEmpty());
+        catalog.entries[0].children[1].enabled=false;
+        assert(encodeKompasCatalog(catalog,prefix,catalogBytes,error));
+        saveFixture(catalogBytes);
+        assert(!readKompasC3dSolids(path,kernel,restored,error));
+        assert(restored.solids.empty() && !error.isEmpty());
+    }
+    {
+        using namespace cadnext::gui;
+        const auto box=kernel.makeBox({.02,.03,.04});
+        assert(box.isOk());
+        KompasImportedOperationPrefix settings;
+        settings.objectId=42;settings.applicationName=100;settings.mainName=1003;
+        settings.frameName=99;settings.title="Imported box";settings.bodyNumber=4;
+        KompasImportedOperationSuffix suffix;suffix.bodyNumber=4;
+        KompasOperationAttribute color;color.color=0x123456;
+        KompasOperationAttribute flag;flag.kind=KompasOperationAttribute::Boolean;
+        suffix.attributes={color,flag};
+        KompasBodyApplicationState state;state.nativeName=100;
+        QString error;
+        QByteArray datums;
+        std::map<quint16,quint16> datumRegistry;
+        for(int i=0;i<7;++i) {
+            KompasDatum datum;
+            datum.objectId=quint16(35+i);datum.mainName=quint32(93+i);datum.nativeName=quint32(i+1);
+            datum.kind=i<3?KompasDatum::Plane:i<6?KompasDatum::Axis:KompasDatum::Origin;
+            datum.title="Datum "+QString::number(i+1);
+            if(i==1)datum.placement={0,0,0,1,0,0,0,0,-1,0,1,0};
+            if(i==2)datum.placement={0,0,0,0,0,1,0,1,0,-1,0,0};
+            if(i>=3 && i<6) {
+                datum.placement[3]=datum.placement[4]=datum.placement[5]=0;
+                datum.placement[i]=1;
+            }
+            if(i==6)datum.datumIds={35,36,37,38,39,40};
+            QByteArray bytes;
+            assert(encodeKompasDatum(datum,datumRegistry,bytes,error));
+            KompasDatum read;qsizetype size=0;
+            assert(decodeKompasDatum(bytes,0,datumRegistry,read,size,error) && size==bytes.size());
+            if(i==6)assert(read.mainName==settings.frameName && read.datumIds==datum.datumIds);
+            datums+=bytes;
+            datumRegistry.emplace(datum.objectId,i<3?0x507a:i<6?0x2c70:0x4170);
+        }
+        KompasImportedBodyOperation first;
+        assert(encodeKompasImportedBodyOperation(kernel,box.value(),settings,suffix,state,first,error));
+        assert(first.registry.at(42)==0x2801 && first.registry.at(43)==0x6239);
+        KompasImportedOperationPrefix decoded;qsizetype consumed=0;
+        assert(decodeKompasImportedOperationPrefix(first.operation,0,decoded,consumed,error));
+        assert(decoded.bodyNumber==4 && decoded.applicationName==100 && decoded.mainName==1003);
+        assert(first.operation.mid(consumed,7)==QByteArray::fromHex("02803962012b00"));
+        // The current body's shell is numbered with a fresh ID, registered as a
+        // shell (KOMPAS numbers the shells of its bodies; /#170/#110 names the
+        // first), and holds exactly six pointers to the faces defined inside
+        // its operation; there is no second math definition of those faces
+        // and no copied operation geometry.
+        const auto number=[&](qsizetype at,int width) {
+            quint64 value=0;for(int i=0;i<width;++i)value|=quint64(uchar(first.body[at+i]))<<(8*i);
+            return value;
+        };
+        assert(first.body.left(13)==QByteArray::fromHex("0104000000ffffffff02803962") && uchar(first.body[13])==1);
+        assert(number(14,2)==first.shellId && first.registry.at(first.shellId)==0x6239 && first.shellId!=43);
+        assert(number(16,8)==6);
+        std::set<quint16> referencedFaces,mathFaces;
+        for(int f=0;f<6;++f) {
+            assert(uchar(first.body[24+3*f])==1);
+            const auto id=quint16(number(25+3*f,2));
+            assert(first.registry.at(id)==0x666e && referencedFaces.insert(id).second);
+        }
+        std::map<quint16,quint16> mathRegistry;
+        for(const auto& [id,cls]:first.registry) {
+            if(cls==0x666e)mathFaces.insert(id);
+            if(cls!=0x7c69 && cls!=0x1408 && cls!=0x110f)mathRegistry.emplace(id,cls);
+        }
+        assert(referencedFaces==mathFaces);
+        KompasBodyApplication application;
+        assert(decodeKompasBodyApplication(first.body,42,mathRegistry,application,consumed,error));
+        assert(consumed==first.body.size()-42 && application.state.nativeName==100);
+        const std::array<std::size_t,3> counts{8,12,6};
+        for(std::size_t kind=0;kind<3;++kind) {
+            const auto& groups=application.topology.groups[kind];
+            assert(groups.size()==1 && groups[0].mainName==1003 && groups[0].proxies.size()==counts[kind]);
+            for(const auto& proxy:groups[0].proxies)
+                assert(proxy.bodyNumber==4 && proxy.name.words.size()==2 && proxy.name.words[0]==1003 && proxy.mathId);
+        }
+        quint32 linked=0;assert(decodeKompasBodyApplicationLink(first.applicationLink,linked,error) && linked==100);
+        auto secondSettings=settings;
+        secondSettings.objectId=quint16(first.lastObjectId+1);
+        secondSettings.applicationName=200;secondSettings.mainName=2003;secondSettings.bodyNumber=5;
+        auto secondSuffix=suffix;secondSuffix.bodyNumber=5;
+        auto secondState=state;secondState.nativeName=200;
+        KompasImportedBodyOperation second;
+        assert(encodeKompasImportedBodyOperation(kernel,box.value(),secondSettings,secondSuffix,secondState,second,error));
+        for(const auto& [id,cls]:second.registry)assert(!first.registry.count(id));
+        KompasModelHeader modelHeader;modelHeader.controllerCount=9;
+        for(auto& bounds:modelHeader.boxes)bounds={0,0,0,20,30,40};
+        QByteArray modelStart,modelEnd;
+        assert(encodeKompasModelHeader(modelHeader,modelStart,error));
+        KompasModelFooter modelFooter;
+        modelFooter.originId=41;modelFooter.nativeCounters={201,5,3,6};modelFooter.nextMainName=2004;
+        auto modelRegistry=datumRegistry;
+        modelRegistry.insert(first.registry.begin(),first.registry.end());
+        modelRegistry.insert(second.registry.begin(),second.registry.end());
+        assert(encodeKompasModelFooter(modelFooter,modelRegistry,modelEnd,error));
+        const auto modelBytes=modelStart+datums+first.operation+second.operation+modelEnd;
+        KompasModelHeader headerRead;KompasModelFooter footerRead;qsizetype envelopeSize=0;
+        assert(decodeKompasModelHeader(modelBytes,0,headerRead,envelopeSize,error) && envelopeSize==283);
+        assert(headerRead.controllerCount==9 && headerRead.boxes[0][5]==40);
+        assert(decodeKompasModelFooter(modelBytes,modelBytes.size()-modelEnd.size(),modelRegistry,footerRead,envelopeSize,error));
+        assert(envelopeSize==modelEnd.size() && footerRead.originId==41 && footerRead.nextMainName>secondSettings.mainName);
+        assert(footerRead.nativeCounters[0]>headerRead.controllerCount);
+        KompasModelProperties modelProperties;
+        modelProperties.name="Two bodies";modelProperties.materialName="Steel";
+        QByteArray propertyBytes;
+        assert(encodeKompasModelProperties(modelProperties,propertyBytes,error));
+        KompasModelProperties propertyRead;
+        assert(decodeKompasModelProperties(propertyBytes,0,propertyRead,envelopeSize,error));
+        assert(envelopeSize==propertyBytes.size() && propertyRead.name==modelProperties.name);
+        KompasDeferredMassProperties massCache;
+        massCache.nativeDensity=modelProperties.nativeDensity/1000;
+        QByteArray massBytes;
+        assert(encodeKompasDeferredMassProperties(massCache,massBytes,error));
+        std::array<QByteArray,2> bodyPropertyBytes;
+        for(std::size_t i=0;i<2;++i) {
+            KompasBodyProperties bodyProperties;
+            bodyProperties.properties=modelProperties;
+            bodyProperties.properties.name="Body "+QString::number(i+1);
+            bodyProperties.massCache=massCache;
+            assert(encodeKompasBodyProperties(bodyProperties,bodyPropertyBytes[i],error));
+            KompasBodyProperties decoded;
+            assert(decodeKompasBodyProperties(bodyPropertyBytes[i],0,decoded,envelopeSize,error));
+            assert(envelopeSize==bodyPropertyBytes[i].size() && decoded.properties.name==bodyProperties.properties.name);
+            assert(decoded.massCache.nativeDensity==massCache.nativeDensity);
+        }
+        KompasPropertyDefinitions definitions;
+        KompasPropertyDefinition definition;definition.id=100;definition.nativeRule=2;
+        definition.sourceKey="CADNext";definition.valueKey="Title";definition.displayName="Title";
+        definitions.entries.push_back(definition);
+        definition.id=37;definition.valueKey="Profile";definition.displayName="Profile";
+        definition.choices=std::vector<QString>{"A","B"};definitions.entries.push_back(definition);
+        KompasPropertyTuning tuning;
+        tuning.lists[0]={{100,true},{37,false}};tuning.lists[1]={{37,true},{100,false}};
+        assert(validateKompasPropertyReferences(definitions,tuning,error));
+        QByteArray definitionsBytes,tuningBytes;
+        assert(encodeKompasPropertyDefinitions(definitions,definitionsBytes,error));
+        assert(encodeKompasPropertyTuning(tuning,tuningBytes,error));
+        KompasDocumentSettings documentSettings;
+        documentSettings.title=modelProperties.name;
+        for(std::size_t i=0;i<KompasDocumentSettings::styleCount;++i) {
+            KompasDocumentStyle style;style.name="CADNext style "+QString::number(i);
+            documentSettings.styles.push_back(style);
+        }
+        QByteArray settingsBytes;
+        assert(encodeKompasDocumentSettings(documentSettings,settingsBytes,error));
+        // Component fixture: the model root, datums, operation packets,
+        // model/body properties, deferred mass cache, property definitions,
+        // tuning lists, document settings and current bodies have native named owners.
+        // Document services and complete property-index
+        // ownership remain absent; this is not a complete native export.
+        KompasStoragePrefix storagePrefix;
+        assert(prepareKompasStorageRecords({modelBytes,first.body,second.body,
+            first.applicationLink,second.applicationLink,propertyBytes,
+            bodyPropertyBytes[0],bodyPropertyBytes[1],massBytes,definitionsBytes,tuningBytes,settingsBytes},storagePrefix,error));
+        KompasCatalog catalog;catalog.lastObjectId=second.lastObjectId;
+        KompasCatalogEntry model;model.directory=true;model.numericName=170;
+        KompasCatalogEntry operations;operations.numericName=130;operations.recordIndex=0;
+        KompasCatalogEntry bodies;bodies.directory=true;bodies.numericName=300;
+        KompasCatalogEntry links;links.directory=true;links.numericName=302;
+        KompasCatalogEntry bodyProperties;bodyProperties.directory=true;bodyProperties.numericName=301;
+        for(std::size_t i=0;i<2;++i) {
+            KompasCatalogEntry body;body.textName=QString::number(i+4);body.recordIndex=i+1;
+            bodies.children.push_back(body);body.recordIndex=i+3;links.children.push_back(body);
+            body.recordIndex=i+6;bodyProperties.children.push_back(body);
+        }
+        KompasCatalogEntry propertiesEntry;propertiesEntry.numericName=100;propertiesEntry.recordIndex=5;
+        KompasCatalogEntry massFolder;massFolder.directory=true;massFolder.numericName=240;
+        KompasCatalogEntry massEntry;massEntry.numericName=100;massEntry.recordIndex=8;
+        massFolder.children.push_back(massEntry);
+        model.children={operations,bodies,links,bodyProperties,massFolder,propertiesEntry};catalog.entries.push_back(model);
+        for(std::size_t i=0;i<2;++i) {
+            KompasCatalogEntry propertyFolder;propertyFolder.directory=true;
+            propertyFolder.textName=i ? "_ADDPROP_TUNING_D" : "_ADDPROP_D";
+            KompasCatalogEntry propertyStream;propertyStream.textName=i ? "_ADDPROP_TUNING_F" : "_ADDPROP_F";
+            propertyStream.recordIndex=9+i;propertyFolder.children.push_back(propertyStream);
+            catalog.entries.push_back(propertyFolder);
+        }
+        KompasCatalogEntry settingsEntry;settingsEntry.numericName=100;settingsEntry.recordIndex=11;
+        catalog.entries.push_back(settingsEntry);
+        QByteArray catalogBytes;
+        assert(encodeKompasCatalog(catalog,storagePrefix,catalogBytes,error));
+        KompasStorageImage storage;assert(finishKompasStorage(storagePrefix,catalogBytes,storage,error));
+        KompasContentsRecords storageRead;
+        assert(decodeKompasContentsRecords(storage.contents,storageRead,error) && storageRead.records.size()==12);
+        KompasDocumentSettings settingsRead;
+        assert(decodeKompasDocumentSettings(storageRead.records[11].decoded,settingsRead,error));
+        assert(settingsRead.title==modelProperties.name && !settingsRead.assembly && settingsRead.styles.size()==220);
+        assert(settingsRead.styles[219].name=="CADNext style 219");
+        QTemporaryDir folder;assert(folder.isValid());
+        const auto path=folder.filePath("operation-components.m3d");
+        QFile file(path);assert(file.open(QIODevice::WriteOnly));
+        const auto fixture=zip({{"Contents",storage.contents},{"SysInfo",storage.sysInfo}});
+        assert(file.write(fixture)==fixture.size());file.close();
+        KompasC3dResult restored;
+        assert(readKompasC3dSolids(path,kernel,restored,error));
+        assert(restored.solids.size()==2 && restored.notes.isEmpty());
+        for(const auto& body:restored.solids) {
+            const auto mass=kernel.volumeProperties(body.shape);
+            assert(mass.isOk() && kernel.isShapeValid(body.shape));
+            assert(std::fabs(mass.value().volumeM3/.000024-1)<1e-12);
+            GProp_GProps area;
+            BRepGProp::SurfaceProperties(*kernel.findShape(body.shape),area,1e-14,true);
+            assert(std::fabs(area.Mass()/.0052-1)<1e-12);
+        }
+        for(int change=0;change<5;++change) {
+            auto badSettings=settings;auto badSuffix=suffix;auto badState=state;
+            switch(change) {
+            case 0:badState.nativeName=200;break;
+            case 1:badSuffix.bodyNumber=5;break;
+            case 2:badSettings.objectId=65535;break;
+            case 3:badState.nativeFlags[0]=2;break;
+            case 4:badSettings.placement[0]=1;break;
+            }
+            auto output=first;
+            assert(!encodeKompasImportedBodyOperation(kernel,box.value(),badSettings,badSuffix,badState,output,error));
+            assert(output.operation.isEmpty() && output.body.isEmpty() && output.applicationLink.isEmpty());
+            assert(output.registry.empty() && output.lastObjectId==0 && !error.isEmpty());
+        }
+    }
+    {
+        using namespace cadnext::gui;
+        // Independently authored FileInfo: big-endian UTF-16, fixed key order,
+        // declared record versions and application identity, without CAD SDKs.
+        const QString fixture = QStringLiteral(
+            "[FileInfo]\nAppName=CADNext\nAppVersion=CADNext_1.0\nBuildNum=1\n"
+            "AppPlatform=x64\nMathFileVersion=0x11001001\nAppFileVersion=0x11001011\n"
+            "FileTypeName=Kompas.m3d\nFileType=4\nCreateAppVersion=0x11001011\n"
+            "CreateData=10/2/2026 9:08:07\nModifyData=10/2/2026 12:34:56\n"
+            "Author=Разработчик\nOrgName=\nComment=Собственная запись\nAutoSave=false\n");
+        QByteArray bytes = QByteArray::fromHex("feff");
+        for (const auto c : fixture) {
+            bytes.append(char(c.unicode() >> 8)); bytes.append(char(c.unicode() & 0xff));
+        }
+        KompasFileInfo info;
+        QString error;
+        QByteArray encoded;
+        assert(decodeKompasFileInfo(bytes, info, error));
+        assert(info.author && *info.author == QStringLiteral("Разработчик"));
+        assert(info.mathVersion == 0x11001001 && info.fileType == 4);
+        assert(encodeKompasFileInfo(info, encoded, error) && encoded == bytes);
+        for (qsizetype size = 0; size < bytes.size(); ++size) {
+            auto decoded = info;
+            assert(!decodeKompasFileInfo(bytes.left(size), decoded, error));
+            assert(decoded.author == std::nullopt && !error.isEmpty());
+        }
+        info.comment = QStringLiteral("Comment\nInjected=true");
+        assert(!encodeKompasFileInfo(info, encoded, error) && encoded.isEmpty());
+        info.comment = QStringLiteral("Comment"); info.fileType = 6;
+        assert(!encodeKompasFileInfo(info, encoded, error) && encoded.isEmpty());
+    }
+    {
+        using namespace cadnext::gui;
+        const auto first = kernel.makeBox({.02, .03, .04});
+        const auto second = kernel.makeCylinder({.005, .012});
+        assert(first.isOk() && second.isOk());
+        QTemporaryDir folder;
+        assert(folder.isValid());
+        const QString path = folder.filePath(QStringLiteral("cadnext-native.m3d"));
+        QString error;
+        KompasNativeWriteOptions options;
+        options.title = QStringLiteral("CADNext native document");
+        options.color = 0x123456;
+        options.material = {50, 60, 70, 80, 90, 100};
+        cadnext::Transform placement;
+        placement.scale = {2, 3, 4};
+        placement.rotationEuler = {0, 0, 90};
+        placement.position = {.11, -.04, .05};
+        assert(writeKompasNativeDocument(kernel,
+            {{first.value(), 0, QStringLiteral("Box"), placement},
+             {second.value(), 1, QStringLiteral("Cylinder")}},
+            path, error, options));
+        KompasC3dResult restored;
+        assert(readKompasC3dSolids(path, kernel, restored, error));
+        assert(restored.solids.size() == 2 && restored.notes.empty());
+        assert(kernel.isShapeValid(restored.solids[0].shape));
+        assert(kernel.isShapeValid(restored.solids[1].shape));
+        const auto boxMass = kernel.volumeProperties(restored.solids[0].shape);
+        const auto cylinderMass = kernel.volumeProperties(restored.solids[1].shape);
+        assert(boxMass.isOk() && cylinderMass.isOk());
+        assert(std::fabs(boxMass.value().volumeM3 / (.02 * .03 * .04 * 24) - 1) < 1e-12);
+        assert(std::fabs(boxMass.value().centerOfMass.x - .11) < 1e-12);
+        assert(std::fabs(boxMass.value().centerOfMass.y + .04) < 1e-12);
+        assert(std::fabs(boxMass.value().centerOfMass.z - .05) < 1e-12);
+        assert(std::fabs(cylinderMass.value().volumeM3 / (M_PI * .005 * .005 * .012) - 1) < 1e-12);
+        GProp_GProps boxArea, cylinderArea;
+        BRepGProp::SurfaceProperties(*kernel.findShape(restored.solids[0].shape), boxArea, 1e-14, true);
+        BRepGProp::SurfaceProperties(*kernel.findShape(restored.solids[1].shape), cylinderArea, 1e-14, true);
+        const double expectedBoxArea = 2 * (.04 * .12 + .04 * .12 + .12 * .12);
+        assert(std::fabs(boxArea.Mass() / expectedBoxArea - 1) < 1e-12);
+        assert(std::fabs(cylinderArea.Mass() / (2 * M_PI * .005 * (.005 + .012)) - 1) < 1e-12);
+        const auto boxBounds = kernel.boundingBox(restored.solids[0].shape);
+        assert(boxBounds.isOk());
+        assert(std::fabs(boxBounds.value().min.x - .05) < 1e-6);
+        assert(std::fabs(boxBounds.value().max.y + .02) < 1e-6);
+        KompasModelInfo modelInfo;
+        assert(readKompasModelInfo(path, modelInfo, error));
+        const QStringList expectedObjects{QStringLiteral("Box"), QStringLiteral("Cylinder")};
+        assert(modelInfo.name == options.title && modelInfo.objects == expectedObjects);
+        KompasStorageImage storageImage;
+        assert(readKompasStorageImage(path, storageImage, error));
+        assert(storageImage.contents.startsWith("KF") && storageImage.sysInfo.startsWith("KF"));
+        KompasFileInfo fileInfo;
+        assert(readKompasFileInfo(path, fileInfo, error));
+        assert(fileInfo.fileType == 4 && fileInfo.applicationName == QStringLiteral("CADNext"));
+        assert(fileInfo.mathVersion == 0x11001001 && fileInfo.applicationFileVersion == 0x11001011);
+        KompasContentsRecords records;
+        assert(decodeKompasContentsRecords(storageImage.contents, records, error));
+        KompasStorageIndex storageIndex;
+        assert(decodeKompasStorageIndex(storageImage.contents, storageImage.sysInfo, storageIndex, error));
+        KompasCatalog catalog;
+        assert(decodeKompasCatalog(records.tail, storageIndex.records, catalog, error));
+        bool settingsFound = false, linksFound = false;
+        for (const auto& entry : catalog.entries) {
+            if (!entry.directory && entry.numericName == 100) {
+                KompasDocumentSettings settings;
+                assert(decodeKompasDocumentSettings(records.records[entry.recordIndex].decoded, settings, error));
+                assert(!settings.assembly); settingsFound = true;
+            }
+            if (entry.directory && entry.numericName == 170) {
+                for (const auto& child : entry.children) {
+                    if (child.directory && child.numericName == 302) {
+                        assert(child.children.size() == 2);
+                        assert(child.children[0].textName == QStringLiteral("2"));
+                        assert(child.children[1].textName == QStringLiteral("1"));
+                        linksFound = true;
+                    }
+                }
+            }
+        }
+        assert(settingsFound && linksFound);
+        const auto before = [&] {
+            QFile file(path); assert(file.open(QIODevice::ReadOnly)); return file.readAll();
+        }();
+        assert(!writeKompasNativeDocument(kernel,
+            {{cadnext::kernel::ShapeHandle{}, 1, QStringLiteral("Broken")}},
+            path, error, options));
+        const auto after = [&] {
+            QFile file(path); assert(file.open(QIODevice::ReadOnly)); return file.readAll();
+        }();
+        assert(after == before);
+    }
+    {
+        using namespace cadnext::gui;
+        const auto cylinder=kernel.makeCylinder({10,30});
+        const auto sphere=kernel.makeSphere({15});
+        const auto cone=kernel.adoptShape(BRepPrimAPI_MakeCone(.02,.008,.03).Shape(),"native-cone");
+        const auto torus=kernel.adoptShape(BRepPrimAPI_MakeTorus(.03,.008).Shape(),"native-torus");
+        const auto cavity=kernel.adoptShape(BRepAlgoAPI_Cut(
+            BRepPrimAPI_MakeBox(.04,.04,.04).Shape(),
+            BRepPrimAPI_MakeBox(gp_Pnt(.01,.01,.01),.02,.02,.02).Shape()).Shape(),"native-cavity");
+        const auto nurbsCylinder=kernel.adoptShape(BRepBuilderAPI_NurbsConvert(*kernel.findShape(cylinder.value())).Shape(),"native-nurbs-cylinder");
+        const auto nurbsTorus=kernel.adoptShape(BRepBuilderAPI_NurbsConvert(*kernel.findShape(torus)).Shape(),"native-nurbs-torus");
+        const auto polynomial=kernel.adoptShape(BRepBuilderAPI_NurbsConvert(*kernel.findShape(box.value())).Shape(),"native-nurbs-box");
+        assert(cylinder.isOk() && sphere.isOk());
+        const std::vector<std::pair<const char*,cadnext::kernel::ShapeHandle>> cases{
+            {"cylinder",cylinder.value()}, {"sphere",sphere.value()}, {"cone",cone}, {"torus",torus}, {"cavity",cavity},
+            {"nurbs-box",polynomial}, {"periodic-nurbs",periodicSplineSolid(kernel)},
+            {"mixed-uv-boundaries",mixedUvSplineSolid(kernel)},
+            {"rational-profile",rationalProfileSolid(kernel)}};
+        for (const auto& item:cases) verifyNativeC3dBody(kernel,item.first,item.second);
+        {
+            // Native coordinates converted to metres lie at rounding boundaries.
+            // Repeated native saves must retain these vertex coordinates exactly.
+            const auto stableBox = kernel.makeBox({10.05 * .001, 10.13 * .001, 10.22 * .001});
+            assert(stableBox.isOk());
+            const auto vertices = [&](cadnext::kernel::ShapeHandle handle) {
+                std::set<std::array<double, 3>> points;
+                for (TopExp_Explorer it(*kernel.findShape(handle), TopAbs_VERTEX); it.More(); it.Next()) {
+                    const auto p = BRep_Tool::Pnt(TopoDS::Vertex(it.Current()));
+                    points.insert({p.X(), p.Y(), p.Z()});
+                }
+                return points;
+            };
+            const auto expected = vertices(stableBox.value());
+            assert(expected.size() == 8);
+            auto current = stableBox.value();
+            for (int cycle = 0; cycle < 3; ++cycle) {
+                current = verifyNativeC3dBody(kernel, "native-unit-stability", current);
+                assert(vertices(current) == expected);
+            }
+        }
+        // A narrowing cone has a signed angle and a reference circle at its
+        // lower cap. Moving that circle or reversing its axis changes the UV
+        // frame and forces periodic seam reconstruction. Preserve the source
+        // frame through C3D, including six hyperbolic sections and an offset
+        // axis. These checks fail when C3D uses XT's positive-angle frame.
+        for (int offset = 0; offset < 3; ++offset) {
+            BRepBuilderAPI_MakePolygon polygon;
+            for (int corner = 0; corner < 6; ++corner) {
+                const double angle = corner * M_PI / 3 + .2;
+                polygon.Add(gp_Pnt(.014 * std::cos(angle), .014 * std::sin(angle), 0));
+            }
+            polygon.Close();
+            const auto bar = BRepPrimAPI_MakePrism(
+                BRepBuilderAPI_MakeFace(polygon.Wire()).Face(), gp_Vec(0, 0, .03)).Shape();
+            gp_Trsf translation;
+            translation.SetTranslation(gp_Vec(.0002 * offset, -.00015 * offset, 0));
+            const auto cone = BRepBuilderAPI_Transform(
+                BRepPrimAPI_MakeCone(.015, .008, .03).Shape(), translation, true).Shape();
+            const auto solid = kernel.adoptShape(BRepAlgoAPI_Common(bar, cone).Shape(), "hex-cone");
+            assert(kernel.isShapeValid(solid));
+            verifyNativeC3dBody(kernel, "offset-hyperbolic-cone", solid);
+        }
+        // Exact endpoints still carry their declared precision. This cap's
+        // interior deviation exceeds the modeller's default tolerance.
+        verifyNativeC3dBody(kernel,"declared-vertex-precision",
+                           mixedUvSplineSolid(kernel,false,3e-6,1e-5));
+        // Straight geometric locus, nonlinear common parameter f(t)=(t+t^3)/2.
+        // Extracting the support's iso curve keeps the locus but loses that
+        // law. Native paired UV curves must retain the prescribed midpoint.
+        const auto nonlinear=verifyNativeC3dBody(kernel,"nonlinear-uv-parameter",
+                                                 mixedUvSplineSolid(kernel,true));
+        bool foundNonlinear=false;
+        for(TopExp_Explorer e(*kernel.findShape(nonlinear),TopAbs_EDGE);e.More();e.Next()) {
+            const BRepAdaptor_Curve curve(TopoDS::Edge(e.Current()));
+            const auto a=curve.Value(curve.FirstParameter()),b=curve.Value(curve.LastParameter());
+            if(std::fabs(a.Y())>1e-12 || std::fabs(b.Y())>1e-12 ||
+               std::fabs(a.Z()-b.Z())>1e-12 || std::fabs(std::fabs(a.X()-b.X())-.02)>1e-12)continue;
+            const auto middle=curve.Value((curve.FirstParameter()+curve.LastParameter())/2);
+            assert(std::fabs(middle.X()-.00625)<1e-12);
+            foundNonlinear=true;
+        }
+        assert(foundNonlinear);
+        verifyNativeC3dBody(kernel,"rational-nurbs-cylinder",nurbsCylinder);
+        verifyNativeC3dBody(kernel,"rational-nurbs-torus",nurbsTorus);
+        {
+            // The common 3D edge is a circle, but its planar cap stores a
+            // slightly different UV boundary within the native edge precision.
+            // Recognizing the circle must preserve that face-specific curve.
+            const auto cylinder=kernel.makeCylinder({.01,.02});assert(cylinder.isOk());
+            const auto shape=*kernel.findShape(cylinder.value());
+            TopoDS_Face cap;
+            for(TopExp_Explorer it(shape,TopAbs_FACE);it.More();it.Next()) {
+                const auto face=TopoDS::Face(it.Current());const BRepAdaptor_Surface surface(face);
+                if(surface.GetType()==GeomAbs_Plane && surface.Plane().Location().Z()>.009)cap=face;
+            }
+            assert(!cap.IsNull());
+            const auto edge=TopoDS::Edge(TopExp_Explorer(cap,TopAbs_EDGE).Current());
+            double first,last;const auto circle=BRep_Tool::CurveOnSurface(edge,cap,first,last);
+            constexpr int count=128;
+            TColgp_Array1OfPnt2d poles(1,3*count+1);
+            TColStd_Array1OfReal knots(1,count+1);
+            TColStd_Array1OfInteger multiplicities(1,count+1);
+            for(int part=0;part<count;++part) {
+                const double a=part==0 ? first : first+(last-first)*part/count;
+                const double b=part+1==count ? last : first+(last-first)*(part+1)/count;
+                gp_Pnt2d from,to;gp_Vec2d atFrom,atTo;
+                circle->D1(a,from,atFrom);circle->D1(b,to,atTo);
+                if(part==0)poles.SetValue(1,from);
+                poles.SetValue(3*part+2,from.Translated(atFrom*(b-a)/3));
+                poles.SetValue(3*part+3,to.Translated(atTo*(-(b-a)/3)));
+                poles.SetValue(3*part+4,to);
+                knots.SetValue(part+1,a);multiplicities.SetValue(part+1,part==0 ? 4 : 3);
+            }
+            knots.SetValue(count+1,last);multiplicities.SetValue(count+1,4);
+            const Handle(Geom2d_BSplineCurve) boundary=new Geom2d_BSplineCurve(poles,knots,multiplicities,3);
+            BRep_Builder builder;builder.UpdateEdge(edge,boundary,cap,1e-7);
+            builder.SameRange(edge,true);builder.SameParameter(edge,true);
+            GProp_GProps area;BRepGProp::SurfaceProperties(cap,area,1e-14,true);
+            constexpr double idealArea=.0001*3.14159265358979323846;
+            const double deviation=std::fabs(area.Mass()/idealArea-1);
+            assert(deviation>1e-9 && deviation<1e-7);
+            assert(kernel.isShapeValid(cylinder.value()));
+            verifyNativeC3dBody(kernel,"circle-with-tolerant-cap",cylinder.value());
+        }
+        {
+            // Six hyperbolic sections on one cone. Their native UV curves
+            // share the spatial parameter within the declared precision;
+            // re-fitting them during sewing changes volume and area.
+            constexpr double radius=.014, lowerRadius=.008, upperRadius=.015, height=.03;
+            constexpr double pi=3.14159265358979323846;
+            BRepBuilderAPI_MakePolygon polygon;
+            for(int side=0;side<6;++side) {
+                const double angle=side*pi/3+.2;
+                polygon.Add(gp_Pnt(radius*std::cos(angle),radius*std::sin(angle),0));
+            }
+            polygon.Close();
+            const auto cap=BRepBuilderAPI_MakeFace(polygon.Wire()).Face();
+            const auto prism=BRepPrimAPI_MakePrism(cap,gp_Vec(0,0,height)).Shape();
+            const auto section=BRepAlgoAPI_Common(prism,
+                BRepPrimAPI_MakeCone(upperRadius,lowerRadius,height).Shape()).Shape();
+            const auto original=kernel.adoptShape(section,"six-hyperbolic-sections");
+            assert(kernel.isShapeValid(original));
+            const auto restored=verifyNativeC3dBody(kernel,"six-hyperbolic-sections",original);
+            // Independent volume: integrate the circle clipped by a regular
+            // hexagon. In the transition interval subtract six circular caps.
+            const double apothem=radius*std::cos(pi/6);
+            const double root=std::sqrt(radius*radius-apothem*apothem);
+            const double capIntegral=(radius*radius*radius*std::acos(apothem/radius)-
+                2*apothem*radius*root+apothem*apothem*apothem*std::acosh(radius/apothem))/3;
+            const double hexArea=3*std::sqrt(3.)*radius*radius/2;
+            const double slope=(upperRadius-lowerRadius)/height;
+            const double volume=(hexArea*(upperRadius-radius)+
+                pi*(radius*radius*radius-lowerRadius*lowerRadius*lowerRadius)/3-6*capIntegral)/slope;
+            // OCCT fits the original cone's UV intersection curves. Anchor
+            // both results to the ideal analytic volume at 1e-8; the separate
+            // boundary-preserving round-trip assertion above remains 1e-9.
+            for(const auto shape:{original,restored}) {
+                GProp_GProps mass;
+                BRepGProp::VolumePropertiesGK(*kernel.findShape(shape),mass,1e-12,true,false,true);
+                assert(std::fabs(mass.Mass()/volume-1)<1e-8);
+            }
+        }
+        // Hyperbolic and parabolic cone sections exercise the original
+        // analytic UV law independently of rational spatial conversion.
+        for(const bool parabola:{false,true}) {
+            auto tool=BRepPrimAPI_MakeBox(gp_Pnt(.01,-.04,-.03),.05,.08,.10).Shape();
+            if(parabola) {
+                gp_Trsf transform;
+                transform.SetRotation(gp_Ax1(gp_Pnt(.01,0,0),gp_Dir(0,1,0)),-std::atan(.4));
+                tool=BRepBuilderAPI_Transform(tool,transform,true).Shape();
+            }
+            const auto section=BRepAlgoAPI_Cut(BRepPrimAPI_MakeCone(.02,.008,.03,1.3).Shape(),tool).Shape();
+            const auto originalSection=kernel.adoptShape(section,"native-conic-section");
+            assert(kernel.isShapeValid(originalSection));
+            const auto description=cadnext::kernel::describeExactBRep(kernel,originalSection);
+            assert(description.isOk());int analyticUvCount=0;
+            for(const auto& face:description.value().faces)for(const auto& loop:face.loops)
+                for(const auto& coedge:loop)if(coedge.analyticPcurve) {
+                    assert(coedge.analyticPcurve->kind==(parabola ?
+                        cadnext::kernel::AnalyticPcurveDefinition::Kind::Parabola :
+                        cadnext::kernel::AnalyticPcurveDefinition::Kind::Hyperbola));
+                    ++analyticUvCount;
+                }
+            assert(analyticUvCount>0);
+            const auto restoredSection=verifyNativeC3dBody(kernel,parabola ? "parabolic-section" : "hyperbolic-section",originalSection);
+            int checkedConics=0;
+            for(TopExp_Explorer e(section,TopAbs_EDGE);e.More();e.Next()) {
+                const auto edge=TopoDS::Edge(e.Current());const BRepAdaptor_Curve original(edge);
+                if(original.GetType()!=(parabola ? GeomAbs_Parabola : GeomAbs_Hyperbola))continue;
+                double first,last;const auto exact=BRep_Tool::Curve(edge,first,last);
+                const auto a=exact->Value(first),b=exact->Value(last);bool checked=false;
+                for(TopExp_Explorer r(*kernel.findShape(restoredSection),TopAbs_EDGE);r.More();r.Next()) {
+                    const BRepAdaptor_Curve restored(TopoDS::Edge(r.Current()));
+                    const auto c=restored.Value(restored.FirstParameter()),d=restored.Value(restored.LastParameter());
+                    if(std::min(std::max(a.Distance(c),b.Distance(d)),std::max(a.Distance(d),b.Distance(c)))>1e-10)continue;
+                    for(int sample=0;sample<=64;++sample) {
+                        const auto p=restored.Value(restored.FirstParameter()+
+                            (restored.LastParameter()-restored.FirstParameter())*sample/64);
+                        const GeomAPI_ProjectPointOnCurve projection(p,exact,first,last);
+                        double distance=std::min(p.Distance(a),p.Distance(b));
+                        if(projection.NbPoints()>0)distance=std::min(distance,projection.LowerDistance());
+                        assert(distance<1e-11);
+                    }
+                    checked=true;break;
+                }
+                assert(checked);++checkedConics;
+            }
+            assert(checkedConics>=2);
+        }
+    }
     const auto facePatch = [](std::vector<cadnext::Vector3> outline,
                               cadnext::Vector3 normal) {
         cadnext::kernel::PlanarFacePatch patch;
@@ -486,6 +2178,19 @@ int main(int argc, char** argv) {
     assert(quarterVolume.isOk());
     assert(std::fabs(quarterVolume.value().volumeM3 -
                      pi*pi*major*minor*minor/2) < 1e-8);
+
+    // A whole meridian can be split into arcs. It still bounds the same
+    // toroidal band and must not enter the latitude-circle builder.
+    auto band=torusPatch;
+    band.loops={{meridian(0,pi,0,false),meridian(0,2*pi,pi,false)},
+                {meridian(pi/2,0,pi,true),meridian(pi/2,pi,2*pi,true)}};
+    const auto splitBand=kernel.makeAnalyticSolid({band,firstSection,lastSection});
+    if(!splitBand.isOk()) qFatal("Split meridians: %s",splitBand.error().message.c_str());
+    assert(kernel.isShapeValid(splitBand.value()));
+    GProp_GProps bandVolume;
+    BRepGProp::VolumeProperties(*kernel.findShape(splitBand.value()),bandVolume,1e-10,true);
+    assert(std::fabs(bandVolume.Mass()/(pi*pi*major*minor*minor/2)-1)<1e-9);
+    verifyNativeC3dBody(kernel,"split-meridians",splitBand.value());
 
     const double sphereRadius = 0.04;
     const double spherePlaneZ = 0.02;

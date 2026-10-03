@@ -26,16 +26,39 @@ add_library(cadnext_gui
     include/cadnext/gui/ExtrudeDialog.hpp
     include/cadnext/gui/MainWindow.hpp
     include/cadnext/gui/NativeCadImport.hpp
+    include/cadnext/gui/NativeCompoundFile.hpp
     include/cadnext/gui/NativeDxfImport.hpp
     include/cadnext/gui/NativeDwgImport.hpp
     include/cadnext/gui/NativeDwgObjects.hpp
     include/cadnext/gui/NativeDwgR2007.hpp
+    include/cadnext/gui/NativeDwgR2000.hpp
     include/cadnext/gui/NativeKompasGeometry.hpp
+    include/cadnext/gui/NativeKompasWriter.hpp
+    include/cadnext/gui/NativeKompasStorage.hpp
+    include/cadnext/gui/NativeKompasCatalog.hpp
+    include/cadnext/gui/NativeKompasTopology.hpp
+    include/cadnext/gui/NativeKompasBodyApplication.hpp
+    include/cadnext/gui/NativeKompasOperation.hpp
+    include/cadnext/gui/NativeKompasModel.hpp
+    include/cadnext/gui/NativeKompasProperties.hpp
+    include/cadnext/gui/NativeKompasDocument.hpp
+    include/cadnext/gui/NativeKompasService.hpp
+    include/cadnext/gui/NativeKompasTextStyles.hpp
+    include/cadnext/gui/NativeKompasMesh.hpp
+    include/cadnext/gui/NativeKompasPreview.hpp
+    include/cadnext/gui/NativeKompasAssembly.hpp
     include/cadnext/gui/NativeAcisSat.hpp
     include/cadnext/gui/AcisSatWriter.hpp
     include/cadnext/gui/DwgWriter.hpp
     include/cadnext/gui/NativeParasolidXt.hpp
     include/cadnext/gui/NativeSolidWorksGeometry.hpp
+    include/cadnext/gui/NativeSolidWorksWriter.hpp
+    include/cadnext/gui/NativeSolidWorksPackage.hpp
+    include/cadnext/gui/NativeSolidWorksPart.hpp
+    include/cadnext/gui/NativeSolidWorksAssembly.hpp
+    include/cadnext/gui/NativeSolidWorksConfiguration.hpp
+    include/cadnext/gui/NativeSolidWorksDocument.hpp
+    include/cadnext/gui/NativeSolidWorksFeatureBodies.hpp
     include/cadnext/gui/ParasolidXtProduct.hpp
     include/cadnext/gui/ParasolidXtWriter.hpp
     include/cadnext/gui/ProjectTree.hpp
@@ -72,17 +95,43 @@ add_library(cadnext_gui
     src/ExtrudeDialog.cpp
     src/MainWindow.cpp
     src/NativeCadImport.cpp
+    src/NativeCompoundFile.cpp
     src/NativeDxfImport.cpp
     src/NativeDwgImport.cpp
     src/NativeDwgObjects.cpp
     src/NativeDwgR2007.cpp
+    src/NativeDwgR2000.cpp
     src/NativeKompasGeometry.cpp
     src/NativeKompasC3d.cpp
+    src/NativeKompasWriter.cpp
+    src/NativeKompasStorage.cpp
+    src/NativeKompasCatalog.cpp
+    src/NativeKompasTopology.cpp
+    src/NativeKompasBodyApplication.cpp
+    src/NativeKompasOperation.cpp
+    src/NativeKompasModel.cpp
+    src/NativeKompasProperties.cpp
+    src/NativeKompasDocument.cpp
+    src/NativeKompasService.cpp
+    src/NativeKompasTextStyles.cpp
+    src/NativeKompasMesh.cpp
+    src/NativeKompasPreview.cpp
+    src/NativeKompasAssembly.cpp
+    src/NativeKompasAssemblyWriter.cpp
     src/NativeAcisSat.cpp
     src/AcisSatWriter.cpp
     src/DwgWriter.cpp
     src/NativeParasolidXt.cpp
     src/NativeSolidWorksGeometry.cpp
+    src/NativeSolidWorksWriter.cpp
+    src/NativeSolidWorksPackage.cpp
+    src/NativeSolidWorksPart.cpp
+    src/NativeSolidWorksPartBlueprint.cpp
+    src/NativeSolidWorksAssembly.cpp
+    src/NativeSolidWorksAssemblyBlueprint.cpp
+    src/NativeSolidWorksConfiguration.cpp
+    src/NativeSolidWorksDocument.cpp
+    src/NativeSolidWorksFeatureBodies.cpp
     src/ProjectTree.cpp
     src/PropertyPanel.cpp
     src/SketchToolBar.cpp
@@ -126,19 +175,6 @@ target_link_libraries(cadnext_gui
 
 if(CADNEXT_WITH_OCCT)
     target_include_directories(cadnext_gui PRIVATE ${OpenCASCADE_INCLUDE_DIR})
-endif()
-
-if(CADNEXT_WITH_LIBREDWG)
-    enable_language(C)
-    find_path(LIBREDWG_INCLUDE_DIR dwg_api.h REQUIRED)
-    find_library(LIBREDWG_LIBRARY NAMES redwg REQUIRED)
-    add_executable(cadnext_dwg_writer ../tools/dwg_writer.c)
-    target_include_directories(cadnext_dwg_writer PRIVATE ${LIBREDWG_INCLUDE_DIR})
-    target_link_libraries(cadnext_dwg_writer PRIVATE ${LIBREDWG_LIBRARY} ZLIB::ZLIB)
-    if(UNIX)
-        target_link_libraries(cadnext_dwg_writer PRIVATE m)
-    endif()
-    install(TARGETS cadnext_dwg_writer RUNTIME DESTINATION bin)
 endif()
 
 if(APPLE)

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cadnext/gui/ImportProgress.hpp"
+#include "cadnext/gui/NativeCadImport.hpp"
 #include "cadnext/gui/NativeParasolidXt.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
 #include "cadnext/kernel/StepProductStructure.hpp"
@@ -83,7 +84,17 @@ bool readParasolidXtAnalyticFile(const QString& path, kernel::OcctKernel& kernel
                                  kernel::ShapeHandle& shape, QString& error,
                                  ParasolidXtBuildReport* report = nullptr);
 
-// Loads colocated SLDPRT components and applies each SLDASM instance matrix.
+// The parts an assembly places, down through its sub-assemblies: swXmlContents/COMPINSTANCETREE
+// holds, in the model of each assembly file, the references to its components in that assembly's
+// frame; the configuration names the top model. Each part instance comes with the product of the
+// matrices from the top and is named by the path of component names ("Wheel/Hub"). A virtual
+// component is a part or a sub-assembly like any other.
+bool readSolidWorksAssemblyParts(const QString& path, std::vector<SolidWorksAssemblyComponent>& parts,
+                                 QString& error);
+
+// Loads the parts of an assembly (readSolidWorksAssemblyParts) and applies each instance matrix. A
+// part is the file next to the assembly, or else the copy SOLIDWORKS keeps inside it: a part made
+// from a foreign file under ImportedComp/<file>, a virtual one under VirtualComp/<name>.
 // Every component must be supported by readSolidWorksPlanarPart.
 bool readSolidWorksPlanarAssembly(const QString& path, kernel::OcctKernel& kernel,
                                  std::vector<SolidWorksImportedBody>& bodies,

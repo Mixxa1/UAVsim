@@ -64,10 +64,13 @@
 #include "cadnext/gui/NativeCadImport.hpp"
 #include "cadnext/gui/AcisSatWriter.hpp"
 #include "cadnext/gui/DwgWriter.hpp"
+#include "cadnext/gui/NativeSolidWorksPart.hpp"
+#include "cadnext/gui/NativeSolidWorksAssembly.hpp"
 #include "cadnext/gui/NativeDxfImport.hpp"
 #include "cadnext/gui/NativeDwgImport.hpp"
 #include "cadnext/gui/NativeDwgObjects.hpp"
 #include "cadnext/gui/NativeKompasGeometry.hpp"
+#include "cadnext/gui/NativeKompasWriter.hpp"
 #include "cadnext/gui/NativeParasolidXt.hpp"
 #include "cadnext/gui/NativeSolidWorksGeometry.hpp"
 #include "cadnext/kernel/ExtrudeMesh.hpp"
@@ -5245,7 +5248,9 @@ void MainWindow::exportCadExchange() {
         return;
     }
     QString selectedExchangeFilter;
-    QString exchangeFilters = tr("STEP (*.step);;IGES (*.iges);;FreeCAD (*.FCStd);;Parasolid, текст (*.x_t);;Parasolid, двоичный (*.x_b);;ACIS SAT, AutoCAD (*.sat);;AutoCAD DXF, тела 3DSOLID (*.dxf)");
+    QString exchangeFilters = tr("STEP (*.step);;IGES (*.iges);;FreeCAD (*.FCStd);;Parasolid, текст (*.x_t);;Parasolid, двоичный (*.x_b);;ACIS SAT, AutoCAD (*.sat);;AutoCAD DXF, тела 3DSOLID (*.dxf);;КОМПАС-3D, собственный компонент (*.m3d);;SOLIDWORKS, деталь с импортированным телом (*.sldprt);;SOLIDWORKS, сборка из деталей с импортированными телами (*.sldasm)");
+    const QString binaryDxfSolidsFilter = tr("AutoCAD DXF двоичный, тела 3DSOLID (*.dxf)");
+    exchangeFilters += QStringLiteral(";;") + binaryDxfSolidsFilter;
     if (dwgSolidWriterAvailable()) exchangeFilters += tr(";;AutoCAD DWG 2000, тела 3DSOLID (*.dwg)");
     QString path = QFileDialog::getSaveFileName(
         this, tr("Экспортировать CAD-модель"), QStringLiteral("model.step"),
@@ -5257,7 +5262,8 @@ void MainWindow::exportCadExchange() {
         suffix != QStringLiteral("iges") && suffix != QStringLiteral("igs") &&
         suffix != QStringLiteral("fcstd") && suffix != QStringLiteral("x_t") &&
         suffix != QStringLiteral("x_b") && suffix != QStringLiteral("sat") &&
-        suffix != QStringLiteral("dxf") && suffix != QStringLiteral("dwg")) {
+        suffix != QStringLiteral("dxf") && suffix != QStringLiteral("dwg") &&
+        suffix != QStringLiteral("m3d") && suffix != QStringLiteral("sldprt") && suffix != QStringLiteral("sldasm")) {
         const int start = selectedExchangeFilter.indexOf(QStringLiteral("(*."));
         const int end = selectedExchangeFilter.indexOf(QLatin1Char(')'), start);
         suffix = start >= 0 && end > start ? selectedExchangeFilter.mid(start + 3, end - start - 3).toLower()
@@ -5270,13 +5276,73 @@ void MainWindow::exportCadExchange() {
             named.push_back({bodyNames[i].toStdString(), bodies[i]});
         const auto written = suffix == QStringLiteral("sat") ? writeAcisSat(*occt, named, path)
                            : suffix == QStringLiteral("dwg") ? writeDwgSolids(*occt, named, path)
-                                                              : writeDxfSolids(*occt, named, path);
+                                                              : writeDxfSolids(*occt, named, path,
+                                                                               selectedExchangeFilter == binaryDxfSolidsFilter);
         if (!written.isOk()) {
             QMessageBox::warning(this, tr("Экспорт AutoCAD"), QString::fromStdString(written.error().message));
             return;
         }
         statusBar()->showMessage(tr("Экспортировано %1 тел: %2")
                                      .arg(written.value().bodies).arg(QFileInfo(path).fileName()), 8000);
+        return;
+    }
+    if (suffix == QStringLiteral("sldprt")) {
+        // One body, where the document places it: the part's tree is that of a part with one import.
+        if (bodies.size() != 1) {
+            QMessageBox::warning(this, tr("Экспорт SOLIDWORKS"),
+                                 tr("Деталь SOLIDWORKS записывается с одним телом, а выбрано %1. Выберите одно тело "
+                                    "или экспортируйте в Parasolid или STEP.").arg(bodies.size()));
+            return;
+        }
+        const auto placed = occt->placeExchangeBody(bodies.front());
+        QString error;
+        if (!placed.isOk() || !writeSolidWorksImportedPart(*occt, placed.value(), path, error)) {
+            QMessageBox::warning(this, tr("Экспорт SOLIDWORKS"),
+                                 placed.isOk() ? error : QString::fromStdString(placed.error().message));
+            return;
+        }
+        statusBar()->showMessage(tr("Экспортирована деталь SOLIDWORKS: %1").arg(QFileInfo(path).fileName()), 8000);
+        return;
+    }
+    if (suffix == QStringLiteral("sldasm")) {
+        // Every body a part of its own beside the assembly, where the document places it.
+        if (bodies.size() < 2) {
+            QMessageBox::warning(this, tr("Экспорт SOLIDWORKS"),
+                                 tr("Сборка SOLIDWORKS записывается для двух и более тел; одно тело экспортируйте деталью (*.sldprt)."));
+            return;
+        }
+        std::vector<SolidWorksAssemblyBody> parts;
+        for (std::size_t i = 0; i < bodies.size(); ++i) {
+            const auto placed = occt->placeExchangeBody(bodies[i]);
+            if (!placed.isOk()) {
+                QMessageBox::warning(this, tr("Экспорт SOLIDWORKS"), QString::fromStdString(placed.error().message));
+                return;
+            }
+            parts.push_back({bodyNames[i], placed.value()});
+        }
+        QString error;
+        if (!writeSolidWorksImportedAssembly(*occt, parts, path, error)) {
+            QMessageBox::warning(this, tr("Экспорт SOLIDWORKS"), error);
+            return;
+        }
+        statusBar()->showMessage(tr("Экспортирована сборка SOLIDWORKS из %1 деталей: %2").arg(parts.size()).arg(QFileInfo(path).fileName()), 8000);
+        return;
+    }
+    if (suffix == QStringLiteral("m3d")) {
+        std::vector<KompasNativeWriteBody> nativeBodies;
+        nativeBodies.reserve(bodies.size());
+        for (std::size_t i = 0; i < bodies.size(); ++i) {
+            nativeBodies.push_back({bodies[i].shape, 0, bodyNames[i], bodies[i].placement});
+        }
+        KompasNativeWriteOptions options;
+        options.title = QFileInfo(path).completeBaseName();
+        QString error;
+        if (!writeKompasNativeDocument(*occt, nativeBodies, path, error, options)) {
+            QMessageBox::warning(this, tr("Экспорт КОМПАС-3D"), error);
+            return;
+        }
+        statusBar()->showMessage(tr("Экспортировано %1 тел в компонентный КОМПАС-3D: %2")
+                                     .arg(nativeBodies.size()).arg(QFileInfo(path).fileName()), 8000);
         return;
     }
     if (suffix == QStringLiteral("x_t") || suffix == QStringLiteral("x_b")) {

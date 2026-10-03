@@ -1,6 +1,7 @@
 #include "cadnext/gui/AcisSatWriter.hpp"
 
 #include "cadnext/gui/NativeAcisSat.hpp"
+#include "cadnext/gui/NativeDxfImport.hpp"
 #include "cadnext/kernel/ExactBRepDescription.hpp"
 
 #include <QDateTime>
@@ -415,7 +416,7 @@ cadnext::Result<AcisSatWriteReport> writeAcisSat(kernel::OcctKernel& kernel,
 
 cadnext::Result<AcisSatWriteReport> writeDxfSolids(kernel::OcctKernel& kernel,
                                                   const std::vector<kernel::NamedExchangeBody>& bodies,
-                                                  const QString& path) {
+                                                  const QString& path, bool binary) {
     using R = cadnext::Result<AcisSatWriteReport>;
     if (bodies.empty()) return R::fail({ErrorCode::InvalidArgument, "No bodies for DXF export"});
     QByteArray bytes = "0\nSECTION\n2\nHEADER\n9\n$ACADVER\n1\nAC1018\n9\n$INSUNITS\n70\n4\n"
@@ -435,6 +436,20 @@ cadnext::Result<AcisSatWriteReport> writeDxfSolids(kernel::OcctKernel& kernel,
         report.largestBoundaryTolerance = std::max(report.largestBoundaryTolerance, part.largestBoundaryTolerance);
     }
     bytes += "0\nENDSEC\n0\nEOF\n";
+    if (binary) {
+        // The same groups, packed. Read back before publishing: every group must come out as written.
+        QByteArray packed;
+        QString error;
+        std::vector<DxfGroup> written, restored;
+        if (!encodeBinaryDxf(bytes, packed, error) || !decodeDxfGroups(bytes, written, error) ||
+            !decodeDxfGroups(packed, restored, error))
+            return R::fail({ErrorCode::SerializationFailed, "Binary DXF export: " + error.toStdString()});
+        bool same = written.size() == restored.size();
+        for (std::size_t i = 0; same && i < written.size(); ++i)
+            same = written[i].code == restored[i].code && written[i].value == restored[i].value;
+        if (!same) return R::fail({ErrorCode::SerializationFailed, "Binary DXF export readback: groups differ"});
+        bytes = std::move(packed);
+    }
     // Match the native reader's bound before publishing an unreadable document.
     if (bytes.size() > 256ll * 1024 * 1024)
         return R::fail({ErrorCode::SerializationFailed, "DXF export exceeds the reader's 256 MiB limit"});

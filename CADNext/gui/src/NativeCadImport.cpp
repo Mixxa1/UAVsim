@@ -1,7 +1,9 @@
 #include "cadnext/gui/NativeCadImport.hpp"
+#include "cadnext/gui/NativeCompoundFile.hpp"
 #include "cadnext/gui/NativeDwgImport.hpp"
 #include "cadnext/gui/NativeKompasGeometry.hpp"
 #include "cadnext/gui/NativeParasolidXt.hpp"
+#include "cadnext/gui/NativeSolidWorksConfiguration.hpp"
 
 #include <QDir>
 #include <QFile>
@@ -314,12 +316,21 @@ bool inflateExact(const char* source, quint32 packedSize, quint32 unpackedSize,
            stream.total_out == unpackedSize;
 }
 
-// SOLIDWORKS 2015+ archive entries: an obfuscated name followed by raw deflate.
+// Legacy CFB storage or SOLIDWORKS 2015+ archive entries.
 bool solidWorksEntry(const QByteArray& bytes, const QByteArray& wanted,
                     QByteArray& payload, bool& found) {
     found = false;
     payload.clear();
     if (bytes.size() < 8) return false;
+    if (bytes.startsWith(QByteArray::fromHex("d0cf11e0a1b11ae1"))) {
+        CompoundFile file; QString error;
+        if (!decodeCompoundFile(bytes, file, error)) return false;
+        for (const auto& entry : file.entries)
+            if (entry.kind == CompoundFileEntry::Kind::Stream && entry.path == QString::fromUtf8(wanted)) {
+                found = true; payload = entry.data; break;
+            }
+        return true;
+    }
     const unsigned shift = uchar(bytes[7]) & 7u;
     const QByteArray marker = QByteArray::fromHex("140006000800");
     qsizetype search = 8;
@@ -345,71 +356,15 @@ bool solidWorksEntry(const QByteArray& bytes, const QByteArray& wanted,
     }
 }
 
-// CMgrHdr2 is an MFC archive of dmConfigMgrHeader_c and dmConfigHeader_c,
-// schema 1. Its names use the MFC CString length/Unicode encoding; the integer
-// following the name is the exact Config-N storage id (not its position in a list).
+// The shared native codec consumes the manager footer and both stamp layouts;
+// names are mapped by storage id, including inactive and derived configurations.
 bool solidWorksConfigurationNames(const QByteArray& data, QMap<QString, QString>& names) {
-    qsizetype at = 0;
-    const auto word = [&](quint16& value) {
-        if (at + 2 > data.size()) return false;
-        value = u16(data, at); at += 2; return true;
-    };
-    const auto integer = [&](quint32& value) {
-        if (at + 4 > data.size()) return false;
-        value = u32(data, at); at += 4; return true;
-    };
-    const auto objectClass = [&](const QByteArray& expected, bool repeated) {
-        quint16 tag = 0, schema = 0, length = 0;
-        if (!word(tag)) return false;
-        if (repeated && tag == 0x8003) return true; // class 3, after manager class/object
-        if (tag != 0xffff || !word(schema) || schema != 1 || !word(length) ||
-            length != expected.size() || at + length > data.size()) return false;
-        const bool same = data.mid(at, length) == expected;
-        at += length;
-        return same;
-    };
-    const auto string = [&](QString& value) {
-        const auto length = [&](quint32& count) {
-            if (at >= data.size()) return false;
-            count = uchar(data[at++]);
-            if (count != 0xff) return true;
-            quint16 n = 0;
-            if (!word(n)) return false;
-            count = n;
-            return n != 0xffff || integer(count);
-        };
-        quint32 count = 0;
-        if (!length(count)) return false;
-        const bool unicode = count == 0xfffe;
-        if (unicode && !length(count)) return false;
-        if (count > 4096 || quint64(at) + quint64(count) * (unicode ? 2 : 1) > quint64(data.size())) return false;
-        if (unicode) {
-            std::u16string chars;
-            chars.reserve(count);
-            for (quint32 i = 0; i < count; ++i) { chars.push_back(char16_t(u16(data, at))); at += 2; }
-            value = QString::fromUtf16(chars.data(), qsizetype(chars.size()));
-        } else {
-            value = QString::fromLatin1(data.constData() + at, count);
-            at += count;
-        }
-        return !value.contains(QChar(u'\0'));
-    };
-    quint16 count = 0;
-    if (!objectClass("dmConfigMgrHeader_c", false) || !word(count) || count == 0 || count > 4096) return false;
-    QSet<QString> usedNames;
-    for (quint16 i = 0; i < count; ++i) {
-        quint32 version = 0, id = 0, flags = 0, parent = 0, reserved = 0;
-        QString name, display, description, partName;
-        if (!objectClass("dmConfigHeader_c", i > 0) || !integer(version) || version != 1 ||
-            !string(name) || name.isEmpty() || !integer(id) || !integer(flags) || !string(display) ||
-            !integer(parent) || !integer(reserved) || !string(description) || !string(partName) || at + 8 > data.size()) return false;
-        at += 8; // saved display flags and timestamp
-        const QString key = QString::number(id);
-        if (names.contains(key) || usedNames.contains(name)) return false;
-        names.insert(key, name);
-        usedNames.insert(name);
-    }
-    return at == data.size();
+    names.clear();
+    SolidWorksConfigurationHeader header;
+    QString error;
+    if (!decodeSolidWorksConfigurationHeader(data, header, error)) return false;
+    for (const auto& entry : header.entries) names.insert(QString::number(entry.id), entry.name);
+    return true;
 }
 
 bool parseParasolidHeader(const QByteArray& data, SolidWorksBodyStream& body) {
@@ -852,6 +807,58 @@ bool writeFreeCadShapes(const QString& path, const std::vector<FreeCadShape>& sh
     return writeStoredZip(path, members, error);
 }
 
+namespace {
+
+// KOMPAS-3D v24 keeps the product in MetaProductInfo (its MetaInfo is an XML declaration alone):
+// an infObject of type "embodiment" is the document in one of its variants, one of type
+// "component" a component, its file in <document><property id="fullFileName">. Properties are
+// named, not numbered, and nest (a material's name is not the object's): only an infObject's own
+// "name" counts. The document's name is that of the embodiment <product><document curEmbKey> names.
+bool readKompasProductInfo(const QByteArray& xml, KompasModelInfo& info, QString& error) {
+    QXmlStreamReader reader(xml);
+    QStringList open;
+    QString objectType, objectId, currentEmbodiment, firstEmbodiment;
+    QMap<QString, QString> embodimentNames;
+    while (!reader.atEnd()) {
+        reader.readNext();
+        if (reader.isStartElement()) {
+            const QString element = reader.name().toString();
+            const auto attributes = reader.attributes();
+            const QString parent = open.isEmpty() ? QString() : open.back();
+            if (element == QLatin1String("infObject")) {
+                objectType = attributes.value(QLatin1String("type")).toString();
+                objectId = attributes.value(QLatin1String("id")).toString();
+                if (objectType == QLatin1String("embodiment") && firstEmbodiment.isEmpty()) firstEmbodiment = objectId;
+            } else if (element == QLatin1String("document") && parent == QLatin1String("product")) {
+                currentEmbodiment = attributes.value(QLatin1String("curEmbKey")).toString();
+            } else if (element == QLatin1String("property") && !objectType.isEmpty()) {
+                const QString id = attributes.value(QLatin1String("id")).toString();
+                const QString value = attributes.value(QLatin1String("value")).toString();
+                if (value.isEmpty()) {
+                } else if (parent == QLatin1String("infObject") && id == QLatin1String("name")) {
+                    if (objectType == QLatin1String("embodiment")) embodimentNames.insert(objectId, value);
+                    else if (objectType == QLatin1String("component") && !info.objects.contains(value)) info.objects.push_back(value);
+                } else if (parent == QLatin1String("document") && id == QLatin1String("fullFileName") &&
+                           objectType == QLatin1String("component") && !info.externalFiles.contains(value)) {
+                    info.externalFiles.push_back(value);
+                }
+            }
+            open.push_back(element);
+        } else if (reader.isEndElement()) {
+            if (reader.name() == QLatin1String("infObject")) objectType.clear();
+            if (!open.isEmpty()) open.pop_back();
+        }
+    }
+    if (reader.hasError() || !open.isEmpty()) {
+        error = QObject::tr("Повреждён MetaProductInfo модели КОМПАС-3D: %1").arg(reader.errorString());
+        return false;
+    }
+    info.name = embodimentNames.value(embodimentNames.contains(currentEmbodiment) ? currentEmbodiment : firstEmbodiment);
+    return true;
+}
+
+} // namespace
+
 bool readKompasModelInfo(const QString& path, KompasModelInfo& info, QString& error) {
     info = {};
     QFile file(path);
@@ -893,17 +900,23 @@ bool readKompasModelInfo(const QString& path, KompasModelInfo& info, QString& er
     }
     QXmlStreamReader reader(xml);
     int objectDepth = 0;
+    bool rooted = false;
+    // An embodiment object is the document itself (its values repeat the document's), not one of its objects.
+    std::vector<bool> embodiment;
     while (!reader.atEnd()) {
         reader.readNext();
         if (reader.isStartElement()) {
+            rooted = true;
             if (reader.name() == QLatin1String("object")) {
                 ++objectDepth;
+                embodiment.push_back(reader.attributes().value(QLatin1String("type")) == QLatin1String("embodiment"));
             } else if (reader.name() == QLatin1String("property")) {
                 const auto attributes = reader.attributes();
                 const QString id = attributes.value(QLatin1String("id")).toString();
                 const QString value = attributes.value(QLatin1String("value")).toString();
                 if (id == QLatin1String("5") && !value.isEmpty()) {
                     if (objectDepth == 0) info.name = value;
+                    else if (!embodiment.empty() && embodiment.back()) continue;
                     else if (!info.objects.contains(value)) info.objects.push_back(value);
                 } else if (id == QLatin1String("16") && !value.isEmpty() &&
                            !info.externalFiles.contains(value)) {
@@ -912,13 +925,55 @@ bool readKompasModelInfo(const QString& path, KompasModelInfo& info, QString& er
             }
         } else if (reader.isEndElement() && reader.name() == QLatin1String("object")) {
             --objectDepth;
+            if (!embodiment.empty()) embodiment.pop_back();
             if (objectDepth < 0) break;
         }
+    }
+    if (!rooted && entries.contains(QStringLiteral("MetaProductInfo"))) {
+        // A MetaInfo without a root element: the product is in MetaProductInfo.
+        QByteArray product;
+        if (entries.value(QStringLiteral("MetaProductInfo")).size > kMaxAssemblyManifestBytes ||
+            !extract(archive, entries, QStringLiteral("MetaProductInfo"), product, zipError)) {
+            error = QObject::tr("Не удалось прочитать метаданные КОМПАС-3D: %1").arg(zipError);
+            info = {};
+            return false;
+        }
+        if (!readKompasProductInfo(product, info, error)) {
+            info = {};
+            return false;
+        }
+        return true;
     }
     if (reader.hasError() || objectDepth != 0) {
         error = QObject::tr("Повреждён MetaInfo модели КОМПАС-3D: %1")
                     .arg(reader.errorString());
         info = {};
+        return false;
+    }
+    return true;
+}
+
+bool readKompasArchiveMember(const QString& path, const QString& member, QByteArray& bytes, QString& error) {
+    bytes.clear();
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || quint64(file.size()) > kMaxArchiveBytes) {
+        error = QObject::tr("Не удалось открыть модель КОМПАС-3D или файл слишком велик.");
+        return false;
+    }
+    const QByteArray archive = file.readAll();
+    QMap<QString, ZipEntry> entries;
+    QString zipError;
+    if (archive.startsWith("KF") || !zipEntries(archive, entries, zipError)) {
+        error = QObject::tr("Неподдерживаемый контейнер КОМПАС-3D: %1").arg(zipError);
+        return false;
+    }
+    if (!entries.contains(member)) {
+        error = QObject::tr("В модели КОМПАС-3D отсутствует %1.").arg(member);
+        return false;
+    }
+    if (!extract(archive, entries, member, bytes, zipError)) {
+        error = QObject::tr("Не удалось прочитать %1 модели КОМПАС-3D: %2").arg(member, zipError);
+        bytes.clear();
         return false;
     }
     return true;
@@ -955,10 +1010,65 @@ bool readKompasContents(const QString& path, QByteArray& contents, QString& erro
     return true;
 }
 
-bool readSolidWorksAssemblyComponents(const QString& path,
-                                      std::vector<SolidWorksAssemblyComponent>& components,
-                                      QString& error) {
-    components.clear();
+bool readKompasStorageImage(const QString& path, KompasStorageImage& image,
+                            QString& error) {
+    image = {};
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || quint64(file.size()) > kMaxArchiveBytes) {
+        error = QObject::tr("Не удалось открыть модель КОМПАС-3D или файл слишком велик.");
+        return false;
+    }
+    const QByteArray archive = file.readAll();
+    if (archive.startsWith("KF")) {
+        error = QObject::tr("Старый бинарный контейнер KF КОМПАС-3D пока не поддерживается.");
+        return false;
+    }
+    QMap<QString, ZipEntry> entries;
+    QString zipError;
+    if (!zipEntries(archive, entries, zipError) ||
+        !entries.contains(QStringLiteral("Contents")) ||
+        !entries.contains(QStringLiteral("SysInfo"))) {
+        error = QObject::tr("В модели КОМПАС-3D отсутствует поддерживаемое Contents или SysInfo: %1")
+                    .arg(zipError);
+        return false;
+    }
+    QByteArray contents, sysInfo;
+    if (!extract(archive, entries, QStringLiteral("Contents"), contents, zipError) ||
+        !extract(archive, entries, QStringLiteral("SysInfo"), sysInfo, zipError)) {
+        error = QObject::tr("Не удалось прочитать хранилище КОМПАС-3D: %1").arg(zipError);
+        return false;
+    }
+    KompasStorageIndex index;
+    if (!decodeKompasStorageIndex(contents, sysInfo, index, error)) return false;
+    image = {std::move(contents), std::move(sysInfo)};
+    return true;
+}
+
+bool readKompasFileInfo(const QString& path, KompasFileInfo& info, QString& error) {
+    info = {}; error.clear();
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly) || quint64(file.size()) > kMaxArchiveBytes) {
+        error = QObject::tr("Не удалось открыть модель КОМПАС-3D или файл слишком велик.");
+        return false;
+    }
+    QMap<QString, ZipEntry> entries;
+    const QByteArray archive = file.readAll();
+    if (!zipEntries(archive, entries, error) ||
+        !entries.contains(QStringLiteral("FileInfo"))) {
+        if (error.isEmpty()) error = QObject::tr("В модели КОМПАС-3D отсутствует FileInfo.");
+        return false;
+    }
+    if (entries.value(QStringLiteral("FileInfo")).size > 128 * 1024) {
+        error = QObject::tr("FileInfo модели КОМПАС-3D превышает 128 КиБ.");
+        return false;
+    }
+    QByteArray bytes;
+    return extract(archive, entries, QStringLiteral("FileInfo"), bytes, error) &&
+           decodeKompasFileInfo(bytes, info, error);
+}
+
+bool readSolidWorksAssemblyManifest(const QString& path, QByteArray& manifest, QString& error) {
+    manifest.clear();
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly) || quint64(file.size()) > kMaxArchiveBytes) {
         error = QObject::tr("Не удалось открыть сборку SOLIDWORKS или файл слишком велик.");
@@ -971,7 +1081,6 @@ bool readSolidWorksAssemblyComponents(const QString& path,
     }
     const QByteArray marker = QByteArray::fromHex("140006000800");
     const unsigned shift = static_cast<unsigned char>(bytes[7]) & 7u;
-    QByteArray manifest;
     qsizetype searchAt = 0;
     while (true) {
         const qsizetype markerAt = bytes.indexOf(marker, searchAt);
@@ -1016,6 +1125,15 @@ bool readSolidWorksAssemblyComponents(const QString& path,
         error = QObject::tr("Не найден список компонентов сборки SOLIDWORKS 2015+.");
         return false;
     }
+    return true;
+}
+
+bool readSolidWorksAssemblyComponents(const QString& path,
+                                      std::vector<SolidWorksAssemblyComponent>& components,
+                                      QString& error) {
+    components.clear();
+    QByteArray manifest;
+    if (!readSolidWorksAssemblyManifest(path, manifest, error)) return false;
 
     QMap<QString, QString> files;
     QMap<QString, QString> modelFiles;
@@ -1106,52 +1224,72 @@ bool readSolidWorksPartBodyStreams(const QString& path,
         return false;
     }
     const QByteArray bytes = file.readAll();
-    if (bytes.size() < 8 || static_cast<unsigned char>(bytes[4]) != 0 ||
+    const bool compound = bytes.startsWith(QByteArray::fromHex("d0cf11e0a1b11ae1"));
+    if (!compound && (bytes.size() < 8 || static_cast<unsigned char>(bytes[4]) != 0 ||
         static_cast<unsigned char>(bytes[5]) != 0 ||
         static_cast<unsigned char>(bytes[6]) != 0 ||
-        static_cast<unsigned char>(bytes[7]) != 4) {
+        static_cast<unsigned char>(bytes[7]) != 4)) {
         error = QObject::tr("Неподдерживаемая версия контейнера детали SOLIDWORKS.");
         return false;
     }
-    const QByteArray marker = QByteArray::fromHex("140006000800");
-    const unsigned shift = static_cast<unsigned char>(bytes[7]) & 7u;
     bool sawPartition = false;
-    qsizetype searchAt = 8;
-    while (true) {
-        const qsizetype at = bytes.indexOf(marker, searchAt);
-        if (at < 0) break;
-        searchAt = at + marker.size();
-        if (quint64(at) + 26 > quint64(bytes.size())) continue;
-        const quint32 crc = u32(bytes, at + 10);
-        const quint32 packedSize = u32(bytes, at + 14);
-        const quint32 unpackedSize = u32(bytes, at + 18);
-        const quint32 nameSize = u32(bytes, at + 22);
-        if (nameSize == 0 || nameSize > 512 ||
-            quint64(at) + 26 + nameSize > quint64(bytes.size())) continue;
-        QByteArray name = bytes.mid(at + 26, nameSize);
-        for (char& value : name) {
-            const auto byte = static_cast<unsigned char>(value);
-            value = static_cast<char>(shift == 0 ? byte :
-                                      ((byte << shift) | (byte >> (8 - shift))) & 0xffu);
+    if (compound) {
+        CompoundFile storage;
+        if (!decodeCompoundFile(bytes, storage, error)) return false;
+        for (const auto& entry : storage.entries) {
+            if (entry.kind != CompoundFileEntry::Kind::Stream ||
+                !entry.path.startsWith("Contents/Config-") || !entry.path.endsWith("-Partition")) continue;
+            const auto config = entry.path.mid(16, entry.path.size() - 16 - 10);
+            if (config.isEmpty()) continue;
+            sawPartition = true;
+            std::vector<SolidWorksBodyStream> parsed;
+            if (!parseParasolidSections(entry.data, config, parsed)) {
+                streams.clear();
+                error = QObject::tr("Раздел точной геометрии SOLIDWORKS %1 повреждён или имеет неизвестную структуру.").arg(entry.path);
+                return false;
+            }
+            streams.insert(streams.end(), std::make_move_iterator(parsed.begin()), std::make_move_iterator(parsed.end()));
         }
-        if (!name.startsWith("Contents/Config-") || !name.endsWith("-Partition")) continue;
-        const QByteArray config = name.mid(16, name.size() - 16 - 10);
-        if (config.isEmpty()) continue;
-        sawPartition = true;
-        const quint64 payloadAt = quint64(at) + 26 + nameSize;
-        if (packedSize == 0 || unpackedSize == 0 ||
-            packedSize > kMaxEntryBytes || unpackedSize > kMaxEntryBytes ||
-            payloadAt + packedSize > quint64(bytes.size())) continue;
-        QByteArray payload;
-        if (!inflateExact(bytes.constData() + payloadAt, packedSize, unpackedSize,
-                          -MAX_WBITS, payload)) continue;
-        if (crc32(0, reinterpret_cast<const Bytef*>(payload.constData()),
-                  static_cast<uInt>(payload.size())) != crc) continue;
-        std::vector<SolidWorksBodyStream> parsed;
-        if (!parseParasolidSections(payload, QString::fromLatin1(config), parsed)) continue;
-        streams.insert(streams.end(), std::make_move_iterator(parsed.begin()),
-                       std::make_move_iterator(parsed.end()));
-        searchAt = qsizetype(payloadAt + packedSize);
+    } else {
+        const QByteArray marker = QByteArray::fromHex("140006000800");
+        const unsigned shift = static_cast<unsigned char>(bytes[7]) & 7u;
+        qsizetype searchAt = 8;
+        while (true) {
+            const qsizetype at = bytes.indexOf(marker, searchAt);
+            if (at < 0) break;
+            searchAt = at + marker.size();
+            if (quint64(at) + 26 > quint64(bytes.size())) continue;
+            const quint32 crc = u32(bytes, at + 10);
+            const quint32 packedSize = u32(bytes, at + 14);
+            const quint32 unpackedSize = u32(bytes, at + 18);
+            const quint32 nameSize = u32(bytes, at + 22);
+            if (nameSize == 0 || nameSize > 512 ||
+                quint64(at) + 26 + nameSize > quint64(bytes.size())) continue;
+            QByteArray name = bytes.mid(at + 26, nameSize);
+            for (char& value : name) {
+                const auto byte = static_cast<unsigned char>(value);
+                value = static_cast<char>(shift == 0 ? byte :
+                                          ((byte << shift) | (byte >> (8 - shift))) & 0xffu);
+            }
+            if (!name.startsWith("Contents/Config-") || !name.endsWith("-Partition")) continue;
+            const QByteArray config = name.mid(16, name.size() - 16 - 10);
+            if (config.isEmpty()) continue;
+            sawPartition = true;
+            const quint64 payloadAt = quint64(at) + 26 + nameSize;
+            if (packedSize == 0 || unpackedSize == 0 ||
+                packedSize > kMaxEntryBytes || unpackedSize > kMaxEntryBytes ||
+                payloadAt + packedSize > quint64(bytes.size())) continue;
+            QByteArray payload;
+            if (!inflateExact(bytes.constData() + payloadAt, packedSize, unpackedSize,
+                              -MAX_WBITS, payload)) continue;
+            if (crc32(0, reinterpret_cast<const Bytef*>(payload.constData()),
+                      static_cast<uInt>(payload.size())) != crc) continue;
+            std::vector<SolidWorksBodyStream> parsed;
+            if (!parseParasolidSections(payload, QString::fromLatin1(config), parsed)) continue;
+            streams.insert(streams.end(), std::make_move_iterator(parsed.begin()),
+                           std::make_move_iterator(parsed.end()));
+            searchAt = qsizetype(payloadAt + packedSize);
+        }
     }
     if (streams.empty()) {
         error = sawPartition

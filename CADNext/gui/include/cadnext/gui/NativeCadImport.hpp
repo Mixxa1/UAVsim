@@ -1,5 +1,8 @@
 #pragma once
 
+#include "cadnext/gui/NativeKompasStorage.hpp"
+#include "cadnext/gui/NativeKompasDocument.hpp"
+
 #include <QByteArray>
 #include <QString>
 #include <QStringList>
@@ -41,6 +44,20 @@ bool readKompasModelInfo(const QString& path, KompasModelInfo& info, QString& er
 // The caller owns the following C3D record decoding step.
 bool readKompasContents(const QString& path, QByteArray& contents, QString& error);
 
+// Extracts one named member (MetaInfo, FileInfo, Preview...) of a modern ZIP-based
+// KOMPAS document exactly as stored.
+bool readKompasArchiveMember(const QString& path, const QString& member, QByteArray& bytes, QString& error);
+
+// Reads both physical storage members of a modern KOMPAS archive and validates
+// the supported cluster index. Newer application versions are left to their
+// dedicated storage codec; this endpoint is for the image emitted by the
+// native writer above.
+bool readKompasStorageImage(const QString& path, KompasStorageImage& image,
+                            QString& error);
+
+// Reads and validates the native archive's FileInfo version/type declaration.
+bool readKompasFileInfo(const QString& path, KompasFileInfo& info, QString& error);
+
 struct SolidWorksAssemblyComponent {
     QString name;
     QString sourcePath;
@@ -48,6 +65,10 @@ struct SolidWorksAssemblyComponent {
     std::array<double, 16> transform{};
     bool virtualComponent = false;
 };
+
+// The component tree of a modern SOLIDWORKS assembly (swXmlContents/COMPINSTANCETREE, XML), found
+// by its local record.
+bool readSolidWorksAssemblyManifest(const QString& path, QByteArray& manifest, QString& error);
 
 // Reads component instances and transforms from a modern SOLIDWORKS assembly.
 // This does not decode exact part geometry.
@@ -89,7 +110,7 @@ bool readSolidWorksPartConfigurations(const QString& path,
                                      std::vector<SolidWorksConfiguration>& configurations,
                                      QString& error);
 
-// Extracts the exact native Parasolid streams from modern SOLIDWORKS parts.
+// Extracts exact native Parasolid streams from supported modern and CFB parts.
 // A partition is the saved current state; following deltas are rollback history,
 // not geometry updates to be applied to that state.
 bool readSolidWorksPartBodyStreams(const QString& path,

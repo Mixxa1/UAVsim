@@ -10,6 +10,7 @@
 
 #include <cassert>
 #include <bit>
+#include <cstring>
 #include <cmath>
 
 namespace {
@@ -132,6 +133,52 @@ EOF
     assert(cadnext::gui::readDxfSketch(binaryPath, roundtrip, error));
     assert(roundtrip.entities.size() == data.entities.size());
     assert(std::fabs(roundtrip.entities[1].circle.radius - 0.0127) < 1e-12);
+
+    // The binary DXF of before AutoCAD R13: a group code is one byte, 255 announces a two-byte
+    // code. The same sketch in that form (built here from Autodesk's description: no file of it
+    // is among the samples) reads as the same groups and the same sketch.
+    {
+        std::vector<cadnext::gui::DxfGroup> groups;
+        assert(cadnext::gui::decodeDxfGroups(binaryExport, groups, error));
+        QByteArray narrow = binaryExport.left(22);
+        const auto put = [&narrow](quint64 value, int width) {
+            for (int i = 0; i < width; ++i) narrow.append(char((value >> (8 * i)) & 255));
+        };
+        const auto group = [&](int code, const QByteArray& value) {
+            if (code >= 255) { put(255, 1); put(quint64(code), 2); }
+            else put(quint64(code), 1);
+            if (code <= 9 || (code >= 100 && code <= 105) || (code >= 1000 && code <= 1009)) { narrow += value; narrow += '\0'; }
+            else if ((code >= 10 && code <= 59) || (code >= 1010 && code <= 1059)) {
+                const double number = value.toDouble();
+                quint64 raw; std::memcpy(&raw, &number, 8); put(raw, 8);
+            } else if ((code >= 60 && code <= 79) || code == 1070) put(quint64(value.toLongLong()), 2);
+            else if (code == 1071) put(quint64(value.toLongLong()), 4);
+            else assert(false);
+        };
+        for (const auto& g : groups) group(g.code, g.value);
+        std::vector<cadnext::gui::DxfGroup> restored;
+        assert(cadnext::gui::decodeDxfGroups(narrow, restored, error));
+        assert(restored.size() == groups.size() && narrow.size() == binaryExport.size() - qsizetype(groups.size()));
+        for (std::size_t i = 0; i < groups.size(); ++i)
+            assert(restored[i].code == groups[i].code && restored[i].value == groups[i].value);
+        const QString narrowPath = directory.filePath(QStringLiteral("exported-binary-r12.dxf"));
+        QFile narrowFile(narrowPath);
+        assert(narrowFile.open(QIODevice::WriteOnly) && narrowFile.write(narrow) == narrow.size());
+        narrowFile.close();
+        cadnext::gui::DxfSketchData old;
+        assert(cadnext::gui::readDxfSketch(narrowPath, old, error));
+        assert(old.entities.size() == data.entities.size() && old.drawingUnits == 4);
+        assert(std::fabs(old.entities[1].circle.radius - 0.0127) < 1e-12);
+        // Extended data: codes above 255 behind the 255 byte, a 16-bit and a 32-bit integer, a real.
+        narrow = binaryExport.left(22);
+        group(0, "SECTION"); group(2, "ENTITIES"); group(0, "POINT"); group(1001, "APP"); group(1070, "-7");
+        group(1071, "-70000"); group(1040, "0.5"); group(0, "ENDSEC"); group(0, "EOF");
+        assert(cadnext::gui::decodeDxfGroups(narrow, restored, error) && restored.size() == 9);
+        assert(restored[3].code == 1001 && restored[3].value == "APP" && restored[4].code == 1070 && restored[4].value == "-7");
+        assert(restored[5].code == 1071 && restored[5].value == "-70000" && restored[6].code == 1040 && restored[6].value.toDouble() == 0.5);
+        // A code cut short is refused.
+        assert(!cadnext::gui::decodeDxfGroups(narrow.left(22 + 9 + 10 + 7 + 1), restored, error) && restored.empty());
+    }
 
     QByteArray independentBinary("AutoCAD Binary DXF\r\n\x1a\0", 22);
     const auto integer = [&independentBinary](quint64 value, int width) {

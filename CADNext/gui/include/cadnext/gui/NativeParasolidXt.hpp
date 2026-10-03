@@ -86,6 +86,9 @@ struct ParasolidXtPlanarFace {
 struct ParasolidXtBody {
     quint32 index = 0;
     quint8 bodyType = 0; // SCH_body_type: 1 solid, 2 wire, 3 sheet, 6 general
+    quint32 attributeHead = 0;
+    quint32 attributeChains = 0;
+    quint32 highestNodeId = 0;
 };
 
 struct ParasolidXtTransform {
@@ -111,14 +114,48 @@ struct ParasolidXtAssembly {
     quint32 firstInstance = 0;
 };
 
-// An attribute resolved to its definition's name and its values, e.g.
-// "SDL/TYSA_NAME" with one string, "SDL/TYSA_COLOUR" with three reals.
+// An attribute resolved to its definition's name and its string, real or signed
+// integer values, e.g. "SDL/TYSA_NAME" or "LAST_BODY_MODIFYING_FEATURE_ID".
 struct ParasolidXtAttribute {
     quint32 index = 0;
     quint32 ownerIndex = 0;
     QByteArray definition;
     std::vector<QByteArray> strings;
     std::vector<double> reals;
+    std::vector<qint32> integers;
+    quint32 definitionIndex = 0;
+    quint32 next = 0;
+    quint32 previous = 0;
+    quint32 nextOfType = 0;
+    quint32 previousOfType = 0;
+    std::vector<quint32> fieldIndices; // includes explicitly null pointer fields
+};
+
+struct ParasolidXtAttributeDefinition {
+    quint32 index = 0;
+    quint32 next = 0;
+    QByteArray name;
+    quint32 typeId = 0;
+    std::array<quint8, 8> actions{};
+    std::array<bool, 14> legalOwners{};
+    std::vector<quint8> fieldTypes;
+};
+
+struct ParasolidXtAttributeList {
+    quint32 index = 0;
+    quint32 owner = 0;
+    quint32 type = 0;
+    quint32 length = 0;
+    quint32 blockLength = 0;
+    quint32 firstBlock = 0;
+};
+
+struct ParasolidXtAttributeListBlock {
+    quint32 index = 0;
+    quint32 count = 0;
+    quint32 indexMapOffset = 0;
+    quint32 next = 0;
+    std::vector<quint32> entries; // zero padding is retained
 };
 
 struct ParasolidXtTopology {
@@ -146,6 +183,10 @@ struct ParasolidXtTopology {
     std::vector<ParasolidXtInstance> instances;
     std::vector<ParasolidXtAssembly> assemblies;
     std::vector<ParasolidXtAttribute> attributes;
+    std::vector<ParasolidXtAttributeDefinition> attributeDefinitions;
+    std::vector<ParasolidXtAttributeList> attributeLists;
+    std::vector<ParasolidXtAttributeListBlock> attributeListBlocks;
+    quint32 worldAttributeDefinitionHead = 0;
     QHash<quint32, quint16> nodeTypes;
 };
 
@@ -175,6 +216,12 @@ struct ParasolidXtFaceWire {
 // and analytic surfaces into a CADNext BRep yet.
 bool readParasolidXtTopology(const QByteArray& partition,
                             ParasolidXtTopology& topology, QString& error);
+
+// Raw neutral-binary transmit payload, without a standalone file's printable
+// keyword header. Used by native stored-feature bodies. Its root is a BODY or
+// ASSEMBLY; a current-state WORLD partition is deliberately rejected here.
+bool readParasolidXtTransmitStream(const QByteArray& stream,
+                                  ParasolidXtTopology& topology, QString& error);
 
 // Decodes a standalone Parasolid transmit file: text (.x_t) or neutral binary
 // (.x_b), written by Parasolid V14 or later (embedded schema). Both encodings

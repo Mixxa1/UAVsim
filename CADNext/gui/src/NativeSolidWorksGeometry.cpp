@@ -1,4 +1,7 @@
 #include "cadnext/gui/NativeSolidWorksGeometry.hpp"
+#include "cadnext/gui/NativeCompoundFile.hpp"
+#include "cadnext/gui/NativeSolidWorksFeatureBodies.hpp"
+#include "cadnext/gui/NativeSolidWorksPackage.hpp"
 
 #include "cadnext/gui/NativeCadImport.hpp"
 #include "cadnext/gui/NativeParasolidXt.hpp"
@@ -10,10 +13,13 @@
 #include <QSet>
 #include <QObject>
 #include <QStringList>
+#include <QTemporaryDir>
+#include <QXmlStreamReader>
 
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <utility>
 
@@ -145,6 +151,51 @@ const SolidWorksBodyStream* selectPartition(const std::vector<SolidWorksBodyStre
         error = QObject::tr("Конфигурация «%1» не содержит сохранённой точной геометрии. Доступны: %2.")
                     .arg(configuration, available.join(QStringLiteral(", ")));
     return selected;
+}
+
+// The bodies the features of configuration `id` keep (Config-<id>-FeatureBodies/LocalBodies, or, in a
+// SOLIDWORKS 2020 document, inside Contents/Config-<id>-ResolvedFeatures), each a BODY-rooted
+// Parasolid transmit. False with an empty error when the document has neither.
+bool storedFeatureBodies(const QString& path, const QString& id, std::vector<QByteArray>& bodies, QString& error) {
+    bodies.clear();
+    error.clear();
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return false;
+    const QByteArray bytes = file.readAll();
+    const QByteArray wanted = "Config-" + id.toLatin1() + "-FeatureBodies/LocalBodies";
+    const QByteArray resolved = "Contents/Config-" + id.toLatin1() + "-ResolvedFeatures";
+    QByteArray section, features2020;
+    bool found = false;
+    QString ignored;
+    if (bytes.startsWith(QByteArray::fromHex("d0cf11e0a1b11ae1"))) {
+        CompoundFile storage;
+        if (!decodeCompoundFile(bytes, storage, ignored)) return false;
+        for (const auto& entry : storage.entries)
+            if (entry.kind == CompoundFileEntry::Kind::Stream && entry.path == QString::fromLatin1(wanted)) {
+                section = entry.data;
+                found = true;
+            }
+    } else {
+        SolidWorksPackage package;
+        if (!decodeSolidWorksPackage(bytes, package, ignored)) return false;
+        for (const auto& entry : package.entries)
+            if (entry.name == wanted) {
+                section = entry.data;
+                found = true;
+            } else if (entry.name == resolved) {
+                features2020 = entry.data;
+            }
+    }
+    if (!found) {
+        for (const auto& body : findSolidWorksStoredBodies(features2020)) bodies.push_back(body.parasolid);
+        return !bodies.empty();
+    }
+    std::vector<SolidWorksFeatureBodies> features;
+    if (!decodeSolidWorksFeatureBodies(section, features, error)) return false;
+    for (const auto& feature : features)
+        for (const auto& body : feature.bodies) bodies.push_back(body.parasolid);
+    if (bodies.empty()) error = QObject::tr("Операции детали SOLIDWORKS не хранят тел.");
+    return !bodies.empty();
 }
 
 QString configurationKey(const QString& path, const QString& configuration) {
@@ -361,9 +412,24 @@ bool readSolidWorksAnalyticPart(const QString& path, kernel::OcctKernel& kernel,
     std::vector<SolidWorksBodyStream> streams;
     if (!readSolidWorksPartBodyStreams(path, streams, error)) return false;
     const SolidWorksBodyStream* partition = selectPartition(streams, configuration, error);
+    if (!partition) return false;
     ParasolidXtTopology topology;
-    if (!partition || !readParasolidXtTopology(partition->parasolid, topology, error))
+    if (readParasolidXtTopology(partition->parasolid, topology, error) && topology.bodyCount > 0)
+        return buildParasolidXtAnalyticSolid(topology, kernel, shape, error, report);
+    // A part made from a foreign file (STEP, IGES, Parasolid…) keeps its geometry with the import
+    // feature, in Config-N-FeatureBodies/LocalBodies; its partition is a world without bodies.
+    std::vector<QByteArray> stored;
+    QString storedError;
+    if (!storedFeatureBodies(path, partition->configuration, stored, storedError)) {
+        if (!storedError.isEmpty()) error = storedError;
         return false;
+    }
+    if (stored.size() != 1) {
+        error = QObject::tr("Импортированная операция детали SOLIDWORKS хранит %1 тел; точный импорт сейчас строит одно тело.").arg(stored.size());
+        return false;
+    }
+    topology = {};
+    if (!readParasolidXtTransmitStream(stored.front(), topology, error)) return false;
     return buildParasolidXtAnalyticSolid(topology, kernel, shape, error, report);
 }
 
@@ -942,16 +1008,24 @@ bool buildParasolidXtAnalyticSolid(const ParasolidXtTopology& topology,
                     // around it (parm_1 to parm_2 are the SP-curve's own parameters).
                     const auto* surface = geometry.value(curve->links.value("surface"), nullptr);
                     const auto* planar = geometry.value(curve->links.value("b_curve"), nullptr);
-                    if (surface && surface->type == 52) {
-                        error = QObject::tr("SP-кривая грани %1 лежит на конусе: параметризация конуса XT не установлена — "
-                                            "нет данных.").arg(face.index);
-                        return false;
-                    }
                     if (!surface || !planar || !analyticSupport(*surface, segment.intersectionSurfaces[0]) ||
                         !planeCurve(*planar, segment.bspline)) {
                         error = QObject::tr("SP-кривая грани %1 на пока не поддерживаемой поверхности или кривой.")
                                     .arg(face.index);
                         return false;
+                    }
+                    if (surface->type == 52) {
+                        // Native cone SP curves use axial length for v. OCCT
+                        // uses generator length: z = v_occt * cos(half-angle).
+                        // Change the UV poles only; knots, weights and the SP
+                        // curve's own parameter retain their original values.
+                        const double cosine = surface->reals.value("cos_half_angle");
+                        if (!std::isfinite(cosine) || cosine <= 1e-10) {
+                            error = QObject::tr("SP-кривая грани %1: недопустимый угол конуса XT.")
+                                        .arg(face.index);
+                            return false;
+                        }
+                        for (auto& pole : segment.bspline.poles) pole.y /= cosine;
                     }
                     segment.kind = kernel::AnalyticEdgeKind::SurfaceCurve;
                     if (curve->links.value("surface") == face.surfaceIndex) {
@@ -1232,35 +1306,191 @@ bool buildParasolidXtAnalyticSolid(const ParasolidXtTopology& topology,
     return true;
 }
 
+namespace {
+
+std::array<double, 16> product(const std::array<double, 16>& a, const std::array<double, 16>& b) {
+    // Column-major 4×4: element (row i, column j) at 4j + i.
+    std::array<double, 16> c{};
+    for (int j = 0; j < 4; ++j)
+        for (int i = 0; i < 4; ++i)
+            for (int k = 0; k < 4; ++k) c[std::size_t(4 * j + i)] += a[std::size_t(4 * k + i)] * b[std::size_t(4 * j + k)];
+    return c;
+}
+
+// Where an assembly's part is: next to the assembly, or the copy inside it, written once to a
+// scratch folder that lives as long as this.
+class ComponentParts {
+public:
+    explicit ComponentParts(const QString& assembly) : assembly_(assembly) {}
+    QString path(const SolidWorksAssemblyComponent& component, QString& error) {
+        QString normalized = component.sourcePath;
+        normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
+        const QString fileName = normalized.section(QLatin1Char('/'), -1);
+        const QString beside = QFileInfo(assembly_).dir().filePath(fileName);
+        if (!fileName.isEmpty() && QFileInfo(fileName).suffix().compare(QLatin1String("sldprt"), Qt::CaseInsensitive) == 0 &&
+            QFileInfo::exists(beside))
+            return beside;
+        // ImportedComp/<file> holds a part SOLIDWORKS made from a foreign file, VirtualComp/<name> a
+        // virtual part (its file named <name>^<assembly>).
+        const QString stem = QFileInfo(fileName).completeBaseName().section(QLatin1Char('^'), 0, 0);
+        if (!fileName.isEmpty() && open(error)) {
+            for (const auto& entry : package_.entries) {
+                const QString name = QString::fromLatin1(entry.name);
+                const bool imported = name.compare(QLatin1String("ImportedComp/") + fileName, Qt::CaseInsensitive) == 0;
+                const bool embedded = component.virtualComponent &&
+                    name.compare(QLatin1String("VirtualComp/") + stem, Qt::CaseInsensitive) == 0;
+                if (!imported && !embedded) continue;
+                const QString target = scratch_->filePath(QString::number(written_.size()) + QLatin1Char('_') + fileName);
+                if (const auto known = written_.constFind(name); known != written_.constEnd()) return known.value();
+                QFile out(target);
+                if (!out.open(QIODevice::WriteOnly) || out.write(entry.data) != entry.data.size()) {
+                    error = QObject::tr("Не удалось извлечь вложенную деталь %1 из сборки.").arg(fileName);
+                    return {};
+                }
+                written_.insert(name, target);
+                return target;
+            }
+        }
+        error = QObject::tr("Для компонента %1 требуется файл %2 рядом со сборкой.").arg(component.name, fileName);
+        return {};
+    }
+
+private:
+    bool open(QString& error) {
+        if (opened_) return package_.entries.size() > 0;
+        opened_ = true;
+        QFile file(assembly_);
+        QString ignored;
+        if (!file.open(QIODevice::ReadOnly) || !decodeSolidWorksPackage(file.readAll(), package_, ignored)) return false;
+        scratch_ = std::make_unique<QTemporaryDir>();
+        if (!scratch_->isValid()) {
+            error = QObject::tr("Не удалось создать временную папку для вложенных деталей сборки.");
+            package_.entries.clear();
+            return false;
+        }
+        return true;
+    }
+    QString assembly_;
+    bool opened_ = false;
+    SolidWorksPackage package_;
+    std::unique_ptr<QTemporaryDir> scratch_;
+    QHash<QString, QString> written_;
+};
+
+} // namespace
+
+bool readSolidWorksAssemblyParts(const QString& path, std::vector<SolidWorksAssemblyComponent>& parts, QString& error) {
+    parts.clear();
+    error.clear();
+    QByteArray xml;
+    if (!readSolidWorksAssemblyManifest(path, xml, error)) return false;
+    struct Reference {
+        QString name, configuration, model;
+        bool isVirtual = false;
+        std::array<double, 16> transform{};
+    };
+    QHash<QString, QString> files, modelFiles;
+    QHash<QString, std::vector<Reference>> children;
+    QStringList models;
+    QString top;
+    QXmlStreamReader reader(xml);
+    while (!reader.atEnd()) {
+        reader.readNext();
+        if (reader.isEndElement() && reader.name() == QLatin1String("swModel") && !models.isEmpty()) models.removeLast();
+        if (!reader.isStartElement()) continue;
+        const auto attrs = reader.attributes();
+        const QString id = attrs.value(QLatin1String("id")).toString();
+        if (reader.name() == QLatin1String("swFile")) {
+            files.insert(id, attrs.value(QLatin1String("swPath")).toString());
+        } else if (reader.name() == QLatin1String("swModel")) {
+            modelFiles.insert(id, attrs.value(QLatin1String("swFileRef")).toString());
+            models.push_back(id);
+        } else if (reader.name() == QLatin1String("swConfiguration") && top.isEmpty()) {
+            top = attrs.value(QLatin1String("swModelRef")).toString();
+        } else if (reader.name() == QLatin1String("swReference")) {
+            Reference reference;
+            reference.name = attrs.value(QLatin1String("swName")).toString();
+            reference.configuration = attrs.value(QLatin1String("swConfigurationName")).toString();
+            reference.model = attrs.value(QLatin1String("swModelRef")).toString();
+            reference.isVirtual = attrs.value(QLatin1String("swIsVirtualComponent")) == QLatin1String("YES");
+            const QStringList values = attrs.value(QLatin1String("swTransform")).toString().simplified().split(QLatin1Char(' '), Qt::SkipEmptyParts);
+            bool valid = values.size() == 16;
+            for (qsizetype i = 0; valid && i < 16; ++i) {
+                reference.transform[std::size_t(i)] = values[i].toDouble(&valid);
+                valid = valid && std::isfinite(reference.transform[std::size_t(i)]);
+            }
+            if (!valid) {
+                error = QObject::tr("Некорректная матрица положения компонента %1.").arg(reference.name);
+                return false;
+            }
+            // A reference outside every model (a list without models) belongs to the top.
+            children[models.isEmpty() ? QString() : models.back()].push_back(std::move(reference));
+        }
+    }
+    if (reader.hasError()) {
+        error = QObject::tr("Некорректный список компонентов сборки: %1").arg(reader.errorString());
+        return false;
+    }
+    // Without a configuration the top is what no model holds.
+    if (top.isEmpty() || children.value(top).empty()) top = QString();
+    std::array<double, 16> identity{};
+    identity[0] = identity[5] = identity[10] = identity[15] = 1.0;
+    const std::function<bool(const QString&, const std::array<double, 16>&, const QString&, int)> walk =
+        [&](const QString& model, const std::array<double, 16>& placement, const QString& prefix, int depth) {
+            for (const Reference& reference : children.value(model)) {
+                const auto world = product(placement, reference.transform);
+                const QString name = prefix.isEmpty() ? reference.name : prefix + QLatin1Char('/') + reference.name;
+                if (!children.value(reference.model).empty()) {
+                    if (depth >= 32) {
+                        error = QObject::tr("Вложенность подсборок глубже 32 уровней или циклическая: %1.").arg(name);
+                        return false;
+                    }
+                    if (!walk(reference.model, world, name, depth + 1)) return false;
+                    continue;
+                }
+                SolidWorksAssemblyComponent part;
+                part.name = name;
+                part.configuration = reference.configuration;
+                part.virtualComponent = reference.isVirtual;
+                part.transform = world;
+                part.sourcePath = files.value(modelFiles.value(reference.model));
+                if (part.sourcePath.isEmpty()) {
+                    error = QObject::tr("Не найдена ссылка на файл компонента %1.").arg(name);
+                    return false;
+                }
+                parts.push_back(std::move(part));
+            }
+            return true;
+        };
+    if (!walk(top, identity, {}, 0)) {
+        parts.clear();
+        return false;
+    }
+    if (parts.empty()) {
+        error = QObject::tr("Сборка SOLIDWORKS не содержит компонентов.");
+        return false;
+    }
+    return true;
+}
+
 bool readSolidWorksPlanarAssembly(const QString& path, kernel::OcctKernel& kernel,
                                  std::vector<SolidWorksImportedBody>& bodies,
                                  QString& error) {
     bodies.clear();
     std::vector<SolidWorksAssemblyComponent> components;
-    if (!readSolidWorksAssemblyComponents(path, components, error)) return false;
+    if (!readSolidWorksAssemblyParts(path, components, error)) return false;
     if (components.empty()) {
         error = QObject::tr("Сборка SOLIDWORKS не содержит компонентов.");
         return false;
     }
-    const QDir directory = QFileInfo(path).dir();
+    ComponentParts located(path);
     QHash<QString, std::vector<kernel::PlanarFacePatch>> cache;
     for (const auto& component : components) {
-        if (component.virtualComponent) {
-            error = QObject::tr("Встроенный компонент %1 пока нельзя извлечь "
-                                "как точное тело.").arg(component.name);
-            bodies.clear();
-            return false;
-        }
         QString normalized = component.sourcePath;
         normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
         const QString fileName = normalized.section(QLatin1Char('/'), -1);
-        const QString partPath = directory.filePath(fileName);
-        if (fileName.isEmpty() ||
-            QFileInfo(fileName).suffix().compare(QLatin1String("sldprt"),
-                                              Qt::CaseInsensitive) != 0 ||
-            !QFileInfo::exists(partPath)) {
-            error = QObject::tr("Для компонента %1 требуется файл %2 рядом со сборкой.")
-                        .arg(component.name, fileName);
+        const QString partPath = located.path(component, error);
+        if (partPath.isEmpty()) {
             bodies.clear();
             return false;
         }
@@ -1303,30 +1533,19 @@ bool readSolidWorksAnalyticAssembly(const QString& path, kernel::OcctKernel& ker
     bodies.clear();
     if (report) *report = {};
     std::vector<SolidWorksAssemblyComponent> components;
-    if (!readSolidWorksAssemblyComponents(path, components, error)) return false;
+    if (!readSolidWorksAssemblyParts(path, components, error)) return false;
     if (components.empty()) {
         error = QObject::tr("Сборка SOLIDWORKS не содержит компонентов.");
         return false;
     }
-    const QDir directory = QFileInfo(path).dir();
+    ComponentParts located(path);
     QHash<QString, kernel::ShapeHandle> cache;
     for (const auto& component : components) {
-        if (component.virtualComponent) {
-            error = QObject::tr("Встроенный компонент %1 пока нельзя извлечь "
-                                "как точное тело.").arg(component.name);
-            bodies.clear();
-            return false;
-        }
         QString normalized = component.sourcePath;
         normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
         const QString fileName = normalized.section(QLatin1Char('/'), -1);
-        const QString partPath = directory.filePath(fileName);
-        if (fileName.isEmpty() ||
-            QFileInfo(fileName).suffix().compare(QLatin1String("sldprt"),
-                                              Qt::CaseInsensitive) != 0 ||
-            !QFileInfo::exists(partPath)) {
-            error = QObject::tr("Для компонента %1 требуется файл %2 рядом со сборкой.")
-                        .arg(component.name, fileName);
+        const QString partPath = located.path(component, error);
+        if (partPath.isEmpty()) {
             bodies.clear();
             return false;
         }
@@ -1376,12 +1595,12 @@ bool readSolidWorksAssemblyProduct(const QString& path, kernel::OcctKernel& kern
     product = {};
     if (report) *report = {};
     std::vector<SolidWorksAssemblyComponent> components;
-    if (!readSolidWorksAssemblyComponents(path, components, error)) return false;
+    if (!readSolidWorksAssemblyParts(path, components, error)) return false;
     if (components.empty()) {
         error = QObject::tr("Сборка SOLIDWORKS не содержит компонентов.");
         return false;
     }
-    const QDir directory = QFileInfo(path).dir();
+    ComponentParts located(path);
     QHash<QString, int> parts; // SLDPRT path and configuration -> part index
     // How many distinct parts there are to build, for the progress.
     QSet<QString> distinct;
@@ -1393,22 +1612,11 @@ bool readSolidWorksAssemblyProduct(const QString& path, kernel::OcctKernel& kern
     kernel::ProductAssembly root;
     root.name = QFileInfo(path).completeBaseName().toStdString();
     for (const auto& component : components) {
-        if (component.virtualComponent) {
-            error = QObject::tr("Встроенный компонент %1 пока нельзя извлечь "
-                                "как точное тело.").arg(component.name);
-            return false;
-        }
         QString normalized = component.sourcePath;
         normalized.replace(QLatin1Char('\\'), QLatin1Char('/'));
         const QString fileName = normalized.section(QLatin1Char('/'), -1);
-        const QString partPath = directory.filePath(fileName);
-        if (fileName.isEmpty() ||
-            QFileInfo(fileName).suffix().compare(QLatin1String("sldprt"), Qt::CaseInsensitive) != 0 ||
-            !QFileInfo::exists(partPath)) {
-            error = QObject::tr("Для компонента %1 требуется файл %2 рядом со сборкой.")
-                        .arg(component.name, fileName);
-            return false;
-        }
+        const QString partPath = located.path(component, error);
+        if (partPath.isEmpty()) return false;
         const QString key = configurationKey(partPath, component.configuration);
         if (!parts.contains(key)) {
             if (progress) {

@@ -1,5 +1,7 @@
 #include "cadnext/gui/AssemblyStepExchange.hpp"
 #include "cadnext/gui/NativeKompasC3d.hpp"
+#include "cadnext/gui/NativeKompasAssembly.hpp"
+#include "cadnext/gui/NativeKompasWriter.hpp"
 #include "cadnext/gui/NativeSolidWorksGeometry.hpp"
 
 #include "cadnext/Document.hpp"
@@ -12,9 +14,11 @@
 #include "cadnext/gui/ParasolidXtWriter.hpp"
 #include "cadnext/kernel/OcctKernel.hpp"
 
+#include <QDir>
 #include <QFileInfo>
 #include <QObject>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <functional>
@@ -197,6 +201,104 @@ cadnext::Result<AssemblyExchangeReport> exportAssemblyToParasolid(const std::str
     const auto written = writeParasolidXtProduct(exchange, structure, xtPath, encoding);
     if (!written.isOk()) return R::fail(written.error());
     report.warnings.insert(report.warnings.end(), written.value().warnings.begin(), written.value().warnings.end());
+    return R::ok(std::move(report));
+}
+
+cadnext::Result<AssemblyExchangeReport> exportAssemblyToKompas(const std::string& cadasmPath, const std::string& a3dPath) {
+    using R = cadnext::Result<AssemblyExchangeReport>;
+    kernel::OcctKernel exchange;
+    if (!exchange.isAvailable()) return R::fail({ErrorCode::KernelUnavailable, "запись КОМПАС-3D требует сборки с OCCT"});
+    kernel::ProductStructure structure;
+    AssemblyExchangeReport report;
+    if (const auto collected = collectAssemblyProduct(cadasmPath, exchange, structure, report); !collected.isOk())
+        return R::fail(collected.error());
+    if (structure.assemblies.empty()) return R::fail({ErrorCode::InvalidArgument, "в сборке нет ни одного вхождения"});
+    // Leaf occurrences from the root, placements composed (the parent's rotation, then its translation).
+    struct Leaf {
+        int part;
+        kernel::ProductPlacement placement;
+    };
+    std::vector<Leaf> leaves;
+    bool nested = false;
+    const auto compose = [](const kernel::ProductPlacement& a, const kernel::ProductPlacement& b) {
+        const auto& p = a.rotation;
+        const auto& q = b.rotation;
+        kernel::ProductPlacement c;
+        c.rotation = {p[0] * q[0] - p[1] * q[1] - p[2] * q[2] - p[3] * q[3], p[0] * q[1] + p[1] * q[0] + p[2] * q[3] - p[3] * q[2],
+                      p[0] * q[2] - p[1] * q[3] + p[2] * q[0] + p[3] * q[1], p[0] * q[3] + p[1] * q[2] - p[2] * q[1] + p[3] * q[0]};
+        // b's translation turned by a's rotation (v' = v + 2w(r × v) + 2 r × (r × v)), then a's added.
+        const double w = p[0], rx = p[1], ry = p[2], rz = p[3];
+        const auto& v = b.translation;
+        const double cx = ry * v[2] - rz * v[1], cy = rz * v[0] - rx * v[2], cz = rx * v[1] - ry * v[0];
+        const double dx = ry * cz - rz * cy, dy = rz * cx - rx * cz, dz = rx * cy - ry * cx;
+        c.translation = {a.translation[0] + v[0] + 2 * (w * cx + dx), a.translation[1] + v[1] + 2 * (w * cy + dy),
+                         a.translation[2] + v[2] + 2 * (w * cz + dz)};
+        return c;
+    };
+    const std::function<void(int, const kernel::ProductPlacement&, int)> walk = [&](int assembly, const kernel::ProductPlacement& at, int depth) {
+        if (depth > 32 || assembly < 0 || std::size_t(assembly) >= structure.assemblies.size()) return;
+        for (const auto& instance : structure.assemblies[std::size_t(assembly)].instances) {
+            const auto placement = compose(at, instance.placement);
+            if (instance.isAssembly) {
+                nested = true;
+                walk(instance.definition, placement, depth + 1);
+            } else if (instance.definition >= 0 && std::size_t(instance.definition) < structure.parts.size()) {
+                leaves.push_back({instance.definition, placement});
+            }
+        }
+    };
+    walk(structure.root, kernel::ProductPlacement{}, 0);
+    if (leaves.empty()) return R::fail({ErrorCode::InvalidArgument, "в сборке нет деталей"});
+    if (leaves.size() > kKompasAssemblyLinkKeys)
+        return R::fail({ErrorCode::UnsupportedOperation,
+                        QObject::tr("Сборка КОМПАС-3D пока записывается до %1 вхождений, а здесь их %2: ключи связей MetaInfo для "
+                                    "большего числа компонентов неизвестны.").arg(kKompasAssemblyLinkKeys).arg(leaves.size()).toStdString()});
+    // One part file per part placed, its name the part's (made unique, and safe as a file name).
+    std::vector<KompasAssemblyPart> parts;
+    std::map<int, std::size_t> partIndex;
+    std::set<QString> names;
+    std::vector<KompasAssemblyComponent> components;
+    for (const auto& leaf : leaves) {
+        auto found = partIndex.find(leaf.part);
+        if (found == partIndex.end()) {
+            const auto& source = structure.parts[std::size_t(leaf.part)];
+            QString base = QString::fromStdString(source.name).trimmed();
+            for (QChar& ch : base)
+                if (QStringLiteral("/\\:*?\"<>|").contains(ch) || ch.unicode() < 32) ch = QLatin1Char('_');
+            if (base.isEmpty()) base = QStringLiteral("Part");
+            QString file = base + QStringLiteral(".m3d");
+            for (int k = 2; names.count(file.toLower()); ++k) file = QStringLiteral("%1 %2.m3d").arg(base).arg(k);
+            names.insert(file.toLower());
+            KompasAssemblyPart part;
+            part.fileName = file;
+            part.bodies = {{source.shape, 0, base}};
+            part.options.title = base;
+            if (source.colour) {
+                // Linear RGB to the 8-bit sRGB KOMPAS keeps.
+                quint32 rgb = 0;
+                for (const double linear : *source.colour) {
+                    const double v = std::clamp(linear, 0.0, 1.0);
+                    const double s = v <= 0.0031308 ? 12.92 * v : 1.055 * std::pow(v, 1 / 2.4) - 0.055;
+                    rgb = (rgb << 8) | quint32(std::lround(s * 255));
+                }
+                part.options.color = rgb;
+            }
+            found = partIndex.emplace(leaf.part, parts.size()).first;
+            parts.push_back(std::move(part));
+        }
+        components.push_back({found->second, leaf.placement});
+    }
+    KompasNativeWriteOptions options;
+    options.title = QString::fromStdString(structure.assemblies[std::size_t(structure.root)].name);
+    if (options.title.isEmpty()) options.title = QFileInfo(QString::fromStdString(a3dPath)).completeBaseName();
+    QString error;
+    if (!writeKompasNativeAssembly(exchange, parts, components, QString::fromStdString(a3dPath), error, options))
+        return R::fail({ErrorCode::SerializationFailed, error.toStdString()});
+    report.parts = int(parts.size());
+    report.assemblies = 1;
+    report.occurrences = int(components.size());
+    if (nested) report.warnings.push_back("Подсборки развёрнуты в одну сборку КОМПАС-3D: их вхождения записаны с итоговыми положениями.");
+    report.warnings.push_back("Детали записаны файлами .m3d рядом со сборкой.");
     return R::ok(std::move(report));
 }
 
