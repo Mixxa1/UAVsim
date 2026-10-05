@@ -152,7 +152,14 @@ final class MissionReplayPlayer: ObservableObject {
             batteryPercent: interpolateOptional(start.batteryPercent, end.batteryPercent, t),
             payloadStatusDescription: chosen.payloadStatusDescription,
             warningCount: max(start.warningCount, end.warningCount),
-            rfSnapshot: chosen.rfSnapshot
+            machNumber: interpolateOptional(start.machNumber, end.machNumber, t),
+            dynamicPressurePa: interpolateOptional(start.dynamicPressurePa, end.dynamicPressurePa, t),
+            loadFactor: interpolateOptional(start.loadFactor, end.loadFactor, t),
+            skinTemperatureK: interpolateOptional(start.skinTemperatureK, end.skinTemperatureK, t),
+            envelopeLimitKey: chosen.envelopeLimitKey,
+            envelopeWorstFraction: interpolateOptional(start.envelopeWorstFraction, end.envelopeWorstFraction, t),
+            rfSnapshot: chosen.rfSnapshot,
+            world: MissionReplayWorldSnapshot.interpolated(start.world, end.world, fraction: t)
         )
     }
 

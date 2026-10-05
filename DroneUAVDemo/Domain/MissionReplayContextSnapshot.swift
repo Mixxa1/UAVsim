@@ -27,4 +27,14 @@ struct MissionReplayContextSnapshot: Codable, Equatable {
     let hasPayloadAttachedAtStart: Bool
 
     let recordedAtAppVersion: String?
+    var terrainDensity: Float? = nil
+    /// Local map package reference, rather than a copy of gigabytes of terrain in each flight.
+    var importedWorld: MissionReplayImportedWorldReference? = nil
+}
+
+struct MissionReplayImportedWorldReference: Codable, Equatable {
+    enum Kind: String, Codable { case photogrammetric, openData }
+    var kind: Kind
+    var identifier: String
+    var tileKey: String? = nil
 }

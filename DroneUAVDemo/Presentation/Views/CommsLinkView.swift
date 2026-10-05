@@ -58,7 +58,7 @@ struct CommsLinkView<RadioEquipment: View>: View {
                     }
                 }
 
-                Text("comms_link.subtitle")
+                Text(LocalizedStringKey(controlLinkType == .radio ? "comms_link.overview.radio" : "comms_link.subtitle"))
                     .font(.caption2)
                     .foregroundStyle(GroundControlPalette.textSecondary.opacity(0.85))
                     .fixedSize(horizontal: false, vertical: true)
@@ -67,6 +67,14 @@ struct CommsLinkView<RadioEquipment: View>: View {
                     radioLinkSection
                     radioEquipment
                 }
+
+                Text("comms_link.fiber.title")
+                    .font(.headline)
+                    .padding(.top, 4)
+                Text("comms_link.fiber.hint")
+                    .font(.caption2)
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
 
                 // Only configurable before mounting — a real reel isn't swapped mid-flight, and a
                 // severed one can't be "resized" back to working via the slider, only replaced.
@@ -93,7 +101,7 @@ struct CommsLinkView<RadioEquipment: View>: View {
                             Text("payload.fiber.reel_length")
                                 .font(.caption).foregroundStyle(GroundControlPalette.textPrimary.opacity(0.85))
                             Spacer()
-                            Text(String(format: "%.1f km", fiberModule.totalLengthMeters / 1000.0))
+                            Text(L10n.f("common.distance.km", fiberModule.totalLengthMeters / 1000.0))
                                 .font(.caption.monospacedDigit()).foregroundStyle(GroundControlPalette.textPrimary)
                         }
                         Slider(
@@ -125,7 +133,7 @@ struct CommsLinkView<RadioEquipment: View>: View {
                 }
 
                 Button(action: isAttached ? onDetach : onAttach) {
-                    Text(isAttached ? "comms_link.detach" : "comms_link.attach")
+                    Text(LocalizedStringKey(isAttached ? "comms_link.detach" : "comms_link.attach"))
                         .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(.borderedProminent)
@@ -166,7 +174,7 @@ struct CommsLinkView<RadioEquipment: View>: View {
                 Button {
                     onRiggingChange(fiberModule.reelClass, Double(preset))
                 } label: {
-                    Text(preset >= 1000 ? String(format: "%.1fkm", preset / 1000.0) : String(format: "%.0fm", preset))
+                    Text(preset >= 1000 ? L10n.f("common.distance.km", preset / 1000.0) : L10n.f("common.distance.m", preset))
                         .font(.caption2.monospacedDigit().weight(isSelected ? .bold : .regular))
                         .foregroundStyle(isSelected ? GroundControlPalette.textPrimary : GroundControlPalette.textSecondary)
                         .padding(.horizontal, 8)
@@ -200,7 +208,7 @@ struct CommsLinkView<RadioEquipment: View>: View {
             )
             telemetryRow(
                 titleKey: "comms_link.radio.zone",
-                value: NSLocalizedString(radioZoneTitleKey, comment: ""),
+                value: L10n.s(radioZoneTitleKey),
                 valueColor: radioZoneColor
             )
 
@@ -236,15 +244,15 @@ struct CommsLinkView<RadioEquipment: View>: View {
         VStack(alignment: .leading, spacing: 6) {
             telemetryRow(
                 titleKey: "comms_link.telemetry.remaining",
-                value: String(format: "%.1f / %.1f km", linkState.remainingLengthMeters / 1000.0, linkState.usableLengthMeters / 1000.0)
+                value: L10n.f("common.distance.remaining", linkState.remainingLengthMeters / 1000.0, linkState.usableLengthMeters / 1000.0)
             )
             telemetryRow(
                 titleKey: "comms_link.telemetry.deployed",
-                value: String(format: "%.0f m", linkState.deployedLengthMeters)
+                value: L10n.f("common.distance.m", linkState.deployedLengthMeters)
             )
             telemetryRow(
                 titleKey: "comms_link.telemetry.mass",
-                value: String(format: "%.1f kg", liveMassKg)
+                value: L10n.f("common.mass.kg", liveMassKg)
             )
             telemetryRow(
                 titleKey: "comms_link.telemetry.snag_risk",
@@ -371,7 +379,7 @@ private struct FiberSpoolIllustrationView: View {
                 Text(LocalizedStringKey(reelClass.titleKey))
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(GroundControlPalette.textSecondary)
-                Text(String(format: "%.1f km", totalLengthMeters / 1000.0))
+                Text(L10n.f("common.distance.km", totalLengthMeters / 1000.0))
                     .font(.caption2.monospacedDigit())
                     .foregroundStyle(GroundControlPalette.textPrimary)
             }

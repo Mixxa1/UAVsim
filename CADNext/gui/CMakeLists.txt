@@ -65,6 +65,7 @@ add_library(cadnext_gui
     include/cadnext/gui/PropertyPanel.hpp
     include/cadnext/gui/SketchToolBar.hpp
     include/cadnext/gui/ToolBar.hpp
+    include/cadnext/gui/ToolIcons.hpp
     include/cadnext/gui/UAVBodySceneBuilder.hpp
     include/cadnext/gui/UAVCatalogPreviewProvider.hpp
     include/cadnext/gui/UAVMountEditorDialog.hpp
@@ -136,6 +137,7 @@ add_library(cadnext_gui
     src/PropertyPanel.cpp
     src/SketchToolBar.cpp
     src/ToolBar.cpp
+    src/ToolIcons.cpp
     src/UAVBodySceneBuilder.cpp
     src/UAVCatalogPreviewProvider.cpp
     src/UAVMountEditorDialog.cpp

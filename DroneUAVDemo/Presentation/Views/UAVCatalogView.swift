@@ -8,7 +8,7 @@ struct UAVCatalogView: View {
     let onSelectEntry: (UAVCatalogEntry) -> Void
     let onEditAbstract: () -> Void
 
-    private let columns = [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+    private let columns = [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), spacing: 8, alignment: .top)]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -2,11 +2,8 @@ import Foundation
 
 /// Read-only collector: turns the live `WeatherModel` + map preset into a `ThermalEnvironmentContext`.
 ///
-/// This project has no real day/night or ambient-temperature system (verified by grep — no
-/// time-of-day / sun-elevation state anywhere). Ambient temperature and the rain/snow/fog/wind
-/// fields are therefore *synthesized* from the weather preset + intensity. `isNight` /
-/// `timeOfDayHours` are accepted as parameters for forward-compat but default to daytime; if a
-/// real day/night cycle is ever added, wire it in here first.
+/// Air temperature is estimated from the weather preset and follows the live world clock.
+/// It peaks after solar noon; surfaces retain their own material-dependent heating history.
 enum ThermalEnvironmentAdapter {
 
     /// Per-preset ambient temperature: (value at 0 intensity, value at full intensity).
@@ -37,9 +34,9 @@ enum ThermalEnvironmentAdapter {
 
         let ambientBounds = ambientRange(for: preset)
         var ambient = ambientBounds.calm + (ambientBounds.severe - ambientBounds.calm) * intensity
-        if isNight {
-            ambient -= 6.0
-        }
+        let hour = timeOfDayHours.truncatingRemainder(dividingBy: 24)
+        let dailyWarmth = (1 + cos((hour - 15) * .pi / 12)) * 0.5
+        ambient -= 6 * (1 - dailyWarmth)
 
         // Derived weather scalars. Each "active" preset has a floor so even a 0% slider reads
         // as the right kind of weather (matching the ground-material/tree-visual switches, which
@@ -99,7 +96,7 @@ enum ThermalEnvironmentAdapter {
         // dampened) cloud-cover suppression — at the snow/rain preset's high cloudiness this
         // keeps roofs/roads from heating up almost as much as on a clear day, which a partial
         // (×0.75) damping let happen (a sunlit roof under snow weather isn't physically sensible).
-        let sunExposure = isNight ? 0.0 : max(0.0, 1.0 - cloudiness)
+        let sunExposure = max(0, 1 - cloudiness) * WorldClock(startHour: hour).sunIntensityMultiplier
 
         let visibility = max(60.0, Double(weather.effectiveFactors.visibilityFactor) * 4000.0)
 

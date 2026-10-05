@@ -406,9 +406,9 @@ struct WorkbenchValidationInspector: View {
 /// editor at a time.
 struct WorkbenchValidationHub: View {
     @ObservedObject var viewModel: WorkbenchViewModel
-    @State private var selectedPanel: Panel = .overview
+    @Binding var selectedPanel: Panel
 
-    private enum Panel: String, CaseIterable, Identifiable {
+    enum Panel: String, CaseIterable, Identifiable {
         case overview
         case cfd
         case structural
@@ -441,6 +441,7 @@ struct WorkbenchValidationHub: View {
                 }
             }
             .pickerStyle(.segmented)
+            .fixedSize(horizontal: false, vertical: true)
             .labelsHidden()
 
             switch selectedPanel {
@@ -495,15 +496,15 @@ struct WorkbenchValidationHub: View {
             Text(L10n.s("workbench.validation.state"))
                 .font(.caption.weight(.bold))
                 .foregroundStyle(GroundControlPalette.textSecondary)
-            LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible())], spacing: 7) {
+            LazyVStack(spacing: 7) {
                 ForEach(viewModel.validation.evaluations, id: \.type) { evaluation in
                     HStack(spacing: 7) {
                         Circle()
                             .fill(WorkbenchValidationText.color(evaluation.status))
                             .frame(width: 7, height: 7)
                         Text(evaluation.type.displayName)
-                            .font(.system(size: 9, weight: .semibold))
-                            .lineLimit(1)
+                            .font(.system(size: 11, weight: .semibold))
+                            .fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: 2)
                         Text(WorkbenchValidationText.status(evaluation.status))
                             .font(.system(size: 8, weight: .heavy, design: .monospaced))
@@ -519,6 +520,12 @@ struct WorkbenchValidationHub: View {
                 .foregroundStyle(GroundControlPalette.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 3)
+            DisclosureGroup(L10n.s("workbench.validation.details")) {
+                WorkbenchValidationInspector(state: viewModel.validation)
+                    .padding(.top, 10)
+            }
+            .font(.system(size: 12, weight: .semibold))
+            .tint(GroundControlPalette.accent)
         }
     }
 }

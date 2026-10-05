@@ -9,6 +9,9 @@ final class MissionReplayRecorder {
 
     private var lastFrameTimestamp: TimeInterval?
     private var didReachFrameLimit: Bool = false
+    var visualNodeBaselines: [String: [String: MissionReplayNodeState]] = [:]
+    var visualNodePaths: [String: [ObjectIdentifier: String]] = [:]
+    var visualAssetIDs: [String: String] = [:]
 
     init(
         minFrameInterval: TimeInterval = 0.1,
@@ -20,6 +23,14 @@ final class MissionReplayRecorder {
 
     var isRecording: Bool { currentSession != nil }
     var currentSessionStartedAt: Date? { currentSession?.startedAt }
+
+    /// A durable snapshot of an ongoing flight. It has a fixed duration for playback, but does
+    /// not stop the producer: impacts and debris after the mission result still get recorded.
+    func checkpoint(at date: Date = Date()) -> MissionReplaySession? {
+        guard var session = currentSession else { return nil }
+        session.endedAt = date
+        return session
+    }
 
     func startSession(at date: Date = Date(), timestamp: TimeInterval = 0) {
         startSession(at: date, timestamp: timestamp, context: nil)
@@ -44,6 +55,9 @@ final class MissionReplayRecorder {
         )
         session.events.append(event)
         currentSession = session
+        visualNodeBaselines.removeAll()
+        visualNodePaths.removeAll()
+        visualAssetIDs.removeAll()
         lastFrameTimestamp = nil
         didReachFrameLimit = false
     }
@@ -61,25 +75,29 @@ final class MissionReplayRecorder {
         session.endedAt = date
         lastCompletedSession = session
         currentSession = nil
+        visualNodeBaselines.removeAll()
+        visualNodePaths.removeAll()
+        visualAssetIDs.removeAll()
         lastFrameTimestamp = nil
     }
 
     func discardCurrentSession() {
         currentSession = nil
+        visualNodeBaselines.removeAll()
+        visualNodePaths.removeAll()
+        visualAssetIDs.removeAll()
         lastFrameTimestamp = nil
         didReachFrameLimit = false
     }
 
     func updateRFArtifacts(_ artifacts: MissionReplayRFArtifacts) {
-        guard var session = currentSession else { return }
-        session.rfArtifacts = artifacts
-        currentSession = session
+        currentSession?.rfArtifacts = artifacts
     }
 
-    func recordFrame(_ frame: MissionReplayFrame) {
-        guard var session = currentSession else { return }
+    func recordFrame(_ frame: MissionReplayFrame, force: Bool = false) {
+        guard let count = currentSession?.frames.count else { return }
 
-        if session.frames.count >= maxFrameCount {
+        if count >= maxFrameCount {
             if !didReachFrameLimit {
                 didReachFrameLimit = true
                 let event = MissionReplayEvent(
@@ -89,24 +107,37 @@ final class MissionReplayRecorder {
                     message: L10n.f("replay.event.recording_limit_reached", language: L10n.currentLanguage(), maxFrameCount),
                     position: frame.position
                 )
-                session.events.append(event)
-                currentSession = session
+                currentSession?.events.append(event)
             }
             return
         }
 
-        if let last = lastFrameTimestamp {
+        if !force, let last = lastFrameTimestamp {
             guard frame.timestamp - last >= minFrameInterval else { return }
         }
 
-        session.frames.append(frame)
-        currentSession = session
+        currentSession?.frames.append(frame)
         lastFrameTimestamp = frame.timestamp
     }
 
+    var needsFrame: Bool {
+        guard let session = currentSession else { return false }
+        if session.frames.count >= maxFrameCount { return !didReachFrameLimit }
+        guard let lastFrameTimestamp else { return true }
+        return Date().timeIntervalSince(session.startedAt) - lastFrameTimestamp >= minFrameInterval
+    }
+
+    /// The producer archives geometry only on first encounter, not at the recording cadence.
+    func registerVisualAsset(id: String, makeData: () -> Data?) -> Bool {
+        guard currentSession != nil else { return false }
+        if currentSession?.visualAssets?[id] != nil { return true }
+        guard let data = makeData() else { return false }
+        if currentSession?.visualAssets == nil { currentSession?.visualAssets = [:] }
+        currentSession?.visualAssets?[id] = data
+        return true
+    }
+
     func recordEvent(_ event: MissionReplayEvent) {
-        guard var session = currentSession else { return }
-        session.events.append(event)
-        currentSession = session
+        currentSession?.events.append(event)
     }
 }

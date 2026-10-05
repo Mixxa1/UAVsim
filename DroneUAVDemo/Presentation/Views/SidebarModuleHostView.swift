@@ -16,7 +16,7 @@ enum GroundControlPalette {
 }
 
 struct SidebarModuleHostView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     @Binding var appLanguage: AppLanguage
 
     var body: some View {
@@ -62,7 +62,7 @@ struct SidebarModuleHostView: View {
 }
 
 private struct SidebarOperationalHeaderView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {

@@ -39,7 +39,7 @@ enum ReplayGizmoAxis: CaseIterable {
 
 // MARK: - Reconstruction status
 
-struct ReplayReconstructionStatus {
+struct ReplayReconstructionStatus: Equatable {
     enum Quality: String {
         case full
         case partial
@@ -211,6 +211,38 @@ final class MissionReplaySceneController {
     private var loadedFrames: [MissionReplayFrame] = []
     private var loadedEvents: [MissionReplayEvent] = []
     private var loadedContext: MissionReplayContextSnapshot?
+    private let worldVisuals = MissionReplayWorldVisuals()
+    private var importedWorld: (any FlyableWorld)?
+    private var importedWorldRoot: SCNNode?
+    private var importedWorldLoadTask: Task<Void, Never>?
+    private var loadedSessionID: UUID?
+    private var completeVisualRecording = false
+    var hasImportedWorld: Bool { importedWorld != nil }
+    private(set) var cameraSubjectID = "player"
+    private(set) var cameraSubjects: [(id: String, title: String)] = []
+    private func rebuildCameraSubjects() {
+        var subjects: [String: String] = [:]
+        for frame in loadedFrames {
+            for node in frame.world?.nodes ?? [] where node.role != nil {
+                let role = L10n.s("replay.subject.\(node.role ?? "participant")")
+                subjects[node.id] = node.displayName.map { "\(role) · \($0)" } ?? role
+            }
+        }
+        cameraSubjects = subjects.sorted {
+            if $0.key == $1.key { return false }
+            return $0.key == "player" || ($1.key != "player" && $0.key < $1.key)
+        }
+            .map { (id: $0.key, title: $0.value) }
+    }
+
+    func setCameraSubject(_ id: String) {
+        cameraSubjectID = id
+        chaseSmoothPos = nil
+        chaseSmoothTarget = nil
+        cinematicSmoothPos = nil
+        cinematicSmoothTarget = nil
+        updateCameraForCurrentMode(frame: lastKnownFrame)
+    }
     private var selectedReplayEvent: MissionReplayEvent?
 
     private(set) var reconstructionStatus: ReplayReconstructionStatus = .none
@@ -277,12 +309,20 @@ final class MissionReplaySceneController {
     // MARK: - Session loading
 
     func loadSession(_ session: MissionReplaySession, events: [MissionReplayEvent] = []) {
+        importedWorldLoadTask?.cancel()
+        importedWorldRoot?.removeFromParentNode()
+        importedWorldRoot = nil
+        importedWorld = nil
+        groundNode.isHidden = false
+        loadedSessionID = session.id
         pathNode.childNodes.forEach { $0.removeFromParentNode() }
         eventMarkersNode.childNodes.forEach { $0.removeFromParentNode() }
         environmentNode.childNodes.forEach { $0.removeFromParentNode() }
 
         let context = session.context
         loadedContext = context
+        cameraSubjectID = "player"
+        worldVisuals.load(assets: session.visualAssets ?? [:], scene: scene, playerRoot: replayDroneNode)
 
         let uavResult = buildReplayUAV(context: context)
         if uavResult.bodyScale != onboardMountBodyScale {
@@ -293,12 +333,18 @@ final class MissionReplaySceneController {
 
         let sorted = session.frames.sorted { $0.timestamp < $1.timestamp }
         loadedFrames = sorted
-        loadedEvents = events
+        rebuildCameraSubjects()
+        loadedEvents = events.isEmpty ? session.events : events
         buildPathTrail(from: sorted)
-        buildEventMarkers(events: events, frames: sorted)
+        buildEventMarkers(events: loadedEvents, frames: sorted)
 
         let overallQuality: ReplayReconstructionStatus.Quality
-        if uavResult.profileFound && envResult.hasEnvironment {
+        let hasWorldRecording = !sorted.isEmpty && sorted.allSatisfy { $0.world != nil }
+        let assetIDs = Set(sorted.flatMap { $0.world?.nodes.map(\.assetID) ?? [] })
+        let assetsPresent = assetIDs.isSubset(of: Set((session.visualAssets ?? [:]).keys))
+        let hasPlayerVisual = sorted.allSatisfy { $0.world?.nodes.contains(where: { $0.id == "player" }) == true }
+        completeVisualRecording = hasWorldRecording && assetsPresent && hasPlayerVisual
+        if (uavResult.profileFound || hasPlayerVisual) && envResult.hasEnvironment && completeVisualRecording && context?.importedWorld == nil {
             overallQuality = .full
         } else if uavResult.profileFound || envResult.hasEnvironment {
             overallQuality = .partial
@@ -311,7 +357,13 @@ final class MissionReplaySceneController {
         if context == nil {
             warnings.append(L10n.s("replay.warning.no_context", language: language))
         }
-        if !uavResult.profileFound {
+        if !hasWorldRecording {
+            warnings.append(L10n.s("replay.warning.legacy_world", language: language))
+        }
+        if !assetsPresent {
+            warnings.append(L10n.s("replay.warning.missing_visuals", language: language))
+        }
+        if !uavResult.profileFound && !hasPlayerVisual {
             warnings.append(L10n.s("replay.warning.uav_not_found", language: language))
         }
 
@@ -355,12 +407,68 @@ final class MissionReplaySceneController {
 
         lastKnownFrame = sorted.first
         update(frame: sorted.first)
+        if let reference = context?.importedWorld {
+            reconstructionStatus.warningMessages.append(L10n.s("replay.world.loading"))
+            reconstructionStatus.terrainDisplayName = reference.tileKey ?? reference.identifier
+            let sessionID = session.id
+            importedWorldLoadTask = Task { @MainActor [weak self] in
+                let runtime = await Self.restoreImportedWorld(reference)
+                guard let self, !Task.isCancelled, self.loadedSessionID == sessionID else { return }
+                self.reconstructionStatus.warningMessages.removeAll { $0 == L10n.s("replay.world.loading") }
+                guard let runtime else {
+                    self.reconstructionStatus.warningMessages.append(L10n.s("replay.world.unavailable"))
+                    return
+                }
+                self.importedWorld = runtime
+                self.importedWorldRoot = runtime.rootNode
+                self.environmentNode.childNodes.forEach { $0.removeFromParentNode() }
+                self.scene.rootNode.addChildNode(runtime.rootNode)
+                self.groundNode.isHidden = true
+                self.reconstructionStatus.quality = self.completeVisualRecording && !self.worldVisuals.assetFailures ? .full : .partial
+                if let world = runtime as? OpenDataWorldRuntime {
+                    self.reconstructionStatus.terrainDisplayName = L10n.s(world.displayName)
+                }
+                self.updateImportedWorldStreaming()
+            }
+        }
+    }
+
+    func waitForImportedWorld() async { await importedWorldLoadTask?.value }
+
+    @MainActor
+    private static func restoreImportedWorld(_ reference: MissionReplayImportedWorldReference) async -> (any FlyableWorld)? {
+        switch reference.kind {
+        case .photogrammetric:
+            guard let source = MeshTileCatalog.source(withIdentifier: reference.identifier), let key = reference.tileKey else { return nil }
+            return await MeshWorldRuntime.load(tileDirectory: MeshTileStore().tileDirectory(for: source, key: key),
+                cacheDirectory: InternalStorePaths.worlds(fileManager: .default).appendingPathComponent("MeshCaches"), progress: { _ in })
+        case .openData:
+            let package = await Task.detached(priority: .userInitiated) {
+                let store = UAVWorldPackageStore()
+                let url = store.packageURL(identifier: reference.identifier)
+                guard let manifest = try? store.readManifest(at: url), let buildings = try? store.readBuildings(at: url) else { return nil as (UAVWorldManifest, [UAVWorldBuilding], UAVWorldWaterGeometry, UAVWorldOSMSurfaceFeatures, TerrariumElevationSource.Grid?)? }
+                return (manifest, buildings, store.readWaterGeometry(at: url), store.readOSMSurfaceFeatures(at: url), store.readElevation(at: url))
+            }.value
+            guard let package, !Task.isCancelled else { return nil }
+            return OpenDataWorldRuntime(manifest: package.0, buildings: package.1, waterGeometry: package.2,
+                osmSurfaceFeatures: package.3, elevation: package.4)
+        }
+    }
+
+    @MainActor
+    func updateImportedWorldStreaming() {
+        guard let importedWorld else { return }
+        importedWorld.updateStreaming(camera: MeshStreamingPolicy.Camera(position: cameraNode.simdWorldPosition,
+            forward: cameraNode.simdWorldOrientation.act(SIMD3<Float>(0, 0, -1)),
+            verticalFieldOfViewRadians: Float(cameraNode.camera?.fieldOfView ?? 68) * .pi / 180,
+            viewportHeightPixels: 1080))
     }
 
     // MARK: - Camera mode
 
     func setCameraMode(_ mode: ReplayCameraMode) {
         cameraMode = mode
+        cameraNode.camera?.fieldOfView = 68
         chaseSmoothPos = nil
         chaseSmoothTarget = nil
         cinematicSmoothPos = nil
@@ -536,7 +644,7 @@ final class MissionReplaySceneController {
         scene.isPaused = true
         cameraNode.camera?.wantsHDR = false
         cameraNode.camera?.motionBlurIntensity = 0
-        if !environmentNode.childNodes.isEmpty {
+        if importedWorld == nil, !environmentNode.childNodes.isEmpty {
             rebuildReplayEnvironment(quality: options.environmentQuality)
         }
         environmentNode.isHidden = false
@@ -555,13 +663,15 @@ final class MissionReplaySceneController {
         guard let frame else { return }
         let cameraReplayTime = replayTime ?? frame.timestamp
         let replayDuration = max(0.001, duration ?? loadedFrames.last?.timestamp ?? frame.timestamp)
-        let dronePos = replayDroneNode.simdPosition
+        let subjectNode = worldVisuals.node(for: cameraSubjectID) ?? replayDroneNode
+        let dronePos = subjectNode.simdWorldPosition
         switch cameraMode {
         case .freeObserver:
             break
         case .chase:
-            let yaw = Float(frame.attitude.yawRadians)
-            let forward = SIMD3<Float>(sin(yaw), 0, -cos(yaw))
+            let direction = subjectNode.simdWorldOrientation.act(SIMD3<Float>(0, 0, -1))
+            let horizontal = SIMD3<Float>(direction.x, 0, direction.z)
+            let forward = simd_length_squared(horizontal) > 0.001 ? simd_normalize(horizontal) : SIMD3<Float>(0, 0, -1)
             let desired = dronePos - forward * chaseDistance + SIMD3<Float>(0, chaseHeight, 0)
             let desiredTarget = dronePos + SIMD3<Float>(0, 0.45, 0)
             if chaseSmoothPos == nil { chaseSmoothPos = desired }
@@ -582,19 +692,25 @@ final class MissionReplaySceneController {
             cameraNode.simdPosition = SIMD3<Float>(dronePos.x, dronePos.y + topDownHeight, dronePos.z)
             lookAtWithLockedHorizon(dronePos)
         case .fpvApproximation:
-            let forward = replayDroneNode.simdOrientation.act(SIMD3<Float>(0, 0, -1))
-            let up = replayDroneNode.simdOrientation.act(SIMD3<Float>(0, 1, 0))
-            cameraNode.simdPosition = dronePos + forward * 1.0 + up * 0.35
-            cameraNode.simdOrientation = replayDroneNode.simdOrientation
+            if let recorded = frame.world?.nodes.first(where: { $0.id == cameraSubjectID })?.camera {
+                cameraNode.simdPosition = recorded.pose.position
+                cameraNode.simdOrientation = simd_quatf(vector: recorded.pose.rotation)
+                cameraNode.camera?.fieldOfView = CGFloat(recorded.fieldOfView)
+            } else {
+                let forward = subjectNode.simdWorldOrientation.act(SIMD3<Float>(0, 0, -1))
+                let up = subjectNode.simdWorldOrientation.act(SIMD3<Float>(0, 1, 0))
+                cameraNode.simdPosition = dronePos + forward * 1.0 + up * 0.35
+                cameraNode.simdOrientation = subjectNode.simdWorldOrientation
+            }
         case .onboardMount:
             if onboardMountIsEditing {
                 // External view so the gizmo (attached to the drone, at the configured offset)
                 // stays visible and draggable — can't see/drag a gizmo marking your own camera's
                 // position from inside that same camera.
-                updateMountEditCamera(around: dronePos)
+                updateMountEditCamera(around: replayDroneNode.simdWorldPosition)
             } else {
                 let offset = replayDroneNode.simdOrientation.act(onboardMountOffset)
-                cameraNode.simdPosition = dronePos + offset
+                cameraNode.simdPosition = replayDroneNode.simdWorldPosition + offset
                 cameraNode.simdOrientation = replayDroneNode.simdOrientation * onboardMountRotation
             }
         case .payloadFollow:
@@ -623,6 +739,13 @@ final class MissionReplaySceneController {
         let pitch = simd_quatf(angle: Float(frame.attitude.pitchRadians), axis: SIMD3<Float>(1, 0, 0))
         let roll  = simd_quatf(angle: Float(frame.attitude.rollRadians),  axis: SIMD3<Float>(0, 0, 1))
         replayDroneNode.simdOrientation = yaw * pitch * roll
+        if let world = frame.world {
+            if let carrier = world.nodes.first(where: { $0.id == "player" }) {
+                replayDroneNode.simdPosition = carrier.pose.position
+                replayDroneNode.simdOrientation = simd_quatf(vector: carrier.pose.rotation)
+            }
+            worldVisuals.update(world)
+        }
         lastKnownFrame = frame
         chaseSmoothPos = nil
         chaseSmoothTarget = nil
@@ -709,6 +832,13 @@ final class MissionReplaySceneController {
         let pitch = simd_quatf(angle: Float(frame.attitude.pitchRadians), axis: SIMD3<Float>(1, 0, 0))
         let roll  = simd_quatf(angle: Float(frame.attitude.rollRadians),  axis: SIMD3<Float>(0, 0, 1))
         replayDroneNode.simdOrientation = yaw * pitch * roll
+        if let world = frame.world {
+            if let carrier = world.nodes.first(where: { $0.id == "player" }) {
+                replayDroneNode.simdPosition = carrier.pose.position
+                replayDroneNode.simdOrientation = simd_quatf(vector: carrier.pose.rotation)
+            }
+            worldVisuals.update(world)
+        }
 
         skyCloudsNode.simdPosition = SIMD3<Float>(
             replayDroneNode.simdPosition.x,
@@ -720,6 +850,10 @@ final class MissionReplaySceneController {
         }
 
         updateCameraForCurrentMode(frame: frame, replayTime: replayTime, duration: duration)
+        if worldVisuals.assetFailures, reconstructionStatus.quality == .full {
+            reconstructionStatus.quality = .partial
+            reconstructionStatus.warningMessages.append(L10n.s("replay.warning.missing_visuals"))
+        }
     }
 
     func resetCameraToDefault() {
@@ -1409,7 +1543,7 @@ final class MissionReplaySceneController {
         let config = TerrainConfiguration(
             preset: preset,
             mapScale: mapScale,
-            density: preset.defaultDensity,
+            density: context.terrainDensity ?? preset.defaultDensity,
             seed: seed,
             safeSpawnRadius: 15.0
         )
@@ -1751,6 +1885,8 @@ final class MissionReplaySceneController {
         case .missionAborted:
             return (SCNSphere(radius: 0.22),
                     NSColor(red: 0.90, green: 0.20, blue: 0.20, alpha: 1))
+        case .scenarioEvent:
+            return (SCNSphere(radius: 0.15), NSColor.systemCyan)
         case .payloadAttached:
             return (SCNBox(width: 0.22, height: 0.22, length: 0.22, chamferRadius: 0.03),
                     NSColor(red: 0.90, green: 0.55, blue: 0.10, alpha: 1))

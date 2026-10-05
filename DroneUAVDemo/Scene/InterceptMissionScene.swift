@@ -339,6 +339,7 @@ final class InterceptMissionScene {
         let camera = SCNNode()
         camera.name = "\(id)-camera"
         camera.camera = SCNCamera()
+        camera.camera?.categoryBitMask = Int.max & ~ThermalRenderCategory.proxyBit
         camera.camera?.fieldOfView = role == .observer ? Self.observerFieldOfView : Self.cameraFieldOfView
         camera.camera?.zNear = Self.cameraNear
         camera.camera?.zFar = Self.cameraFar
@@ -377,6 +378,24 @@ final class InterceptMissionScene {
     }
 
     // MARK: - Per-frame update
+
+    var hasReplayAftermath: Bool { !debrisNodes.isEmpty || !effectNodes.isEmpty }
+
+    func captureReplayVisuals(session: InterceptMissionSession, recorder: MissionReplayRecorder) -> [MissionReplayVisualSnapshot] {
+        var nodes: [MissionReplayVisualSnapshot] = []
+        for actor in session.actors {
+            guard let visual = visuals[actor.id] else { continue }
+            nodes.append(MissionReplayVisualCapture.snapshot(id: actor.id, node: visual.rootNode, recorder: recorder,
+                role: actor.role.rawValue, displayName: actor.profile.displayName, camera: cameras[actor.id]))
+        }
+        for (id, entry) in debrisNodes {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: "intercept-debris:\(id)", node: entry.node, recorder: recorder))
+        }
+        if let load = deliveryLoadNode, !load.isHidden {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: "delivery-load", node: load, recorder: recorder))
+        }
+        return nodes.sorted { $0.id < $1.id }
+    }
 
     func update(
         _ session: InterceptMissionSession,

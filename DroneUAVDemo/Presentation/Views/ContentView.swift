@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import Combine
 
 private enum ProjectSortOrder: String, CaseIterable, Identifiable {
     case newest
@@ -581,6 +582,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         do {
             try projectStorage.deleteProject(id: summary.id)
             if activeSimulation?.currentProjectID == summary.id {
+                activeSimulation?.stopRuntimeForExit()
                 activeSimulation = nil
             }
             refreshProjects()
@@ -819,7 +821,7 @@ private final class WindowResolveView: NSView {
 }
 
 private struct SimulationViewModelObserver<Content: View>: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     let content: (DroneSimulationViewModel) -> Content
 
     var body: some View {
@@ -1009,7 +1011,7 @@ private struct SignalInterferenceOverlayView: View {
 }
 
 private struct SimulationToolstripView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     private static let selectorButtonWidth: CGFloat = 142
     private static let selectorButtonHeight: CGFloat = 46
@@ -1091,11 +1093,11 @@ private struct SimulationToolstripView: View {
 }
 
 private struct KeyBindingsSheetHost: View {
-    @ObservedObject var simulationViewModel: DroneSimulationViewModel
+    @SimulationObservedObject var simulationViewModel: DroneSimulationViewModel
     @ObservedObject private var bindingsViewModel: BindingsViewModel
 
     init(simulationViewModel: DroneSimulationViewModel) {
-        self.simulationViewModel = simulationViewModel
+        _simulationViewModel = SimulationObservedObject(wrappedValue: simulationViewModel)
         _bindingsViewModel = ObservedObject(wrappedValue: simulationViewModel.bindingsViewModel)
     }
 
@@ -1128,6 +1130,7 @@ private struct KeyBindingsSheetHost: View {
 }
 
 struct ContentView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @StateObject private var appShell = AppShellViewModel()
     // P2P v1.3: LANSessionViewModel lifetime must span lobby and runtime — never recreate mid-session.
     @StateObject private var lanSessionViewModel = LANSessionViewModel()
@@ -1138,7 +1141,6 @@ struct ContentView: View {
     @State private var showingMapSelection = false
     @State private var nameDraft: String = ""
     @State private var deleteCandidate: ProjectRecordSummary?
-    @State private var isReplayCenterPresented: Bool = false
     @State private var isOnlineTrialsPresented: Bool = false
     @State private var isMissionSetupPresented: Bool = false
     @State private var isSettingsPresented: Bool = false
@@ -1189,6 +1191,7 @@ struct ContentView: View {
                 startScreen
             }
         }
+        .screenCurtain(for: rootScreen)
         .environment(\.locale, selectedLanguage.locale)
         .background(
             WindowAccessor { window in
@@ -1209,13 +1212,20 @@ struct ContentView: View {
                     pendingProjectName = nil
                 }
             )
+            .environment(\.locale, selectedLanguage.locale)
         }
         // A world can take tens of seconds to prepare on a cold cache; the overlay both reports
         // where that time is going and blocks a second start while it does.
         .overlay {
-            if let load = appShell.worldLoad {
-                WorldLoadOverlay(load: load)
+            // The animation is scoped to the overlay alone: the simulation usually replaces the
+            // start screen in the same update, and that swap must stay a cut.
+            ZStack {
+                if let load = appShell.worldLoad {
+                    WorldLoadOverlay(load: load)
+                        .transition(.opacity)
+                }
             }
+            .animation(Motion.panel, value: appShell.worldLoad != nil)
         }
         .sheet(item: $nameDialogMode) { mode in
             projectNameSheet(mode: mode)
@@ -1279,6 +1289,26 @@ struct ContentView: View {
         }
     }
 
+    /// Which of the three screens the window shows; a change of it is covered by the curtain.
+    private var rootScreen: Int {
+        if appShell.activeSimulation != nil { return 2 }
+        return isWorkbenchPresented ? 1 : 0
+    }
+
+    /// What the right half of the start screen shows.
+    private enum StartPanel {
+        case menu
+        case onlineTrials
+        case missionSetup
+        case settings
+    }
+
+    private var startPanel: StartPanel {
+        if isOnlineTrialsPresented { return .onlineTrials }
+        if isMissionSetupPresented { return .missionSetup }
+        return isSettingsPresented ? .settings : .menu
+    }
+
     private func unsavedMessage() -> String {
         let projectName = appShell.activeSimulation?.currentProjectName ?? "Project"
         return String(
@@ -1289,94 +1319,133 @@ struct ContentView: View {
 
     private var startScreen: some View {
         HStack(spacing: 0) {
-            VStack(alignment: .leading, spacing: 12) {
-                Text("menu.saved_projects")
-                    .font(.headline)
-                    .padding(.bottom, 2)
-
-                VStack(alignment: .leading, spacing: 8) {
-                    TextField(L10n.s("menu.search"), text: $appShell.searchQuery)
-                        .textFieldStyle(.roundedBorder)
-
-                    Picker("menu.sort", selection: $appShell.sortOrder) {
-                        ForEach(ProjectSortOrder.allCases) { order in
-                            Text(LocalizedStringKey(order.titleKey)).tag(order)
+            projectSidebar
+            Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
+            GeometryReader { geometry in
+                ZStack {
+                    LinearGradient(
+                        colors: [Color(red: 0.075, green: 0.11, blue: 0.17), GroundControlPalette.shell],
+                        startPoint: .topLeading, endPoint: .bottomTrailing)
+                        .ignoresSafeArea()
+                    ZStack {
+                        switch startPanel {
+                        case .menu:
+                            ScrollView {
+                                startScreenActions
+                                    .frame(maxWidth: 900)
+                                    .padding(.horizontal, 32)
+                                    .padding(.vertical, 28)
+                                    .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                            }
+                            .transition(.opacity)
+                        case .onlineTrials:
+                            ScrollView {
+                                LANOnlineTrialsView(
+                                    viewModel: lanSessionViewModel,
+                                    onClose: { isOnlineTrialsPresented = false },
+                                    onLaunchTrial: { descriptor, participant in
+                                        isOnlineTrialsPresented = false
+                                        appShell.launchLANTrial(
+                                            descriptor: descriptor,
+                                            localParticipant: participant,
+                                            snapshotTransport: lanSessionViewModel,
+                                            sharedEventTransport: lanSessionViewModel)
+                                        lanSessionViewModel.markRuntimeHandoffCompleted()
+                                    })
+                                    .frame(maxWidth: 840)
+                                    .padding(28)
+                                    .frame(maxWidth: .infinity)
+                            }
+                            .transition(reduceMotion ? .opacity : .panelSwap)
+                        case .missionSetup:
+                            MissionSetupView(
+                                availableProfiles: appShell.missionUAVProfiles,
+                                onCancel: { isMissionSetupPresented = false },
+                                onStart: { config in
+                                    isMissionSetupPresented = false
+                                    appShell.launchMission(config: config)
+                                })
+                                .frame(maxWidth: 1080, maxHeight: geometry.size.height - 40)
+                                .padding(20)
+                                .transition(reduceMotion ? .opacity : .panelSwap)
+                        case .settings:
+                            SettingsView(
+                                onClose: { isSettingsPresented = false },
+                                onApplyWindowSize: { appShell.applyWindowSizePreset($0) })
+                                .environment(\.locale, selectedLanguage.locale)
+                                .frame(maxWidth: 1080, maxHeight: geometry.size.height - 40)
+                                .padding(20)
+                                .transition(reduceMotion ? .opacity : .panelSwap)
                         }
                     }
-                    .pickerStyle(.segmented)
+                    .animation(reduceMotion ? .easeOut(duration: 0.16) : Motion.panel, value: startPanel)
                 }
-
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
-                        ForEach(appShell.visibleProjects) { project in
-                            projectCard(project)
-                        }
-                    }
-                    .padding(.vertical, 2)
-                }
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 16)
-            .padding(.bottom, 12)
-            .frame(width: 370, alignment: .topLeading)
-            .background(Color(nsColor: .windowBackgroundColor))
-
-            Divider()
-
-            ZStack {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.08, green: 0.12, blue: 0.18),
-                        Color(red: 0.05, green: 0.08, blue: 0.12)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-                .ignoresSafeArea()
-
-                Group {
-                    if isOnlineTrialsPresented {
-                        LANOnlineTrialsView(
-                            viewModel: lanSessionViewModel,
-                            onClose: {
-                                isOnlineTrialsPresented = false
-                            },
-                            onLaunchTrial: { descriptor, participant in
-                                isOnlineTrialsPresented = false
-                                appShell.launchLANTrial(
-                                    descriptor: descriptor,
-                                    localParticipant: participant,
-                                    snapshotTransport: lanSessionViewModel,
-                                    sharedEventTransport: lanSessionViewModel
-                                )
-                                lanSessionViewModel.markRuntimeHandoffCompleted()
-                            }
-                        )
-                    } else if isMissionSetupPresented {
-                        MissionSetupView(
-                            availableProfiles: appShell.missionUAVProfiles,
-                            onCancel: { isMissionSetupPresented = false },
-                            onStart: { config in
-                                isMissionSetupPresented = false
-                                appShell.launchMission(config: config)
-                            }
-                        )
-                    } else if isSettingsPresented {
-                        SettingsView(
-                            onClose: { isSettingsPresented = false },
-                            onApplyWindowSize: { appShell.applyWindowSizePreset($0) }
-                        )
-                        .environment(\.locale, selectedLanguage.locale)
-                    } else {
-                        startScreenActions
-                    }
-                }
-                .frame(maxWidth: isSettingsPresented ? 1080 : 760)
-                .padding(.horizontal, 20)
             }
         }
-        .frame(minWidth: 1200, minHeight: 820)
+        .frame(minWidth: 1080, minHeight: 720)
+    }
+
+    private var projectSidebar: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("menu.saved_projects").font(.headline)
+                Spacer(minLength: 4)
+                Text("\(appShell.projects.count)")
+                    .font(.caption.monospacedDigit())
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.top, 6)
+
+            TextField(L10n.s("menu.search"), text: $appShell.searchQuery)
+                .textFieldStyle(.roundedBorder)
+                .controlSize(.large)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(Text("menu.search"))
+
+            HStack(spacing: 10) {
+                Image(systemName: "arrow.up.arrow.down").foregroundStyle(.secondary)
+                Picker("menu.sort", selection: $appShell.sortOrder) {
+                    ForEach(ProjectSortOrder.allCases) { order in
+                        Text(LocalizedStringKey(order.titleKey)).tag(order)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+            }
+            .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+            projectList
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+        .frame(width: 320)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(GroundControlPalette.panel)
+    }
+
+    @ViewBuilder
+    private var projectList: some View {
+        if appShell.visibleProjects.isEmpty {
+            ShellEmptyState(
+                symbol: appShell.projects.isEmpty ? "folder.badge.plus" : "magnifyingglass",
+                title: L10n.s(appShell.projects.isEmpty ? "shell.projects.empty.title" : "shell.projects.search.title"),
+                detail: L10n.s(appShell.projects.isEmpty ? "shell.projects.empty.detail" : "shell.projects.search.detail"))
+            Spacer(minLength: 0)
+        } else {
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(appShell.visibleProjects) { project in
+                        projectCard(project).transition(.opacity)
+                    }
+                }
+                .padding(.vertical, 2)
+                .animation(reduceMotion ? nil : Motion.panel, value: appShell.visibleProjects.map(\.id))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        }
     }
 
     private var startScreenActions: some View {
@@ -1385,6 +1454,7 @@ struct ContentView: View {
                 .font(.system(size: 30, weight: .bold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
+                .cascadeAppear(0)
 
             Button {
                 nameDraft = projectDefaultName()
@@ -1407,7 +1477,8 @@ struct ContentView: View {
                         )
                 )
             }
-            .buttonStyle(.plain)
+            .buttonStyle(ShellButtonStyle(cornerRadius: 22, hoverScale: 1.02))
+            .cascadeAppear(1)
 
             if let recent = appShell.visibleProjects.first {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1425,6 +1496,7 @@ struct ContentView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
                 .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 12))
+                .cascadeAppear(2)
             }
 
             VStack(spacing: 12) {
@@ -1444,11 +1516,11 @@ struct ContentView: View {
                         isOnlineTrialsPresented = true
                     }
                 }
+                .cascadeAppear(3)
 
                 HStack(spacing: 12) {
                     startMenuButton(title: L10n.s("menu.recorder"), systemImage: "archivebox") {
-                        startScreenReplayLibrary.refresh()
-                        isReplayCenterPresented = true
+                        ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
                     }
 
                     startMenuButton(
@@ -1458,17 +1530,14 @@ struct ContentView: View {
                         isSettingsPresented = true
                     }
                 }
+                .cascadeAppear(4)
 
                 startMenuButton(title: L10n.s("menu.workbench"), systemImage: "wrench.and.screwdriver.fill") {
                     isWorkbenchPresented = true
                 }
+                .cascadeAppear(5)
             }
             .frame(width: 460)
-            .onChange(of: isReplayCenterPresented) { _, new in
-                guard new else { return }
-                isReplayCenterPresented = false
-                ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
-            }
         }
     }
 
@@ -1494,7 +1563,7 @@ struct ContentView: View {
                     .stroke(Color.white.opacity(0.28), lineWidth: 1)
             )
         }
-        .buttonStyle(.plain)
+        .buttonStyle(ShellButtonStyle(cornerRadius: 12))
     }
 
     @ViewBuilder
@@ -1652,11 +1721,6 @@ struct ContentView: View {
                     message: Text(item.message),
                     dismissButton: .default(Text("common.ok"))
                 )
-            }
-            .onChange(of: isReplayCenterPresented) { _, new in
-                guard new else { return }
-                isReplayCenterPresented = false
-                ReplayCenterWindowHost.open(viewModel: viewModel.replayLibraryViewModel)
             }
         }
     }
@@ -1971,8 +2035,8 @@ struct ContentView: View {
             .help(L10n.s("hud.time_scale"))
 
             Button {
-                viewModel.replayLibraryViewModel.refresh()
-                isReplayCenterPresented = true
+                viewModel.prepareReplayLibraryForPresentation()
+                ReplayCenterWindowHost.open(viewModel: viewModel.replayLibraryViewModel)
             } label: {
                 ZStack(alignment: .topTrailing) {
                     headerUtilityButtonLabel(systemImage: "archivebox")
@@ -2373,6 +2437,7 @@ struct ContentView: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 9)
         .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        .hoverHighlight(cornerRadius: 10)
     }
 
     private func toggleFullscreen() {
@@ -2393,6 +2458,7 @@ private struct WorldLoadOverlay: View {
                     .font(.headline)
                 ProgressView(value: load.stage.fraction)
                     .frame(width: 360)
+                    .animation(Motion.panel, value: load.stage.fraction)
                 HStack {
                     Text(LocalizedStringKey(load.stage.titleKey))
                         .font(.callout)

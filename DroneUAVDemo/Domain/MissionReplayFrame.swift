@@ -56,6 +56,8 @@ struct MissionReplayFrame: Identifiable, Codable, Equatable {
     let envelopeLimitKey: String?
     let envelopeWorstFraction: Double?
     let rfSnapshot: MissionReplayRFSnapshot?
+    /// Nil identifies recordings made before surrounding vehicles and visual effects were sampled.
+    let world: MissionReplayWorldSnapshot?
 
     init(
         id: UUID,
@@ -75,7 +77,8 @@ struct MissionReplayFrame: Identifiable, Codable, Equatable {
         skinTemperatureK: Double? = nil,
         envelopeLimitKey: String? = nil,
         envelopeWorstFraction: Double? = nil,
-        rfSnapshot: MissionReplayRFSnapshot? = nil
+        rfSnapshot: MissionReplayRFSnapshot? = nil,
+        world: MissionReplayWorldSnapshot? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -95,5 +98,94 @@ struct MissionReplayFrame: Identifiable, Codable, Equatable {
         self.envelopeLimitKey = envelopeLimitKey
         self.envelopeWorstFraction = envelopeWorstFraction
         self.rfSnapshot = rfSnapshot
+        self.world = world
+    }
+}
+
+struct MissionReplayPose: Codable, Equatable {
+    var position: SIMD3<Float>
+    var rotation: SIMD4<Float>
+    var scale: SIMD3<Float>
+}
+
+struct MissionReplayCameraSnapshot: Codable, Equatable {
+    var pose: MissionReplayPose
+    var fieldOfView: Double
+}
+
+struct MissionReplayNodeState: Codable, Equatable {
+    var pose: MissionReplayPose
+    var opacity: Double
+}
+
+/// Assets are stored once per session; frames contain only poses and visibility changes.
+struct MissionReplayVisualSnapshot: Codable, Equatable, Identifiable {
+    var id: String
+    var assetID: String
+    var role: String?
+    var displayName: String?
+    var pose: MissionReplayPose
+    var opacity: Double
+    var isHidden: Bool
+    var hiddenNodePaths: [String]
+    var absentNodeNames: [String]
+    var camera: MissionReplayCameraSnapshot?
+    var nodeStates: [String: MissionReplayNodeState]? = nil
+    var absentNodePaths: [String]? = nil
+}
+
+struct MissionReplayEffectSnapshot: Codable, Equatable, Identifiable {
+    var id: UUID
+    var kind: String
+    var position: SIMD3<Float>
+    var normal: SIMD3<Float>
+    /// Age in the authoritative simulation, independent of playback speed and wall clock.
+    var age: Double
+    var lifetime: Double
+}
+
+struct MissionReplayWorldSnapshot: Codable, Equatable {
+    var nodes: [MissionReplayVisualSnapshot]
+    var effects: [MissionReplayEffectSnapshot]
+
+    static func interpolated(_ start: Self?, _ end: Self?, fraction: Double) -> Self? {
+        guard let start, let end else { return start ?? end }
+        // Appearance/disappearance belongs to the sampled boundary, never half a frame early.
+        guard fraction < 1 else { return end }
+        let destinations = Dictionary(end.nodes.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let nodes = start.nodes.map { node -> MissionReplayVisualSnapshot in
+            guard let next = destinations[node.id], node.assetID == next.assetID else { return node }
+            var value = node
+            value.pose = interpolatePose(node.pose, next.pose, fraction)
+            value.opacity += (next.opacity - node.opacity) * fraction
+            if let camera = node.camera, let nextCamera = next.camera {
+                value.camera = MissionReplayCameraSnapshot(
+                    pose: interpolatePose(camera.pose, nextCamera.pose, fraction),
+                    fieldOfView: camera.fieldOfView + (nextCamera.fieldOfView - camera.fieldOfView) * fraction
+                )
+            }
+            return value
+        }
+        let effectsByID = Dictionary(end.effects.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        let effects = start.effects.map { effect -> MissionReplayEffectSnapshot in
+            var value = effect
+            if let next = effectsByID[effect.id] { value.age += (next.age - value.age) * fraction }
+            return value
+        }
+        return Self(nodes: nodes, effects: effects)
+    }
+
+    private static func interpolatePose(_ a: MissionReplayPose, _ b: MissionReplayPose, _ t: Double) -> MissionReplayPose {
+        let fraction = Float(t)
+        // Normalized shortest-arc quaternion interpolation, stable across ±q representations.
+        var destination = b.rotation
+        if (a.rotation * destination).sum() < 0 { destination = -destination }
+        let rotation = a.rotation + (destination - a.rotation) * fraction
+        let length = sqrt((rotation * rotation).sum())
+        return MissionReplayPose(
+            position: a.position + (b.position - a.position) * fraction,
+            rotation: length > 0.0001 ? rotation / length : a.rotation,
+            scale: a.scale + (b.scale - a.scale) * fraction
+        )
     }
 }

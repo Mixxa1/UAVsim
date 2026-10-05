@@ -23,6 +23,12 @@ final class ReplayLibraryViewModel: ObservableObject {
 
     func refresh() {
         summaries = storage.listSummaries()
+        if let selectedSummaryID, summaries.contains(where: { $0.id == selectedSummaryID }) { return }
+        if let latest = summaries.first {
+            select(id: latest.id)
+        } else {
+            clearSelection()
+        }
     }
 
     func select(id: UUID) {

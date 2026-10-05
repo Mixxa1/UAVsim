@@ -62,6 +62,7 @@ struct ReplayCenterView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var deleteCandidate: MissionReplayRecordSummary?
     @State private var cameraMode: ReplayCameraMode = .freeObserver
+    @State private var cameraSubjectID = "player"
     @State private var topDownHeight: Double = 120
     // Mirrors sceneHolder.controller's onboardMount state for the Edit/Preview + Move/Rotate
     // toggles — the gizmo is dragged via raw AppKit mouse events deep inside ReplaySCNView,
@@ -90,35 +91,14 @@ struct ReplayCenterView: View {
         .background(GroundControlPalette.shell)
         .onAppear {
             viewModel.refresh()
+            loadSelectedSession(viewModel.selectedSummaryID)
             wasdMonitor.start()
         }
         .onDisappear {
             wasdMonitor.stop()
         }
         .onChange(of: viewModel.selectedSummaryID) { _, newID in
-            replayPlayer.unload()
-            cameraMode = .freeObserver
-            exportCameraMode = .freeObserver
-            topDownHeight = 120
-            selectedReplayEvent = nil
-            trimRange = ReplayTrimRange(startTime: 0, endTime: 0)
-            telemetrySeries = []
-            comparisonResult = nil
-            sceneHolder.controller.setCameraMode(.freeObserver)
-            sceneHolder.controller.setTopDownHeight(Float(topDownHeight))
-            sceneHolder.controller.setSelectedEvent(nil)
-            if let id = newID, let session = viewModel.loadSession(id: id) {
-                fullscreenSession = session
-                replayPlayer.load(session: session)
-                trimRange = ReplayTrimRange(startTime: 0, endTime: replayPlayer.duration)
-                rebuildTelemetrySeries(for: session)
-                let events = viewModel.selectedReport?.events ?? []
-                sceneHolder.controller.loadSession(session, events: events)
-                reconstructionStatus = sceneHolder.controller.reconstructionStatus
-            } else {
-                fullscreenSession = nil
-                reconstructionStatus = .none
-            }
+            loadSelectedSession(newID)
         }
         .onChange(of: cameraMode) { _, newMode in
             sceneHolder.controller.setCameraMode(newMode)
@@ -128,6 +108,10 @@ struct ReplayCenterView: View {
             if let frame = replayPlayer.currentFrame {
                 sceneHolder.controller.update(frame: frame)
             }
+        }
+        .onChange(of: cameraSubjectID) { _, id in
+            sceneHolder.controller.setCameraSubject(id)
+            sceneHolder.controller.update(frame: replayPlayer.currentFrame)
         }
         .onChange(of: topDownHeight) { _, newHeight in
             sceneHolder.controller.setTopDownHeight(Float(newHeight))
@@ -148,8 +132,15 @@ struct ReplayCenterView: View {
             rebuildTelemetrySeries(for: session)
         }
         .onReceive(Timer.publish(every: 1.0 / 60.0, on: .main, in: .common).autoconnect()) { _ in
+            if reconstructionStatus != sceneHolder.controller.reconstructionStatus {
+                reconstructionStatus = sceneHolder.controller.reconstructionStatus
+            }
+            if sceneHolder.controller.hasImportedWorld {
+                sceneHolder.controller.updateImportedWorldStreaming()
+            }
+            let wasPlaying = replayPlayer.isPlaying
             replayPlayer.update(deltaTime: 1.0 / 60.0)
-            if replayPlayer.isPlaying {
+            if wasPlaying {
                 sceneHolder.controller.update(frame: replayPlayer.currentFrame)
             }
             if cameraMode == .onboardMount {
@@ -187,6 +178,34 @@ struct ReplayCenterView: View {
     }
 
     // MARK: - List panel
+
+    private func loadSelectedSession(_ newID: UUID?) {
+        guard fullscreenSession?.id != newID else { return }
+        replayPlayer.unload()
+        cameraMode = .freeObserver
+        cameraSubjectID = "player"
+        exportCameraMode = .freeObserver
+        topDownHeight = 120
+        selectedReplayEvent = nil
+        trimRange = ReplayTrimRange(startTime: 0, endTime: 0)
+        telemetrySeries = []
+        comparisonResult = nil
+        sceneHolder.controller.setCameraMode(.freeObserver)
+        sceneHolder.controller.setTopDownHeight(Float(topDownHeight))
+        sceneHolder.controller.setSelectedEvent(nil)
+        if let id = newID, let session = viewModel.loadSession(id: id) {
+            fullscreenSession = session
+            replayPlayer.load(session: session)
+            trimRange = ReplayTrimRange(startTime: 0, endTime: replayPlayer.duration)
+            rebuildTelemetrySeries(for: session)
+            let events = viewModel.selectedReport?.events ?? []
+            sceneHolder.controller.loadSession(session, events: events)
+            reconstructionStatus = sceneHolder.controller.reconstructionStatus
+        } else {
+            fullscreenSession = nil
+            reconstructionStatus = .none
+        }
+    }
 
     private var listPanel: some View {
         VStack(spacing: 0) {
@@ -253,13 +272,13 @@ struct ReplayCenterView: View {
         let isSelected = viewModel.selectedSummaryID == summary.id
         return HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 3) {
-                Text(summary.title)
+                Text(summary.title.hasPrefix("Replay ") ? L10n.s("replay.record.title") + " " + summary.title.dropFirst(7) : summary.title)
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(isSelected ? GroundControlPalette.accent : GroundControlPalette.textPrimary)
                     .lineLimit(1)
                 HStack(spacing: 6) {
                     Label(formatDuration(summary.durationSeconds), systemImage: "clock")
-                    Label("\(summary.frameCount) fr", systemImage: "square.stack")
+                    Label(L10n.f("replay.record.frames", summary.frameCount), systemImage: "square.stack")
                 }
                 .font(.caption2)
                 .foregroundStyle(GroundControlPalette.textSecondary)
@@ -424,12 +443,11 @@ struct ReplayCenterView: View {
                 }
             }
 
-            HStack(spacing: 14) {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), alignment: .leading), count: 4), alignment: .leading, spacing: 6) {
                 reconstructionCell(localized("replay.uav_label"), reconstructionStatus.uavDisplayName)
                 reconstructionCell(localized("replay.terrain_label"), reconstructionStatus.terrainDisplayName)
                 reconstructionCell(localized("replay.weather_label"), reconstructionStatus.weatherDisplayName)
                 reconstructionCell(localized("replay.payload_label"), reconstructionStatus.payloadDisplayName)
-                Spacer()
             }
         }
     }
@@ -515,6 +533,7 @@ struct ReplayCenterView: View {
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundStyle(GroundControlPalette.textSecondary)
                         .monospacedDigit()
+                        .frame(width: 154, alignment: .trailing)
                 }
 
                 Button {
@@ -524,6 +543,7 @@ struct ReplayCenterView: View {
                         report: viewModel.selectedReport,
                         initialTime: replayPlayer.isLoaded ? replayPlayer.currentTime : 0,
                         initialCameraMode: cameraMode,
+                        initialCameraSubjectID: cameraSubjectID,
                         selectedEvent: selectedReplayEvent
                     )
                 } label: {
@@ -559,12 +579,27 @@ struct ReplayCenterView: View {
                     }
                 }
                 .labelsHidden()
-                .pickerStyle(.segmented)
+                .pickerStyle(.menu)
                 .controlSize(.small)
-                .frame(idealWidth: 690, maxWidth: 760, alignment: .leading)
-                .layoutPriority(1)
+                .frame(width: 182)
                 .disabled(!replayPlayer.isLoaded)
 
+                if sceneHolder.controller.cameraSubjects.count > 1 {
+                    Picker("replay.subject.label", selection: $cameraSubjectID) {
+                        ForEach(sceneHolder.controller.cameraSubjects, id: \.id) { subject in
+                            Text(subject.title).tag(subject.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .pickerStyle(.menu)
+                    .frame(maxWidth: 250)
+                }
+
+                Spacer(minLength: 0)
+            }
+
+            if cameraMode == .topDown || cameraMode == .onboardMount {
+                HStack(spacing: 10) {
                 if cameraMode == .topDown {
                     Divider().frame(height: 18)
 
@@ -612,7 +647,8 @@ struct ReplayCenterView: View {
                     .disabled(!replayPlayer.isLoaded)
                 }
 
-                Spacer(minLength: 0)
+                    Spacer(minLength: 0)
+                }
             }
         }
     }
@@ -644,18 +680,17 @@ struct ReplayCenterView: View {
             if let frame = replayPlayer.currentFrame {
                 let vel = frame.velocity.simd
                 let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).squareRoot()
-                HStack(spacing: 16) {
-                    frameCell("T", String(format: "%.1fs", frame.timestamp))
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 80), spacing: 8, alignment: .leading)], alignment: .leading, spacing: 5) {
+                    frameCell("T", fmtTime(frame.timestamp))
                     frameCell("X", String(format: "%.1f", frame.position.x))
                     frameCell("Y", String(format: localized("replay.frame.meters_format"), frame.position.y))
                     frameCell("Z", String(format: "%.1f", frame.position.z))
                     frameCell(localized("replay.frame.speed_short"), String(format: localized("replay.frame.speed_format"), speed))
-                    frameCell(localized("replay.frame.mode_short"), frame.flightModeDescription)
-                    frameCell(localized("replay.frame.autopilot_short"), frame.autopilotDescription ?? localized("common.na"))
+                    frameCell(localized("replay.frame.mode_short"), DroneFlightMode(rawValue: frame.flightModeDescription).map { localized($0.titleKey) } ?? frame.flightModeDescription)
+                    frameCell(localized("replay.frame.autopilot_short"), frame.autopilotDescription.map { value in DroneFlightMode(rawValue: value).map { localized($0.titleKey) } ?? value } ?? localized("common.na"))
                     frameCell(localized("replay.frame.battery_short"), frame.batteryPercent.map { String(format: "%.1f%%", $0) } ?? localized("common.na"))
                     frameCell(localized("replay.frame.warnings_short"), "\(frame.warningCount)",
                               tint: frame.warningCount > 0 ? GroundControlPalette.warning : nil)
-                    Spacer()
                 }
             } else {
                 Group {
@@ -681,7 +716,10 @@ struct ReplayCenterView: View {
                 .font(.system(size: 10, weight: .medium, design: .monospaced))
                 .foregroundStyle(tint ?? GroundControlPalette.textPrimary)
                 .lineLimit(1)
+                .truncationMode(.tail)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(minHeight: 28, alignment: .topLeading)
     }
 
     // MARK: - Report
@@ -1111,7 +1149,7 @@ struct ReplayCenterView: View {
                 .foregroundStyle(eventColor(event.type))
                 .frame(width: 16, alignment: .center)
 
-            Text(String(format: "T+%.1fs", event.timestamp))
+            Text(L10n.f("replay.event.timestamp", event.timestamp))
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(GroundControlPalette.textSecondary)
                 .frame(width: 58, alignment: .leading)
@@ -1170,6 +1208,7 @@ struct ReplayCenterView: View {
         case .waypointReached:       return "mappin.circle"
         case .missionCompleted:      return "checkmark.circle.fill"
         case .missionAborted:        return "xmark.circle.fill"
+        case .scenarioEvent:         return "scope"
         case .payloadAttached:       return "bag"
         case .payloadReleased:       return "bag.badge.minus"
         case .payloadImpact:         return "burst"
@@ -1207,6 +1246,8 @@ struct ReplayCenterView: View {
             return Color(red: 1.00, green: 0.82, blue: 0.00)
         case .missionAborted:
             return Color.red
+        case .scenarioEvent:
+            return GroundControlPalette.accent
         case .payloadAttached:
             return Color.orange
         case .payloadReleased:
@@ -1357,7 +1398,8 @@ struct ReplayCenterView: View {
                     type: event.type,
                     message: event.message,
                     position: event.position,
-                    damage: event.damage
+                    damage: event.damage,
+                    interception: event.interception
                 )
             }
     }
@@ -1382,6 +1424,7 @@ struct ReplayCenterView: View {
                     settings: settings,
                     outputURL: url,
                     cameraMode: exportCameraMode,
+                    cameraSubjectID: cameraSubjectID,
                     renderOverlay: settings.includeOverlay,
                     selectedEvent: selectedReplayEvent
                 )
@@ -1431,15 +1474,12 @@ struct ReplayCenterView: View {
     }
 
     private func fmtTime(_ t: TimeInterval) -> String {
-        let total = Int(max(0, t))
-        let ms = Int((t - Double(total)) * 10)
-        if total < 60 { return String(format: "%d.%ds", total, ms) }
-        return String(format: "%dm%02ds", total / 60, total % 60)
+        let tenths = Int(max(0, t) * 10)
+        return String(format: "%02d:%02d.%d", tenths / 600, (tenths / 10) % 60, tenths % 10)
     }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
         let s = Int(seconds)
-        if s < 60 { return "\(s)s" }
-        return "\(s / 60)m \(s % 60)s"
+        return String(format: "%02d:%02d", max(0, s) / 60, max(0, s) % 60)
     }
 }

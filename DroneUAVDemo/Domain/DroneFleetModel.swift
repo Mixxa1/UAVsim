@@ -9,7 +9,7 @@ enum FormationMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        NSLocalizedString(titleKey, comment: "")
+        L10n.s(titleKey)
     }
 
     var titleKey: String {

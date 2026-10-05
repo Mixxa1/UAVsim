@@ -24,7 +24,7 @@ final class ReplayCenterWindowHost: NSObject, NSWindowDelegate {
             defer: false
         )
         win.title = L10n.s("replay.title", language: L10n.currentLanguage())
-        win.minSize = NSSize(width: 960, height: 680)
+        win.minSize = NSSize(width: 1020, height: 680)
         win.isReleasedWhenClosed = false
         win.delegate = self
         self.window = win
@@ -33,7 +33,7 @@ final class ReplayCenterWindowHost: NSObject, NSWindowDelegate {
             viewModel: viewModel,
             onDismiss: { [weak self] in self?.closeWindow() }
         )
-        win.contentViewController = NSHostingController(rootView: content)
+        win.contentViewController = NSHostingController(rootView: content.environment(\.locale, L10n.currentLanguage().locale))
         win.center()
         win.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)

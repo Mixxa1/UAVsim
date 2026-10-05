@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct FlightOpsModuleView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     private static let throttleFormatter: NumberFormatter = {
         let formatter = NumberFormatter()

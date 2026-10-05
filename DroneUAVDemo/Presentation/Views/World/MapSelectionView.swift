@@ -216,13 +216,13 @@ struct MapSelectionView: View {
         switch family {
         case .standard:
             guard let highlightedPreset else { return L10n.s("map.select.prompt") }
-            return NSLocalizedString(highlightedPreset.titleKey, comment: "")
+            return L10n.s(highlightedPreset.titleKey)
         case .photogrammetric:
             guard let highlightedWorld else { return L10n.s("map.select.prompt_world") }
             return "\(highlightedWorld.key) — \(highlightedWorld.sizeBytes.formattedByteSize)"
         case .openData:
             guard let highlightedPackage else { return L10n.s("map.select.prompt_package") }
-            return "\(highlightedPackage.displayName) — \(highlightedPackage.buildingCount)"
+            return "\(L10n.s(highlightedPackage.displayName)) — \(highlightedPackage.buildingCount)"
         }
     }
 
@@ -376,7 +376,8 @@ enum MapCardArtwork {
     static func image(for preset: TerrainPreset) -> NSImage? {
         let name = "map-card-\(preset.rawValue)"
         for ext in ["jpg", "jpeg", "png"] {
-            if let url = Bundle.main.url(forResource: name, withExtension: ext),
+            if let url = Bundle.main.url(forResource: name, withExtension: ext, subdirectory: "MapCards")
+                ?? Bundle.main.url(forResource: name, withExtension: ext),
                let image = NSImage(contentsOf: url) {
                 return image
             }
@@ -448,7 +449,7 @@ private struct BuiltPackageRow: View {
                 .font(.title3)
                 .foregroundStyle(.secondary)
             VStack(alignment: .leading, spacing: 2) {
-                Text(package.displayName).font(.headline)
+                Text(L10n.s(package.displayName)).font(.headline)
                 Text(L10n.f("map.open_data.buildings", package.buildingCount))
                     .font(.caption)
                     .foregroundStyle(.secondary)

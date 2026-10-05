@@ -835,7 +835,7 @@ struct DroneModelProfile: Identifiable, Hashable {
             return displayName
         }
 
-        let localizedName = NSLocalizedString(displayNameKey, comment: "")
+        let localizedName = L10n.s(displayNameKey)
         return localizedName == displayNameKey ? displayName : localizedName
     }
 

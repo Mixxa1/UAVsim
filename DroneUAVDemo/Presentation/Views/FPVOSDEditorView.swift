@@ -9,7 +9,7 @@ import SwiftUI
 /// atlas through the same composer the analog compositor uses. An element the installed
 /// equipment cannot feed is shown disabled with the reason rather than silently dropped.
 struct FPVOSDEditorView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedElement: OSDElement?

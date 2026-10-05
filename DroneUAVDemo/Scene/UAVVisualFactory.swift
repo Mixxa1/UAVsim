@@ -22,8 +22,9 @@ enum UAVVisualFactory {
     ///
     /// `modelScale` is the ratio between the size the simulation flies and the size the
     /// catalogue publishes; see `DroneModelBuilder.authoredModelScale`.
-    static func build(profile: UAVProfile, modelScale: Float = 1.0) -> DroneVisualModel {
-        if let authored = UAVModelAssetLibrary.shared.makeVisualModel(
+    static func build(profile: UAVProfile, modelScale: Float = 1.0,
+                      assetLibrary: UAVModelAssetLibrary = .shared) -> DroneVisualModel {
+        if let authored = assetLibrary.makeVisualModel(
             profileID: profile.id,
             payloadMountOffset: profile.payloadMountOffset,
             scale: modelScale

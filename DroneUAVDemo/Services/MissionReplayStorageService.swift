@@ -4,9 +4,11 @@ final class MissionReplayStorageService {
     private let fileManager: FileManager
     private let encoder: JSONEncoder
     private let decoder: JSONDecoder
+    private let directory: URL?
 
-    init(fileManager: FileManager = .default) {
+    init(fileManager: FileManager = .default, directory: URL? = nil) {
         self.fileManager = fileManager
+        self.directory = directory
         encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         decoder = JSONDecoder()
@@ -16,7 +18,7 @@ final class MissionReplayStorageService {
     // MARK: - Directories
 
     private var replaysDirectory: URL {
-        InternalStorePaths.replays(fileManager: fileManager)
+        directory ?? InternalStorePaths.replays(fileManager: fileManager)
     }
 
     private func sessionDirectory(for id: UUID) -> URL {
@@ -74,19 +76,41 @@ final class MissionReplayStorageService {
             title: MissionReplayRecordSummary.makeTitle(from: startedAt)
         )
 
-        try encoder.encode(summary).write(to: summaryURL(for: id))
-        try encoder.encode(session).write(to: sessionURL(for: id))
-        try encoder.encode(report).write(to: reportURL(for: id))
+        var stored = session
+        if let assets = session.visualAssets, !assets.isEmpty {
+            var files: [String: String] = [:]
+            for (index, asset) in assets.sorted(by: { $0.key < $1.key }).enumerated() {
+                let name = "visual-\(index).scnarchive"
+                try asset.value.write(to: dir.appendingPathComponent(name), options: .atomic)
+                files[asset.key] = name
+            }
+            stored.visualAssetFiles = files
+            stored.visualAssets = nil
+        }
+        try encoder.encode(stored).write(to: sessionURL(for: id), options: .atomic)
+        try encoder.encode(report).write(to: reportURL(for: id), options: .atomic)
+        // Publish a selectable library entry only once its session and report are present.
+        try encoder.encode(summary).write(to: summaryURL(for: id), options: .atomic)
     }
 
     func loadSession(id: UUID) throws -> MissionReplaySession {
         let data = try Data(contentsOf: sessionURL(for: id))
-        return try decoder.decode(MissionReplaySession.self, from: data)
+        var session = try decoder.decode(MissionReplaySession.self, from: data)
+        if let files = session.visualAssetFiles {
+            var assets = session.visualAssets ?? [:]
+            for (assetID, name) in files where name == URL(fileURLWithPath: name).lastPathComponent {
+                if let data = try? Data(contentsOf: sessionDirectory(for: id).appendingPathComponent(name)) {
+                    assets[assetID] = data
+                }
+            }
+            session.visualAssets = assets
+        }
+        return session
     }
 
     func loadReport(id: UUID) throws -> MissionReport {
         let data = try Data(contentsOf: reportURL(for: id))
-        return try decoder.decode(MissionReport.self, from: data)
+        return MissionReportBuilder().localizedReport(try decoder.decode(MissionReport.self, from: data))
     }
 
     func delete(id: UUID) throws {

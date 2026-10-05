@@ -7,7 +7,7 @@ import SwiftUI
 /// the world paused around it, so everything here has to sit beside the view the pilot is aiming
 /// with — never on top of it.
 struct RaceBuilderPanelView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     @State private var trackName: String = ""
     @State private var laps: Int = 3
 

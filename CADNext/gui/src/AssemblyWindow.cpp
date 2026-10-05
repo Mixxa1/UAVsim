@@ -41,6 +41,7 @@
 #include "cadnext/assembly/AssemblySerializer.hpp"
 #include "cadnext/assembly/DirectPlacementSolver.hpp"
 #include "cadnext/gui/AssemblyJointDialog.hpp"
+#include "cadnext/gui/ToolIcons.hpp"
 
 namespace cadnext::gui {
 
@@ -195,38 +196,41 @@ AssemblyWindow::AssemblyWindow(QWidget* parent)
     auto* toolbar = addToolBar(tr("Сборка"));
     toolbar->setObjectName(QStringLiteral("assemblyToolBar"));
     toolbar->setMovable(false);
+    toolbar->setToolButtonStyle(Qt::ToolButtonIconOnly);
+    toolbar->setIconSize(QSize(kToolIconSize, kToolIconSize));
 
-    QAction* newAction = toolbar->addAction(tr("Создать"));
-    QAction* openAction = toolbar->addAction(tr("Открыть…"));
-    QAction* saveAction = toolbar->addAction(tr("Сохранить"));
+    QAction* newAction = toolbar->addAction(toolIcon(ToolIcon::NewDocument), tr("Создать"));
+    QAction* openAction = toolbar->addAction(toolIcon(ToolIcon::OpenDocument), tr("Открыть…"));
+    QAction* saveAction = toolbar->addAction(toolIcon(ToolIcon::SaveDocument), tr("Сохранить"));
     toolbar->addSeparator();
-    QAction* insertAction = toolbar->addAction(tr("Вставить деталь…"));
-    groundAction_ = toolbar->addAction(tr("Закрепить"));
-    moveModeAction_ = toolbar->addAction(tr("Переместить"));
+    QAction* insertAction = toolbar->addAction(toolIcon(ToolIcon::InsertPart), tr("Вставить деталь…"));
+    groundAction_ = toolbar->addAction(toolIcon(ToolIcon::Ground), tr("Закрепить"));
+    moveModeAction_ = toolbar->addAction(toolIcon(ToolIcon::Move), tr("Переместить"));
     moveModeAction_->setCheckable(true);
-    QAction* deleteAction = toolbar->addAction(tr("Удалить"));
+    QAction* deleteAction = toolbar->addAction(toolIcon(ToolIcon::Delete), tr("Удалить"));
     toolbar->addSeparator();
 
     const struct {
         assembly::JointType type;
+        ToolIcon icon;
         QString title;
     } jointButtons[] = {
-        {assembly::JointType::Coincident, tr("Совпадение")},
-        {assembly::JointType::Parallel, tr("Параллельность")},
-        {assembly::JointType::Perpendicular, tr("Перпендикулярность")},
-        {assembly::JointType::Concentric, tr("Соосность")},
-        {assembly::JointType::Distance, tr("Расстояние")},
-        {assembly::JointType::Angle, tr("Угол")},
-        {assembly::JointType::Rigid, tr("Жёсткое")},
+        {assembly::JointType::Coincident, ToolIcon::JointCoincident, tr("Совпадение")},
+        {assembly::JointType::Parallel, ToolIcon::JointParallel, tr("Параллельность")},
+        {assembly::JointType::Perpendicular, ToolIcon::JointPerpendicular, tr("Перпендикулярность")},
+        {assembly::JointType::Concentric, ToolIcon::JointConcentric, tr("Соосность")},
+        {assembly::JointType::Distance, ToolIcon::JointDistance, tr("Расстояние")},
+        {assembly::JointType::Angle, ToolIcon::JointAngle, tr("Угол")},
+        {assembly::JointType::Rigid, ToolIcon::JointRigid, tr("Жёсткое")},
     };
     for (const auto& button : jointButtons) {
-        QAction* action = toolbar->addAction(button.title);
+        QAction* action = toolbar->addAction(toolIcon(button.icon), button.title);
         const assembly::JointType type = button.type;
         connect(action, &QAction::triggered, this,
                 [this, type]() { startJointTool(type); });
     }
     toolbar->addSeparator();
-    QAction* recomputeAction = toolbar->addAction(tr("Пересчитать"));
+    QAction* recomputeAction = toolbar->addAction(toolIcon(ToolIcon::Recompute), tr("Пересчитать"));
 
     connect(newAction, &QAction::triggered, this, [this]() { newAssembly(); });
     connect(openAction, &QAction::triggered, this, [this]() { openAssembly(); });

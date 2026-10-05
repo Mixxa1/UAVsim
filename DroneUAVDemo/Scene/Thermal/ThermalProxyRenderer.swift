@@ -5,34 +5,39 @@ import simd
 /// Render category bit reserved for thermal proxy geometry. The payload camera switches to this
 /// (and only this) bit to show the thermal scene; every other camera must clear it.
 enum ThermalRenderCategory {
-    static let proxyBit = 1 << 8
+    // Bit 8 belongs to the LiDAR point cloud; the thermal scene needs its own channel.
+    static let proxyBit = 1 << 15
 }
 
 /// Builds and colours a parallel set of false-colour "proxy" nodes for the environment, without
 /// ever touching the real scene materials.
 ///
-/// Each classifiable geometry node gets a **child** proxy: `geometry.copy()` (shares vertex
-/// buffers — cheap) with a single `.constant`-lit `SCNMaterial` (immune to scene lighting and
-/// shadows — the exact thing that used to make trunks read hot from specular highlights). The
-/// proxy carries the `thermalProxy` category bit, so only the payload camera in thermal mode
-/// renders it. Colour is recomputed on the CPU only when the context/palette/normalization
-/// changes — never per pixel, never per frame.
+/// Proxy geometry shares vertex buffers and is visible only to the thermal camera. Imported
+/// surfaces retain their material slots and GPU imagery; discovery/construction is incremental.
 final class ThermalProxyRenderer {
 
-    private struct ProxyEntry {
+    private final class ProxyEntry {
         let node: SCNNode
-        let materialClass: ThermalMaterialClass
-        let variation: Double
+        let materialClasses: [ThermalMaterialClass]
+        let population: [ThermalMaterialClass: Double]
         let rootName: String?
-        var temperatureCelsius: Double
-        var footprint: Double
-        // The real model texture, desaturated to luminance — modulates the thermal colour so bark/
-        // leaf/asphalt/building detail shows through. nil when the surface has no real texture
-        // (e.g. the flat-colour ground) → procedural grain is used instead.
-        let realTextureLuminance: NSImage?
-        // Tiling for the multiply texture, derived from the real material so the thermal grain
-        // sits at the right world scale (the ground tiles its texture heavily; objects don't).
-        let multiplyTransform: SCNMatrix4
+        weak var source: SCNNode?
+        let sourceID: ObjectIdentifier
+        let importedMaterialKeys: [ThermalImportedSurfaceMaterials.Key]
+        let isImported: Bool
+
+        init(node: SCNNode, source: SCNNode,
+             materialClasses: [ThermalMaterialClass], population: [ThermalMaterialClass: Double], rootName: String?,
+             importedMaterialKeys: [ThermalImportedSurfaceMaterials.Key], isImported: Bool) {
+            self.node = node
+            self.source = source
+            self.sourceID = ObjectIdentifier(source)
+            self.materialClasses = materialClasses
+            self.population = population
+            self.rootName = rootName
+            self.importedMaterialKeys = importedMaterialKeys
+            self.isImported = isImported
+        }
     }
 
     private weak var sceneRoot: SCNNode?
@@ -40,7 +45,8 @@ final class ThermalProxyRenderer {
     private weak var missionTargetNode: SCNNode?
 
     private var proxies: [ProxyEntry] = []
-    private var proxyByID: [ObjectIdentifier: Int] = [:]   // proxy node id -> index in proxies
+    private var proxyByID: [ObjectIdentifier: ProxyEntry] = [:]
+    private var populationWeights: [ThermalMaterialClass: Double] = [:]
     private var builtRevision: UInt64 = .max
     private var builtGroundClass: ThermalMaterialClass?
     private var hasBuilt = false
@@ -55,10 +61,38 @@ final class ThermalProxyRenderer {
         "environment.snowDecorations",
         "environment.abandonedCity.root"
     ]
+    private weak var importedRoot: SCNNode?
+    private var importedGeometryIDs: Set<ObjectIdentifier> = []
+    private var importedTraversal: [SCNNode] = []
+    private var lastImportedScan: CFTimeInterval = -.infinity
+    private var pruneCursor = 0
+    private let importedMaterials = ThermalImportedSurfaceMaterials()
+    private var lastPresentation: Presentation?
 
-    init(sceneRoot: SCNNode, groundNode: SCNNode) {
+    private struct Presentation: Equatable {
+        let context: ThermalEnvironmentContext
+        let palette: ThermalPalette
+        let contrast: Double
+        let brightness: Double
+        let noise: Double
+        let normalization: ThermalNormalizationState
+    }
+
+    var hasPendingImportedGeometry: Bool { !importedTraversal.isEmpty || importedMaterials.hasPendingUniformUpdates }
+    var importedGeometryCount: Int { importedGeometryIDs.count }
+    var importedMaterialCount: Int { importedMaterials.count }
+    var importedUniformUpdateCount: Int { importedMaterials.uniformUpdateCount }
+    private(set) var lastImportedVisitCount = 0
+
+    init(sceneRoot: SCNNode, groundNode: SCNNode, importedRoot: SCNNode? = nil) {
         self.sceneRoot = sceneRoot
         self.groundNode = groundNode
+        self.importedRoot = importedRoot
+    }
+
+    func setImportedRoot(_ root: SCNNode?) {
+        importedRoot = root
+        invalidate()
     }
 
     // MARK: - Lifecycle
@@ -70,8 +104,15 @@ final class ThermalProxyRenderer {
         }
         proxies.removeAll(keepingCapacity: true)
         proxyByID.removeAll(keepingCapacity: true)
+        populationWeights.removeAll(keepingCapacity: true)
         hasBuilt = false
         builtGroundClass = nil
+        importedGeometryIDs.removeAll()
+        importedTraversal.removeAll(keepingCapacity: true)
+        lastImportedScan = -.infinity
+        pruneCursor = 0
+        importedMaterials.clear()
+        lastPresentation = nil
     }
 
     /// Registers (or clears, when `nil`) the mission scenario's detectable target — e.g. the
@@ -98,9 +139,11 @@ final class ThermalProxyRenderer {
         noiseAmount: Double,
         normalization: ThermalNormalizationState,
         groundClass: ThermalMaterialClass,
-        environmentRevision: UInt64
+        environmentRevision: UInt64,
+        now: CFTimeInterval = CACurrentMediaTime()
     ) {
         ensureBuilt(groundClass: groundClass, environmentRevision: environmentRevision)
+        updateImportedWorld(now: now)
         recolor(
             context: context,
             palette: palette,
@@ -111,24 +154,25 @@ final class ThermalProxyRenderer {
         )
     }
 
-    /// Population of present classes (weighted by horizontal footprint) for normalization.
+    /// Coarse material population, independent of where the camera is looking.
     func normalizationPopulation(
         groundClass: ThermalMaterialClass,
         environmentRevision: UInt64
     ) -> [(materialClass: ThermalMaterialClass, weight: Double)] {
         ensureBuilt(groundClass: groundClass, environmentRevision: environmentRevision)
-        var weights: [ThermalMaterialClass: Double] = [:]
-        for entry in proxies {
-            weights[entry.materialClass, default: 0.0] += entry.footprint
-        }
-        return weights.map { (materialClass: $0.key, weight: $0.value) }
+        return populationWeights.map { (materialClass: $0.key, weight: $0.value) }
     }
 
     /// Center-of-frame probe result for a hit proxy node.
-    func probe(node: SCNNode) -> (materialClass: ThermalMaterialClass, temperatureCelsius: Double, name: String?)? {
-        guard let index = proxyByID[ObjectIdentifier(node)] else { return nil }
-        let entry = proxies[index]
-        return (entry.materialClass, entry.temperatureCelsius, entry.rootName)
+    func probe(node: SCNNode, geometryIndex: Int = 0, normal: SIMD3<Double> = SIMD3(0, 1, 0),
+               view: SIMD3<Double> = SIMD3(0, 1, 0), distance: Double = 0)
+        -> (materialClass: ThermalMaterialClass, temperatureCelsius: Double, name: String?)? {
+        guard let entry = proxyByID[ObjectIdentifier(node)], let presentation = lastPresentation else { return nil }
+        var cls = entry.materialClasses[max(0, geometryIndex) % entry.materialClasses.count]
+        if cls == .building && normal.y > 0.85 { cls = .roof }
+        let temperature = ThermalMaterialModel.apparentSurfaceTemperature(for: cls,
+            context: presentation.context, normal: normal, view: view, distance: distance)
+        return (cls, temperature, entry.rootName)
     }
 
     func isProxyNode(_ node: SCNNode) -> Bool {
@@ -159,12 +203,11 @@ final class ThermalProxyRenderer {
         guard let sceneRoot else { return }
 
         // Ground first (one big proxy).
-        if let groundNode, groundNode.geometry != nil {
+        if let groundNode, groundNode.geometry != nil, !groundNode.isHidden {
             addProxy(
                 for: groundNode,
                 materialClass: groundClass,
-                rootName: "ground",
-                variation: 0.0
+                rootName: "ground"
             )
         }
 
@@ -177,7 +220,7 @@ final class ThermalProxyRenderer {
             var geometryNodes: [SCNNode] = []
             collectGeometryNodes(missionTargetNode, into: &geometryNodes)
             for node in geometryNodes {
-                addProxy(for: node, materialClass: .body, rootName: "mission.target.person", variation: 0.0)
+                addProxy(for: node, materialClass: .body, rootName: "mission.target.person")
             }
         }
 
@@ -190,6 +233,60 @@ final class ThermalProxyRenderer {
         }
     }
 
+    /// At most 96 node visits / 32 new geometries / 4 ms per presentation. Newly streamed tiles
+    /// are picked up by a periodic traversal, without two full scene walks on each refresh.
+    private func updateImportedWorld(now: CFTimeInterval) {
+        lastImportedVisitCount = 0
+        guard let root = importedRoot else { return }
+        let deadline = CACurrentMediaTime() + 0.004
+        var removedIDs: Set<ObjectIdentifier> = []
+        for _ in 0..<min(64, proxies.count) {
+            if pruneCursor >= proxies.count { pruneCursor = 0 }
+            let entry = proxies[pruneCursor]
+            pruneCursor += 1
+            if entry.isImported, !isAttached(entry.source, to: root) {
+                importedGeometryIDs.remove(entry.sourceID)
+                proxyByID.removeValue(forKey: ObjectIdentifier(entry.node))
+                for (cls, weight) in entry.population { populationWeights[cls, default: 0] -= weight }
+                entry.importedMaterialKeys.forEach { importedMaterials.release($0) }
+                entry.node.removeFromParentNode()
+                removedIDs.insert(ObjectIdentifier(entry))
+            }
+            if CACurrentMediaTime() >= deadline { break }
+        }
+        if !removedIDs.isEmpty {
+            proxies.removeAll { removedIDs.contains(ObjectIdentifier($0)) }
+            pruneCursor = min(pruneCursor, proxies.count)
+        }
+        if importedTraversal.isEmpty, now - lastImportedScan >= 0.5 {
+            lastImportedScan = now
+            importedTraversal = [root]
+        }
+        var added = 0
+        while lastImportedVisitCount < 96, added < 32, CACurrentMediaTime() < deadline,
+              let node = importedTraversal.popLast() {
+            lastImportedVisitCount += 1
+            guard !shouldExclude(node), isAttached(node, to: root) else { continue }
+            // A flat city root can have thousands of children; don't copy that array every tick.
+            importedTraversal.append(contentsOf: node.childNodes.reversed())
+            guard node.geometry != nil, !importedGeometryIDs.contains(ObjectIdentifier(node)),
+                  proxies.count < maxProxies else { continue }
+            importedGeometryIDs.insert(ObjectIdentifier(node))
+            let cls = ThermalSurfaceClassifier.classify(node: node)
+            addProxy(for: node, materialClass: cls, rootName: node.name, imported: true)
+            added += 1
+        }
+    }
+
+    private func isAttached(_ source: SCNNode?, to root: SCNNode) -> Bool {
+        var ancestor = source
+        while let node = ancestor {
+            if node === root { return root.parent != nil }
+            ancestor = node.parent
+        }
+        return false
+    }
+
     /// Build proxies for one placed object (a tree / building / rock / etc. and its sub-meshes).
     private func buildObject(_ objectRoot: SCNNode) {
         if shouldExclude(objectRoot) { return }
@@ -200,7 +297,6 @@ final class ThermalProxyRenderer {
         guard !geometryNodes.isEmpty else { return }
 
         let baseClass = baseClassForObject(objectRoot)
-        let variation = variationFromWorldPosition(objectRoot.simdWorldPosition)
 
         // Trunk/roof disambiguation when an object has several sub-meshes but no per-mesh names.
         var trunkNode: SCNNode?
@@ -232,8 +328,7 @@ final class ThermalProxyRenderer {
             addProxy(
                 for: node,
                 materialClass: cls,
-                rootName: objectRoot.name,
-                variation: variation
+                rootName: objectRoot.name
             )
         }
     }
@@ -242,23 +337,34 @@ final class ThermalProxyRenderer {
         for node: SCNNode,
         materialClass: ThermalMaterialClass,
         rootName: String?,
-        variation: Double
+        imported: Bool = false
     ) {
         guard let geometry = node.geometry else { return }
 
-        // Resolve the real model texture (desaturated) BEFORE copying — gives genuine surface
-        // detail. The ground's diffuse is a flat colour, so it falls back to procedural grain.
-        let realDiffuse = node.geometry?.firstMaterial?.diffuse
-        let realLuminance = ThermalRealTexture.luminance(for: realDiffuse)
-        let transform = multiplyTransform(forRealDiffuse: realDiffuse, usesRealTexture: realLuminance != nil)
-
         let copy = geometry.copy() as! SCNGeometry
-        let material = SCNMaterial()
-        material.lightingModel = .constant
-        material.isDoubleSided = true
-        material.diffuse.contents = NSColor.gray
-        material.locksAmbientWithDiffuse = true
-        copy.materials = [material]
+        var importedMaterialKeys: [ThermalImportedSurfaceMaterials.Key] = []
+        var materialClasses: [ThermalMaterialClass] = []
+        var population: [ThermalMaterialClass: Double] = [:]
+        let sources = geometry.materials.isEmpty ? [SCNMaterial()] : geometry.materials
+        copy.materials = sources.map { source in
+            let cls = materialClass == .body ? .body
+                : (ThermalSurfaceClassifier.override(for: node)
+                    ?? ThermalSurfaceClassifier.classify(material: source, fallback: materialClass))
+            let (key, material) = importedMaterials.acquire(source: source, materialClass: cls)
+            importedMaterialKeys.append(key)
+            materialClasses.append(cls)
+            let weight = 1.0 / Double(sources.count)
+            population[cls, default: 0] += weight
+            if cls == .building {
+                // Upward fragments and glazing are represented in the possible scene range,
+                // even when an imported building stores all faces in one material slot.
+                population[.roof, default: 0] += weight * 0.20
+                if source.name?.hasPrefix("world.facade.") == true {
+                    population[.glass, default: 0] += weight * 0.30
+                }
+            }
+            return material
+        }
 
         let proxy = SCNNode(geometry: copy)
         proxy.name = proxyName
@@ -266,35 +372,18 @@ final class ThermalProxyRenderer {
         proxy.castsShadow = false
         node.addChildNode(proxy)
 
-        let footprint = horizontalFootprint(of: node)
         let entry = ProxyEntry(
             node: proxy,
-            materialClass: materialClass,
-            variation: variation,
+            source: node,
+            materialClasses: materialClasses,
+            population: population,
             rootName: rootName,
-            temperatureCelsius: 16.0,
-            footprint: footprint,
-            realTextureLuminance: realLuminance,
-            multiplyTransform: transform
+            importedMaterialKeys: importedMaterialKeys,
+            isImported: imported
         )
-        proxyByID[ObjectIdentifier(proxy)] = proxies.count
+        for (cls, weight) in population { populationWeights[cls, default: 0] += weight }
+        proxyByID[ObjectIdentifier(proxy)] = entry
         proxies.append(entry)
-    }
-
-    /// Tiling for the proxy multiply channel. Real textures keep the model's own UV transform.
-    /// Procedural grain on a heavily-tiled surface (the ground) is scaled down from the real tile
-    /// rate so the grain reads as medium patches, not invisible micro-noise.
-    private func multiplyTransform(forRealDiffuse diffuse: SCNMaterialProperty?, usesRealTexture: Bool) -> SCNMatrix4 {
-        let realTransform = diffuse?.contentsTransform ?? SCNMatrix4Identity
-        if usesRealTexture {
-            return realTransform
-        }
-        let scaleX = realTransform.m11
-        if scaleX > 2.0 {
-            let scaled = scaleX * 0.2
-            return SCNMatrix4MakeScale(scaled, scaled, 1.0)
-        }
-        return SCNMatrix4Identity
     }
 
     // MARK: - Recolor
@@ -307,44 +396,11 @@ final class ThermalProxyRenderer {
         noiseAmount: Double,
         normalization: ThermalNormalizationState
     ) {
-        for index in proxies.indices {
-            let entry = proxies[index]
-            let temperature = ThermalMaterialModel.apparentTemperature(
-                for: entry.materialClass,
-                context: context,
-                variation: entry.variation
-            )
-            proxies[index].temperatureCelsius = temperature
-
-            let color = ThermalPaletteMapper.color(
-                forTemperature: temperature,
-                displayMin: normalization.displayMinCelsius,
-                displayMax: normalization.displayMaxCelsius,
-                palette: palette,
-                contrast: contrast,
-                brightness: brightness
-            )
-
-            guard let material = entry.node.geometry?.firstMaterial else { continue }
-            material.diffuse.contents = color
-
-            // Real model texture (luminance) when the surface has one, else procedural grain.
-            let multiplyImage = entry.realTextureLuminance
-                ?? ThermalVariationTexture.texture(for: entry.materialClass, noiseAmount: noiseAmount)
-            if let multiplyImage {
-                material.multiply.contents = multiplyImage
-                material.multiply.contentsTransform = entry.multiplyTransform
-                material.multiply.wrapS = .repeat
-                material.multiply.wrapT = .repeat
-                // The noise slider dials how strongly the real texture shades; procedural grain
-                // already bakes the amount in, so it stays at full strength.
-                material.multiply.intensity = entry.realTextureLuminance != nil
-                    ? (0.45 + 0.55 * min(1.0, max(0.0, noiseAmount)))
-                    : 1.0
-            } else {
-                material.multiply.contents = nil
-            }
-        }
+        importedMaterials.update(context: context, palette: palette, normalization: normalization,
+                                 contrast: contrast, brightness: brightness, noise: noiseAmount)
+        let presentation = Presentation(context: context, palette: palette, contrast: contrast,
+            brightness: brightness, noise: noiseAmount, normalization: normalization)
+        lastPresentation = presentation
     }
 
     // MARK: - Classification helpers
@@ -368,6 +424,7 @@ final class ThermalProxyRenderer {
     }
 
     private func shouldExclude(_ node: SCNNode) -> Bool {
+        if node.isHidden { return true }
         if node.name == proxyName { return true }
         guard let name = node.name?.lowercased() else { return false }
         let blocked = ["collision", "collider", "placeholder_hidden", "debug", "_proxy", "boundary_signal", "capture_sphere"]
@@ -395,24 +452,6 @@ final class ThermalProxyRenderer {
     /// mesh's own anchor ordering matches its visual position closely enough.
     private func centerY(_ node: SCNNode) -> Float {
         node.simdWorldPosition.y
-    }
-
-    /// Coarse population weight, intentionally NOT area-accurate — see `centerY`'s note on why
-    /// `node.boundingBox` is unsafe to call this many times here. A flat per-proxy weight still
-    /// lets denser classes (more sub-meshes) dominate the percentile appropriately.
-    private func horizontalFootprint(of node: SCNNode) -> Double {
-        1.0
-    }
-
-    private func variationFromWorldPosition(_ position: SIMD3<Float>) -> Double {
-        let xi = Int64((Double(position.x) * 3.137).rounded())
-        let zi = Int64((Double(position.z) * 2.917).rounded())
-        var h = UInt64(bitPattern: xi &* 0x9E37_79B9 &+ zi &* 0x85EB_CA77)
-        h ^= h >> 29
-        h = h &* 0xBF58_476D_1CE4_E5B9
-        h ^= h >> 32
-        // 0...1 -> -1...1
-        return (Double(h >> 11) * (1.0 / 9_007_199_254_740_992.0)) * 2.0 - 1.0
     }
 
     private func findNode(named name: String, under root: SCNNode) -> SCNNode? {

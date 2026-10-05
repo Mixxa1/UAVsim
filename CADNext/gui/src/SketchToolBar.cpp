@@ -5,30 +5,32 @@
 
 #include "cadnext/SketchInput.hpp"
 #include "cadnext/Units.hpp"
+#include "cadnext/gui/ToolIcons.hpp"
 
 namespace cadnext::gui {
 
 SketchToolBar::SketchToolBar(QWidget* parent)
     : QToolBar(tr("Панель эскиза"), parent) {
     setMovable(false);
-    setToolButtonStyle(Qt::ToolButtonTextOnly);
+    setToolButtonStyle(Qt::ToolButtonIconOnly);
+    setIconSize(QSize(kToolIconSize, kToolIconSize));
 
-    newSketchXYAction_ = addAction(tr("Новый эскиз XY"));
-    newSketchXZAction_ = addAction(tr("Новый эскиз XZ"));
-    newSketchYZAction_ = addAction(tr("Новый эскиз YZ"));
+    newSketchXYAction_ = addAction(toolIcon(ToolIcon::SketchXY), tr("Новый эскиз XY"));
+    newSketchXZAction_ = addAction(toolIcon(ToolIcon::SketchXZ), tr("Новый эскиз XZ"));
+    newSketchYZAction_ = addAction(toolIcon(ToolIcon::SketchYZ), tr("Новый эскиз YZ"));
     addSeparator();
-    createSketchAction_ = addAction(tr("Создать эскиз"));
-    enterSketchAction_ = addAction(tr("Войти в эскиз"));
-    exitSketchAction_ = addAction(tr("Выйти из эскиза"));
+    createSketchAction_ = addAction(toolIcon(ToolIcon::CreateSketch), tr("Создать эскиз"));
+    enterSketchAction_ = addAction(toolIcon(ToolIcon::EnterSketch), tr("Войти в эскиз"));
+    exitSketchAction_ = addAction(toolIcon(ToolIcon::ExitSketch), tr("Выйти из эскиза"));
     addSeparator();
 
     toolGroup_ = new QActionGroup(this);
     toolGroup_->setExclusive(true);
 
-    selectToolAction_ = addAction(tr("Выбор"));
-    lineToolAction_ = addAction(tr("Линия"));
-    rectangleToolAction_ = addAction(tr("Прямоугольник"));
-    circleToolAction_ = addAction(tr("Окружность"));
+    selectToolAction_ = addAction(toolIcon(ToolIcon::SelectTool), tr("Выбор"));
+    lineToolAction_ = addAction(toolIcon(ToolIcon::LineTool), tr("Линия"));
+    rectangleToolAction_ = addAction(toolIcon(ToolIcon::RectangleTool), tr("Прямоугольник"));
+    circleToolAction_ = addAction(toolIcon(ToolIcon::CircleTool), tr("Окружность"));
     for (QAction* action :
          {selectToolAction_, lineToolAction_, rectangleToolAction_, circleToolAction_}) {
         action->setCheckable(true);
@@ -38,12 +40,12 @@ SketchToolBar::SketchToolBar(QWidget* parent)
     addSeparator();
 
     // Snap/grid controls. Defaults must match SketchInputOptions.
-    snapGridAction_ = addAction(tr("Привязка к сетке"));
+    snapGridAction_ = addAction(toolIcon(ToolIcon::SnapGrid), tr("Привязка к сетке"));
     snapGridAction_->setCheckable(true);
     snapGridAction_->setChecked(true);
     snapGridAction_->setToolTip(tr("Привязывать ввод эскиза к сетке"));
 
-    showGridAction_ = addAction(tr("Показать сетку"));
+    showGridAction_ = addAction(toolIcon(ToolIcon::ShowGrid), tr("Показать сетку"));
     showGridAction_->setCheckable(true);
     showGridAction_->setChecked(true);
     showGridAction_->setToolTip(tr("Показывать сетку плоскости эскиза"));

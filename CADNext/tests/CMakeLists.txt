@@ -880,6 +880,9 @@ if(CADNEXT_WITH_OCCT)
         add_executable(cadnext_test_thread_dialog test_thread_dialog.cpp)
         target_link_libraries(cadnext_test_thread_dialog PRIVATE cadnext_gui cadnext_kernel)
         add_test(NAME cadnext_test_thread_dialog COMMAND cadnext_test_thread_dialog)
+        add_executable(cadnext_test_gui_tool_icons test_gui_tool_icons.cpp)
+        target_link_libraries(cadnext_test_gui_tool_icons PRIVATE cadnext_gui)
+        add_test(NAME cadnext_test_gui_tool_icons COMMAND cadnext_test_gui_tool_icons)
         # Against a real, independent CAD system. Skipped (not passed) unless
         # CADNEXT_TEST_FREECADCMD points at FreeCADCmd.
         add_executable(cadnext_test_freecad_interchange test_freecad_interchange.cpp)

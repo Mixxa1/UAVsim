@@ -8,7 +8,7 @@ enum CollisionEmergencyAction: String {
     case emergencyStop
 
     var title: String {
-        NSLocalizedString(titleKey, comment: "")
+        L10n.s(titleKey)
     }
 
     var titleKey: String {

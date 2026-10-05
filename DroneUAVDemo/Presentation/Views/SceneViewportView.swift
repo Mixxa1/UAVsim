@@ -3,7 +3,7 @@ import SwiftUI
 import simd
 
 struct SceneViewportView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     var trialPhase: LANTrialPhase = .running
     var recentSharedEvents: [OnlineSharedEvent] = []
     var onEndTrial: (() -> Void)? = nil
@@ -85,7 +85,6 @@ struct SceneViewportView: View {
                     state: payloadOpticsState,
                     thermalState: viewModel.payloadThermalState
                 )
-                .ignoresSafeArea()
             }
 
             if rangefinderOpticsActive {
@@ -463,9 +462,9 @@ private struct PayloadOpticsViewportOverlayView: View {
 
     private var targetText: String {
         guard let target = state.targetDistanceMeters else {
-            return "-- m"
+            return L10n.s("payload.camera.hud.distance_unknown")
         }
-        return String(format: "%.1f m", target)
+        return L10n.f("payload.camera.hud.distance_value", target)
     }
 
     private var zoomText: String {
@@ -473,7 +472,7 @@ private struct PayloadOpticsViewportOverlayView: View {
     }
 
     private var focusText: String {
-        String(format: "%.1f m", state.focusDistanceMeters)
+        L10n.f("payload.camera.hud.distance_value", state.focusDistanceMeters)
     }
 
     private var fovText: String {
@@ -518,8 +517,14 @@ private struct PayloadOpticsViewportOverlayView: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text(feedLabel)
                             .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        Text("ZOOM \(zoomText)")
+                        Text(L10n.s("payload.camera.zoom") + " " + zoomText)
                             .font(.system(size: 18, weight: .semibold, design: .monospaced))
+                        Text(L10n.s("payload.camera.fov") + " " + fovText)
+                            .font(.system(size: 14, weight: .medium, design: .monospaced))
+                        if state.autofocusEnabled {
+                            Text("payload.camera.autofocus")
+                                .font(.system(size: 12, weight: .medium, design: .monospaced))
+                        }
                     }
 
                     Spacer()
@@ -550,18 +555,13 @@ private struct PayloadOpticsViewportOverlayView: View {
 
                 HStack(alignment: .bottom) {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text("FOCUS \(focusText)")
-                        Text("TARGET \(targetText)")
+                        Text(L10n.s("payload.camera.focus") + " " + focusText)
+                        Text(L10n.s("payload.camera.hud.target") + " " + targetText)
                     }
 
                     Spacer()
 
-                    VStack(alignment: .trailing, spacing: 6) {
-                        if state.autofocusEnabled {
-                            Text("AF")
-                        }
-                        Text("FOV \(fovText)")
-                    }
+                    // The lower right belongs to the interactive gimbal controls.
                 }
                 .font(.system(size: 18, weight: .semibold, design: .monospaced))
                 .padding(.horizontal, 32)

@@ -21,9 +21,9 @@ enum ThermalPalette: String, CaseIterable, Identifiable, Codable {
 
     var feedLabel: String {
         switch self {
-        case .whiteHot: return "THERMAL WHITE HOT"
-        case .blackHot: return "THERMAL BLACK HOT"
-        case .iron: return "THERMAL IRON"
+        case .whiteHot: return L10n.s("payload.camera.thermal.palette.white_hot")
+        case .blackHot: return L10n.s("payload.camera.thermal.palette.black_hot")
+        case .iron: return L10n.s("payload.camera.thermal.palette.iron")
         }
     }
 }

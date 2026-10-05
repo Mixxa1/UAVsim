@@ -12,6 +12,9 @@ struct WorkbenchView: View {
     @State private var importRole: WorkbenchAssemblyRole = .frame
     @State private var importArchitecture: WorkbenchVehicleArchitecture = .multicopter
     @State private var isInspectorVisible = true
+    @State private var validationPanel: WorkbenchValidationHub.Panel = .overview
+    @State private var showsRadioParameters = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let accent = GroundControlPalette.accent
     private let shell = GroundControlPalette.shell
@@ -20,22 +23,29 @@ struct WorkbenchView: View {
     private let inset = GroundControlPalette.inset
 
     var body: some View {
-        ZStack {
-            WorkbenchSceneRepresentable(viewModel: viewModel)
-                .ignoresSafeArea()
-
-            VStack(spacing: 0) {
-                topBar
-                HStack(spacing: 0) {
-                    ZStack(alignment: .bottom) {
-                        Color.clear
-                        bottomShelf
-                            .padding(14)
-                    }
-                    if isInspectorVisible {
-                        inspector
-                            .transition(.move(edge: .trailing).combined(with: .opacity))
-                    }
+        VStack(spacing: 0) {
+            topBar
+            HStack(spacing: 0) {
+                VStack(spacing: 0) {
+                    workflowGuide
+                    WorkbenchSceneRepresentable(viewModel: viewModel)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipped()
+                        .overlay(alignment: .bottomLeading) {
+                            Label("Повернуть — перетаскивание · Масштаб — прокрутка · Выбрать — клик", systemImage: "hand.draw")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.7))
+                                .padding(10)
+                                .background(.black.opacity(0.45), in: Capsule())
+                                .padding(12)
+                                .allowsHitTesting(false)
+                        }
+                    bottomShelf.padding(12)
+                }
+                .frame(maxWidth: .infinity)
+                if isInspectorVisible {
+                    inspector
+                        .transition(reduceMotion ? .opacity : .move(edge: .trailing).combined(with: .opacity))
                 }
             }
         }
@@ -47,6 +57,7 @@ struct WorkbenchView: View {
         )) {
             importRoleSheet
         }
+        .animation(reduceMotion ? nil : Motion.panel, value: isInspectorVisible)
     }
 
     // MARK: Top rail
@@ -54,7 +65,7 @@ struct WorkbenchView: View {
     private var categories: [WorkbenchCategory] {
         // Component slots are still available from the menu beside the rail. Keeping them out of
         // the main rail leaves the five workflow steps readable at a glance.
-        [.overview, .validation, .blueprints, .frame, .radio]
+        [.overview, .frame, .radio, .validation, .blueprints]
     }
 
     private var topBar: some View {
@@ -71,7 +82,7 @@ struct WorkbenchView: View {
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Мастерская")
                         .font(.system(size: 19, weight: .bold, design: .rounded))
-                    Text("Сборка и проверка UAV")
+                    Text("От рамы до первого полёта")
                         .font(.caption2.weight(.medium))
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
@@ -114,12 +125,12 @@ struct WorkbenchView: View {
                     WorkbenchReadinessChip(state: viewModel.validation)
                 }
                 .buttonStyle(.plain)
-                .help("Инженерные испытания: \(viewModel.validation.readiness.displayName)")
+                .help("Испытания: \(viewModel.validation.readiness.displayName)")
 
                 Button {
                     onBuildAndTest(viewModel.build)
                 } label: {
-                    Label("Испытать", systemImage: "airplane.departure")
+                    Label("Пробный полёт", systemImage: "airplane.departure")
                         .font(.system(size: 12, weight: .bold))
                         .padding(.horizontal, 14)
                         .frame(height: 36)
@@ -151,12 +162,13 @@ struct WorkbenchView: View {
                 Image(systemName: category.symbolName)
                     .font(.system(size: 16, weight: .semibold))
                 Text(category.displayName)
-                    .font(.system(size: 9, weight: .bold))
+                    .font(.system(size: 10, weight: .semibold))
                     .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
             }
             .foregroundStyle(selected ? .white : GroundControlPalette.textSecondary)
-            .frame(minWidth: 58, maxWidth: 72, minHeight: 47)
-            .padding(.horizontal, 4)
+            .frame(minWidth: 64, minHeight: 47)
+            .padding(.horizontal, 10)
             .background(selected ? accent.opacity(0.18) : Color.clear,
                         in: RoundedRectangle(cornerRadius: 7))
             .overlay(
@@ -213,6 +225,54 @@ struct WorkbenchView: View {
 
     // MARK: Bottom shelf
 
+    private var workflowGuide: some View {
+        HStack(spacing: 12) {
+            Image(systemName: viewModel.selectedCategory.symbolName)
+                .font(.system(size: 19, weight: .medium))
+                .foregroundStyle(accent)
+                .frame(width: 38, height: 38)
+                .background(accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(guideTitle).font(.system(size: 15, weight: .semibold, design: .rounded))
+                Text(guideDetail)
+                    .font(.system(size: 11))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            if viewModel.selectedCategory == .overview {
+                Button("Выбрать раму") { viewModel.selectedCategory = .frame }
+                    .buttonStyle(.bordered)
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(.horizontal, 18)
+        .padding(.vertical, 12)
+        .background(shell)
+    }
+
+    private var guideTitle: String {
+        switch viewModel.selectedCategory {
+        case .overview: return "Соберите аппарат в три шага"
+        case .frame: return "Начните с основы"
+        case .radio: return "Настройте связь с аппаратом"
+        case .validation: return "Проверьте, как поведёт себя сборка"
+        case .blueprints: return "Ваши сохранённые сборки"
+        case let .slot(kind): return "Выберите: \(kind.displayName.lowercased())"
+        }
+    }
+
+    private var guideDetail: String {
+        switch viewModel.selectedCategory {
+        case .overview: return "1. Рама → 2. Детали → 3. Проверка. Нажмите на деталь в модели, чтобы заменить её."
+        case .frame: return "Выберите карточку снизу. Геометрия и совместимость деталей обновятся сразу."
+        case .radio: return "Управление, видео и телеметрия — три отдельных канала. Начните с готовых настроек."
+        case .validation: return "Выберите расчёт снизу. Пробный полёт доступен отдельно и не заменяет испытания."
+        case .blueprints: return "Сохраните текущий аппарат или выберите сборку, с которой хотите продолжить."
+        case .slot: return "Карточки показывают реальные детали в 3D. Параметры и совместимость находятся справа."
+        }
+    }
+
     @ViewBuilder
     private var bottomShelf: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -249,7 +309,7 @@ struct WorkbenchView: View {
                 case .overview:
                     overviewShelf
                 case .validation:
-                    WorkbenchValidationShelf(state: viewModel.validation)
+                    validationShelf
                 case .blueprints:
                     blueprintsShelf
                 case .frame:
@@ -277,13 +337,13 @@ struct WorkbenchView: View {
         case .validation: return L10n.s("workbench.validation.shelf_subtitle")
         case .blueprints: return "Сохранённые удачные сборки"
         case .frame: return "Выберите базовую геометрию аппарата"
-        case .radio: return "Физические CONTROL / VIDEO / TELEMETRY и QoS"
+        case .radio: return "Управление · Видео · Телеметрия"
         case let .slot(kind): return "Каждая карточка — отдельная 3D-модель · \(kind.displayName)"
         }
     }
 
     private var overviewShelf: some View {
-        HStack(spacing: 12) {
+        horizontalCards {
             newAircraftMenu
             quickAction("square.stack.3d.up.fill", "В каталог", "Сохранить в «Пользовательские»") {
                 viewModel.saveFavorite()
@@ -294,9 +354,36 @@ struct WorkbenchView: View {
             quickAction("folder", "Открыть файл", "Импорт Blueprint с диска") {
                 openBlueprint()
             }
-            Spacer()
         }
-        .padding(16)
+    }
+
+    private var validationShelf: some View {
+        horizontalCards {
+            ForEach(WorkbenchValidationHub.Panel.allCases) { value in
+                Button {
+                    validationPanel = value
+                    isInspectorVisible = true
+                } label: {
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack {
+                            Image(systemName: value.icon).font(.system(size: 25, weight: .light)).foregroundStyle(accent)
+                            Spacer()
+                            Image(systemName: "arrow.up.right").foregroundStyle(.secondary)
+                        }
+                        Text(value == .cfd ? "Аэродинамика" : value.title)
+                            .font(.system(size: 14, weight: .semibold, design: .rounded))
+                        Text(value == .overview ? "Статус всех испытаний" : value == .cfd ? "Обтекание и силы в полёте" : "Нагрузки, удары и резонанс")
+                            .font(.system(size: 11)).foregroundStyle(GroundControlPalette.textSecondary)
+                    }
+                    .foregroundStyle(.white)
+                    .padding(16)
+                    .frame(width: 200, height: 146, alignment: .topLeading)
+                    .background(validationPanel == value ? accent.opacity(0.14) : raised, in: RoundedRectangle(cornerRadius: 14))
+                    .overlay(RoundedRectangle(cornerRadius: 14).stroke(validationPanel == value ? accent : GroundControlPalette.borderStrong))
+                }
+                .buttonStyle(ShellButtonStyle(cornerRadius: 14, hoverScale: 1.01))
+            }
+        }
     }
 
     private var newAircraftMenu: some View {
@@ -408,7 +495,7 @@ struct WorkbenchView: View {
                     .font(.system(size: 9, design: .monospaced))
                 }
             } title: {
-                Text(link.kind.rawValue.uppercased())
+                Text(radioTitle(link.kind))
             } detail: {
                 Text(String(
                     format: "QoS P%d · reserve %.0f kbit/s",
@@ -421,7 +508,7 @@ struct WorkbenchView: View {
     }
 
     private func horizontalCards<Content: View>(@ViewBuilder content: () -> Content) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
+        ScrollView(.horizontal, showsIndicators: true) {
             LazyHStack(spacing: 10) { content() }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -581,7 +668,7 @@ struct WorkbenchView: View {
                             .font(.system(size: 20, weight: .bold, design: .rounded))
                     }
                     Spacer()
-                    readinessBadge
+                    if viewModel.selectedCategory != .validation { readinessBadge }
                     Button {
                         withAnimation(.easeInOut(duration: 0.18)) {
                             isInspectorVisible = false
@@ -600,7 +687,7 @@ struct WorkbenchView: View {
                 case .overview, .blueprints:
                     buildInspector
                 case .validation:
-                    WorkbenchValidationHub(viewModel: viewModel)
+                    WorkbenchValidationHub(viewModel: viewModel, selectedPanel: $validationPanel)
                 case .frame:
                     frameInspector
                 case .radio:
@@ -635,7 +722,7 @@ struct WorkbenchView: View {
     private var readinessBadge: some View {
         HStack(spacing: 5) {
             Circle().fill(viewModel.stats.isFlightReady ? Color.green : Color.orange).frame(width: 6, height: 6)
-            Text(viewModel.stats.isFlightReady ? "Готово" : "Проверка")
+            Text(viewModel.stats.isFlightReady ? "Совместимо" : "Есть ошибки")
                 .font(.caption2.weight(.bold))
         }
         .padding(.horizontal, 8).padding(.vertical, 6)
@@ -699,6 +786,89 @@ struct WorkbenchView: View {
 
     @ViewBuilder
     private var radioInspector: some View {
+        inspectorSection("Канал", icon: "antenna.radiowaves.left.and.right") {
+            HStack(spacing: 10) {
+                Label("Станция", systemImage: "gamecontroller")
+                Image(systemName: viewModel.selectedRFLinkKind == .control ? "arrow.right" : "arrow.left")
+                    .foregroundStyle(accent)
+                Label("Аппарат", systemImage: "airplane")
+            }
+            .font(.caption)
+            .foregroundStyle(GroundControlPalette.textSecondary)
+            Picker("", selection: Binding(
+                get: { viewModel.selectedRFLinkKind },
+                set: { viewModel.selectRFLink($0) }
+            )) {
+                ForEach(viewModel.build.rfSystem.logicalLinks.all) { link in
+                    Text(radioTitle(link.kind)).tag(link.kind)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .frame(height: 28)
+            Text(radioHint(viewModel.selectedRFLinkKind))
+                .font(.system(size: 11))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+
+        if !showsRadioParameters, let link = viewModel.selectedRFLink,
+           let transmitter = viewModel.rfDevice(id: link.transmitterDeviceID) {
+            inspectorSection("Основные параметры", icon: "slider.horizontal.3") {
+                rfNumberField("Частота", value: Binding(
+                    get: { transmitter.centerFrequencyHz / 1_000_000 },
+                    set: { viewModel.setRFFrequencyMHz($0, for: link.kind) }
+                ), suffix: "MHz", fractionDigits: 3)
+                rfNumberField("Мощность", value: Binding(
+                    get: { transmitter.txPowerDBm ?? 0 },
+                    set: { viewModel.setRFTxPowerDBm($0, for: link.kind) }
+                ), suffix: "dBm")
+                Text("Частота определяет диапазон связи. Мощность влияет на уровень сигнала; препятствия и ориентация антенн тоже имеют значение.")
+                    .font(.system(size: 11))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+
+        if !viewModel.rfConfigurationIssues.isEmpty {
+            inspectorSection("Проверьте настройки", icon: "exclamationmark.triangle") {
+                ForEach(Array(viewModel.rfConfigurationIssues.enumerated()), id: \.offset) { _, issue in
+                    issueRow(issue.detail, icon: "exclamationmark.triangle.fill",
+                             color: issue.severity == .error ? .red : .orange)
+                }
+            }
+        }
+
+        DisclosureGroup("Параметры", isExpanded: $showsRadioParameters) {
+            VStack(alignment: .leading, spacing: 16) {
+                radioParametersInspector
+            }
+            .padding(.top, 14)
+        }
+        .font(.system(size: 12, weight: .semibold))
+        .tint(accent)
+    }
+
+    private func radioTitle(_ kind: LogicalLinkKind) -> String {
+        switch kind {
+        case .control: return "Управление"
+        case .video: return "Видео"
+        case .telemetry: return "Телеметрия"
+        case .payloadData: return "Оборудование"
+        }
+    }
+
+    private func radioHint(_ kind: LogicalLinkKind) -> String {
+        switch kind {
+        case .control: return "Передаёт команды пилота аппарату. Стабильность этого канала важнее качества изображения."
+        case .video: return "Передаёт изображение с бортовой камеры на наземную станцию."
+        case .telemetry: return "Возвращает высоту, скорость, заряд и состояние аппарата."
+        case .payloadData: return "Передаёт данные бортовых датчиков и полезной нагрузки."
+        }
+    }
+
+    @ViewBuilder
+    private var radioParametersInspector: some View {
         let configuration = viewModel.build.rfSystem
         inspectorSection("RF-конфигурация", icon: "antenna.radiowaves.left.and.right") {
             statRow("Источник", configuration.origin.rawValue)
@@ -706,15 +876,6 @@ struct WorkbenchView: View {
             statRow("Устройства", "\(configuration.devices.count)")
             statRow("Антенны", "\(configuration.antennas.count)")
 
-            Picker("Логический канал", selection: Binding(
-                get: { viewModel.selectedRFLinkKind },
-                set: { viewModel.selectRFLink($0) }
-            )) {
-                ForEach(configuration.logicalLinks.all) { link in
-                    Text(link.kind.rawValue.uppercased()).tag(link.kind)
-                }
-            }
-            .pickerStyle(.segmented)
         }
 
         if let link = viewModel.selectedRFLink,
@@ -742,6 +903,7 @@ struct WorkbenchView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .fixedSize(horizontal: false, vertical: true)
                 } else {
                     statRow("Полоса", String(format: "%.3f MHz", transmitter.bandwidthHz / 1_000_000))
                 }
@@ -779,6 +941,7 @@ struct WorkbenchView: View {
                         Text("Fiber / tether · clean/dropout").tag(RFVideoTransmissionMode.fiber)
                     }
                     .pickerStyle(.menu)
+                    .fixedSize(horizontal: false, vertical: true)
                 }
                 statRow("TX", "\(transmitter.id) · \(transmitter.endpoint.rawValue)")
                 statRow("RX", "\(receiver.id) · \(receiver.endpoint.rawValue)")
@@ -942,6 +1105,7 @@ struct WorkbenchView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .fixedSize(horizontal: false, vertical: true)
 
                 Text("Фазовый центр / mount transform")
                     .font(.system(size: 9, weight: .bold))

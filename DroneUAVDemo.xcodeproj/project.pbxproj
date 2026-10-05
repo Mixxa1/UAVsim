@@ -129,6 +129,9 @@
 		100000000000000000000223 /* AbstractModelEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000123 /* AbstractModelEditorView.swift */; };
 		100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000124 /* CompactTelemetryHUDView.swift */; };
 		100000000000000000000C73 /* WorldClockChipView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000C74 /* WorldClockChipView.swift */; };
+		B0710000000000000000A002 /* Motion.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0710000000000000000A001 /* Motion.swift */; };
+		B0710000000000000000A004 /* ShellDesign.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0710000000000000000A003 /* ShellDesign.swift */; };
+		B0710000000000000000A006 /* SimulationObservedObject.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0710000000000000000A005 /* SimulationObservedObject.swift */; };
 		100000000000000000000225 /* Localizable.strings in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000126 /* Localizable.strings */; };
 		100000000000000000000226 /* KeyBindingsSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000129 /* KeyBindingsSettingsView.swift */; };
 		100000000000000000000228 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000012B /* Assets.xcassets */; };
@@ -333,6 +336,7 @@
 		1000000000000000000002DB /* MissionReplayRecordSummary.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DA /* MissionReplayRecordSummary.swift */; };
 		1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DC /* MissionReplayPlayer.swift */; };
 		1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DE /* MissionReplaySceneController.swift */; };
+				BA7200000000000000000002 /* MissionReplayWorldVisuals.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7200000000000000000001 /* MissionReplayWorldVisuals.swift */; };
 		1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */; };
 		100000000000000000000421 /* ReplayGizmoInteraction.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000420 /* ReplayGizmoInteraction.swift */; };
 		1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1000000000000000000002E2 /* ReplayCameraMode.swift */; };
@@ -501,6 +505,7 @@
 		7C0F0000000000000000B008 /* ThermalSurfaceClassifier.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F008 /* ThermalSurfaceClassifier.swift */; };
 		7C0F0000000000000000B009 /* ThermalProxyRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F009 /* ThermalProxyRenderer.swift */; };
 		7C0F0000000000000000B00A /* ThermalRealTexture.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7C0F0000000000000000F00A /* ThermalRealTexture.swift */; };
+				BA7200000000000000000004 /* ThermalImportedSurfaceMaterial.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA7200000000000000000003 /* ThermalImportedSurfaceMaterial.swift */; };
 		F20000000000000000000001 /* WorkbenchBuild.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000001 /* WorkbenchBuild.swift */; };
 		F20000000000000000000002 /* WorkbenchBuildAnalyzer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000002 /* WorkbenchBuildAnalyzer.swift */; };
 		F20000000000000000000003 /* WorkbenchBuildStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F10000000000000000000003 /* WorkbenchBuildStore.swift */; };
@@ -704,6 +709,9 @@
 		100000000000000000000123 /* AbstractModelEditorView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AbstractModelEditorView.swift; sourceTree = "<group>"; };
 		100000000000000000000124 /* CompactTelemetryHUDView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactTelemetryHUDView.swift; sourceTree = "<group>"; };
 		100000000000000000000C74 /* WorldClockChipView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldClockChipView.swift; sourceTree = "<group>"; };
+		B0710000000000000000A001 /* Motion.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Motion.swift; sourceTree = "<group>"; };
+		B0710000000000000000A003 /* ShellDesign.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShellDesign.swift; sourceTree = "<group>"; };
+		B0710000000000000000A005 /* SimulationObservedObject.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SimulationObservedObject.swift; sourceTree = "<group>"; };
 		100000000000000000000127 /* en */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = en; path = en.lproj/Localizable.strings; sourceTree = "<group>"; };
 		100000000000000000000128 /* ru */ = {isa = PBXFileReference; lastKnownFileType = text.plist.strings; name = ru; path = ru.lproj/Localizable.strings; sourceTree = "<group>"; };
 		100000000000000000000129 /* KeyBindingsSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyBindingsSettingsView.swift; sourceTree = "<group>"; };
@@ -907,6 +915,7 @@
 		1000000000000000000002DA /* MissionReplayRecordSummary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayRecordSummary.swift; sourceTree = "<group>"; };
 		1000000000000000000002DC /* MissionReplayPlayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayPlayer.swift; sourceTree = "<group>"; };
 		1000000000000000000002DE /* MissionReplaySceneController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneController.swift; sourceTree = "<group>"; };
+				BA7200000000000000000001 /* MissionReplayWorldVisuals.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayWorldVisuals.swift; sourceTree = "<group>"; };
 		1000000000000000000002DF /* MissionReplaySceneViewRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplaySceneViewRepresentable.swift; sourceTree = "<group>"; };
 		100000000000000000000420 /* ReplayGizmoInteraction.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayGizmoInteraction.swift; sourceTree = "<group>"; };
 		1000000000000000000002E2 /* ReplayCameraMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReplayCameraMode.swift; sourceTree = "<group>"; };
@@ -1076,6 +1085,7 @@
 		7C0F0000000000000000F008 /* ThermalSurfaceClassifier.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalSurfaceClassifier.swift; sourceTree = "<group>"; };
 		7C0F0000000000000000F009 /* ThermalProxyRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalProxyRenderer.swift; sourceTree = "<group>"; };
 		7C0F0000000000000000F00A /* ThermalRealTexture.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalRealTexture.swift; sourceTree = "<group>"; };
+				BA7200000000000000000003 /* ThermalImportedSurfaceMaterial.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThermalImportedSurfaceMaterial.swift; sourceTree = "<group>"; };
 		F10000000000000000000001 /* WorkbenchBuild.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchBuild.swift; sourceTree = "<group>"; };
 		F10000000000000000000002 /* WorkbenchBuildAnalyzer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchBuildAnalyzer.swift; sourceTree = "<group>"; };
 		F10000000000000000000003 /* WorkbenchBuildStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchBuildStore.swift; sourceTree = "<group>"; };
@@ -1522,6 +1532,7 @@
 				10000000000000000000FE90 /* CarrierAircraftLoader.swift */,
 				100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */,
 				1000000000000000000002DE /* MissionReplaySceneController.swift */,
+				BA7200000000000000000001 /* MissionReplayWorldVisuals.swift */,
 				7C0F000000000000000000F0 /* Thermal */,
 			);
 			path = Scene;
@@ -1571,6 +1582,9 @@
 				100000000000000000000123 /* AbstractModelEditorView.swift */,
 				100000000000000000000124 /* CompactTelemetryHUDView.swift */,
 				100000000000000000000C74 /* WorldClockChipView.swift */,
+				B0710000000000000000A001 /* Motion.swift */,
+				B0710000000000000000A003 /* ShellDesign.swift */,
+				B0710000000000000000A005 /* SimulationObservedObject.swift */,
 				100000000000000000000154 /* CompassOverlayView.swift */,
 				100000000000000000000101 /* ContentView.swift */,
 				1000000000000000000001AA /* ControllerCursorOverlay.swift */,
@@ -1872,6 +1886,7 @@
 				7C0F0000000000000000F008 /* ThermalSurfaceClassifier.swift */,
 				7C0F0000000000000000F009 /* ThermalProxyRenderer.swift */,
 				7C0F0000000000000000F00A /* ThermalRealTexture.swift */,
+				BA7200000000000000000003 /* ThermalImportedSurfaceMaterial.swift */,
 			);
 			path = Thermal;
 			sourceTree = "<group>";
@@ -2331,6 +2346,9 @@
 				1000000000000000000002B7 /* BindingsViewModel.swift in Sources */,
 				100000000000000000000224 /* CompactTelemetryHUDView.swift in Sources */,
 				100000000000000000000C73 /* WorldClockChipView.swift in Sources */,
+				B0710000000000000000A002 /* Motion.swift in Sources */,
+				B0710000000000000000A004 /* ShellDesign.swift in Sources */,
+				B0710000000000000000A006 /* SimulationObservedObject.swift in Sources */,
 				100000000000000000000251 /* CompassOverlayView.swift in Sources */,
 				100000000000000000000250 /* CompassViewModel.swift in Sources */,
 				100000000000000000000252 /* PayloadCameraController.swift in Sources */,
@@ -2516,6 +2534,7 @@
 				1000000000000000000002DB /* MissionReplayRecordSummary.swift in Sources */,
 				1000000000000000000002DD /* MissionReplayPlayer.swift in Sources */,
 				1000000000000000000002E0 /* MissionReplaySceneController.swift in Sources */,
+				BA7200000000000000000002 /* MissionReplayWorldVisuals.swift in Sources */,
 				1000000000000000000002E1 /* MissionReplaySceneViewRepresentable.swift in Sources */,
 				100000000000000000000421 /* ReplayGizmoInteraction.swift in Sources */,
 				1000000000000000000002E3 /* ReplayCameraMode.swift in Sources */,
@@ -2576,6 +2595,7 @@
 				7C0F0000000000000000B008 /* ThermalSurfaceClassifier.swift in Sources */,
 				7C0F0000000000000000B009 /* ThermalProxyRenderer.swift in Sources */,
 				7C0F0000000000000000B00A /* ThermalRealTexture.swift in Sources */,
+				BA7200000000000000000004 /* ThermalImportedSurfaceMaterial.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

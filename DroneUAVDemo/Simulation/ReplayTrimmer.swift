@@ -27,7 +27,8 @@ struct ReplayTrimmer {
                     skinTemperatureK: frame.skinTemperatureK,
                     envelopeLimitKey: frame.envelopeLimitKey,
                     envelopeWorstFraction: frame.envelopeWorstFraction,
-                    rfSnapshot: frame.rfSnapshot
+                    rfSnapshot: frame.rfSnapshot,
+                    world: frame.world
                 )
             }
 
@@ -40,7 +41,8 @@ struct ReplayTrimmer {
                     type: event.type,
                     message: event.message,
                     position: event.position,
-                    damage: event.damage
+                    damage: event.damage,
+                    interception: event.interception
                 )
             }
 
@@ -52,7 +54,8 @@ struct ReplayTrimmer {
             frames: trimmedFrames,
             events: trimmedEvents,
             context: session.context,
-            rfArtifacts: session.rfArtifacts
+            rfArtifacts: session.rfArtifacts,
+            visualAssets: session.visualAssets
         )
     }
 }

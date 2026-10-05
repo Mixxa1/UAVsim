@@ -74,17 +74,10 @@ struct PayloadView<StationsContent: View>: View {
         VStack(spacing: 8) {
             HStack(alignment: .center, spacing: 14) {
                 HStack(spacing: 8) {
-                    Rectangle()
-                        .fill(Color.cyan.opacity(0.92))
-                        .frame(width: 3, height: 20)
-                    Rectangle()
-                        .fill(Color.cyan.opacity(0.55))
-                        .frame(width: 8, height: 2)
                     VStack(alignment: .leading, spacing: 2) {
                         Text("payload.section")
                             .font(.system(size: 17, weight: .bold, design: .rounded))
-                            .tracking(0.9)
-                            .foregroundStyle(Color(red: 0.74, green: 0.87, blue: 1.0))
+                                                        .foregroundStyle(GroundControlPalette.textPrimary)
                             .lineLimit(1)
                             .minimumScaleFactor(0.84)
                         Text("payload.catalog.subtitle")
@@ -99,8 +92,7 @@ struct PayloadView<StationsContent: View>: View {
                 VStack(alignment: .trailing, spacing: 2) {
                     Text("payload.active_uav")
                         .font(.system(size: 9, weight: .bold))
-                        .tracking(0.6)
-                        .foregroundStyle(.white.opacity(0.38))
+                                                .foregroundStyle(.white.opacity(0.38))
                     Text(activeUAVProfile?.localizedDisplayName ?? L10n.s("common.not_specified"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.88))
@@ -127,16 +119,8 @@ struct PayloadView<StationsContent: View>: View {
             HStack(spacing: 7) {
                 Text("payload.status")
                     .font(.system(size: 9, weight: .bold))
-                    .tracking(0.6)
-                    .foregroundStyle(.white.opacity(0.34))
+                                        .foregroundStyle(.white.opacity(0.34))
                 consoleBadge(title: payloadState.title, tint: statusTint)
-                consoleBadge(title: payloadMountState.title, tint: mountTint)
-                if let payloadDataResolution {
-                    consoleBadge(
-                        title: payloadDataResolution.sourceQuality.title,
-                        tint: payloadDataTint(for: payloadDataResolution.sourceQuality)
-                    )
-                }
 
                 Spacer(minLength: 12)
 
@@ -155,16 +139,7 @@ struct PayloadView<StationsContent: View>: View {
         VStack(alignment: .leading, spacing: 0) {
             ZStack(alignment: .topLeading) {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.105, green: 0.115, blue: 0.12),
-                                Color(red: 0.065, green: 0.070, blue: 0.075)
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
+                    .fill(GroundControlPalette.inset)
 
                 PayloadLivePreviewView(
                     configuration: configuration,
@@ -389,7 +364,7 @@ struct PayloadView<StationsContent: View>: View {
                         }
                     )
 
-                    Text("kg")
+                    Text("common.unit.kg")
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.white.opacity(0.48))
                 }
@@ -806,50 +781,27 @@ struct PayloadView<StationsContent: View>: View {
 
     private var shellBackground: some View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.115, green: 0.125, blue: 0.15),
-                        Color(red: 0.065, green: 0.075, blue: 0.095)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(GroundControlPalette.shell)
     }
 
     private var shellStroke: some View {
         RoundedRectangle(cornerRadius: 22, style: .continuous)
-            .stroke(Color.white.opacity(0.09), lineWidth: 1)
+            .stroke(GroundControlPalette.border, lineWidth: 1)
     }
 
     private func chromePanel(accent: Color) -> some View {
         RoundedRectangle(cornerRadius: 16, style: .continuous)
-            .fill(
-                LinearGradient(
-                    colors: [Color.white.opacity(0.045), Color.black.opacity(0.16)],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
-            )
+            .fill(GroundControlPalette.panel)
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(Color.white.opacity(0.065), lineWidth: 1)
+                    .stroke(GroundControlPalette.border, lineWidth: 1)
             )
-            .overlay(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(accent)
-                    .frame(width: 38, height: 3)
-                    .padding(.horizontal, 12)
-                    .padding(.top, 8)
-            }
     }
 
     private func sectionHeader(titleKey: String) -> some View {
         Text(LocalizedStringKey(titleKey))
             .font(.caption.weight(.semibold))
-            .tracking(0.7)
-            .foregroundStyle(.white.opacity(0.68))
+                        .foregroundStyle(.white.opacity(0.68))
     }
 
     private func consoleBadge(title: String, tint: Color) -> some View {

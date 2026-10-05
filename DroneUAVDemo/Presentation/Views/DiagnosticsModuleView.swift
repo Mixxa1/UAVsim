@@ -3,7 +3,7 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 struct DiagnosticsModuleView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     @Binding var appLanguage: AppLanguage
     @State private var activePanel: DiagnosticsDetailPanel = .overview
     @State private var rfExportStatusKey: String?
@@ -735,7 +735,7 @@ struct DiagnosticsModuleView: View {
 }
 
 private struct BlackBoxReplaySection: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     var body: some View {
         ModuleSection(
@@ -749,13 +749,13 @@ private struct BlackBoxReplaySection: View {
                               ? GroundControlPalette.danger
                               : GroundControlPalette.textSecondary)
                         .frame(width: 8, height: 8)
-                    Text(viewModel.isMissionReplayRecording ? "Recording: ON" : "Recording: OFF")
+                    Text(LocalizedStringKey(viewModel.isMissionReplayRecording ? "blackbox.recording.on" : "blackbox.recording.off"))
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(viewModel.isMissionReplayRecording
                                          ? GroundControlPalette.danger
                                          : GroundControlPalette.textSecondary)
                     Spacer()
-                    Text("Session source: ARM → DISARM")
+                    Text("blackbox.recording.lifecycle")
                         .font(.caption2)
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
@@ -763,7 +763,7 @@ private struct BlackBoxReplaySection: View {
                 if let report = viewModel.lastMissionReport {
                     BlackBoxReportView(report: report)
                 } else {
-                    Text("No black box replay recorded yet.")
+                    Text("blackbox.recording.empty")
                         .font(.caption)
                         .foregroundStyle(GroundControlPalette.textSecondary)
                 }
@@ -780,7 +780,7 @@ private struct BlackBoxReportView: View {
             ModuleMetricGrid {
                 ModuleMetricCell(
                     labelKey: "blackbox.duration",
-                    value: String(format: "%.1f s", report.summary.durationSeconds)
+                    value: L10n.f("common.time.seconds", report.summary.durationSeconds)
                 )
                 ModuleMetricCell(
                     labelKey: "blackbox.frames",
@@ -796,19 +796,19 @@ private struct BlackBoxReportView: View {
                 )
                 ModuleMetricCell(
                     labelKey: "blackbox.max_speed",
-                    value: String(format: "%.1f m/s", report.summary.maxSpeedMetersPerSecond)
+                    value: L10n.f("common.speed.meters_per_second", report.summary.maxSpeedMetersPerSecond)
                 )
                 ModuleMetricCell(
                     labelKey: "blackbox.avg_speed",
-                    value: String(format: "%.1f m/s", report.summary.averageSpeedMetersPerSecond)
+                    value: L10n.f("common.speed.meters_per_second", report.summary.averageSpeedMetersPerSecond)
                 )
                 ModuleMetricCell(
                     labelKey: "blackbox.max_alt",
-                    value: String(format: "%.1f m", report.summary.maxAltitudeMeters)
+                    value: L10n.f("common.distance.m_precise", report.summary.maxAltitudeMeters)
                 )
                 ModuleMetricCell(
                     labelKey: "blackbox.battery_used",
-                    value: report.summary.batteryUsedPercent.map { String(format: "%.1f %%", $0) } ?? "n/a"
+                    value: report.summary.batteryUsedPercent.map { String(format: "%.1f %%", $0) } ?? L10n.s("common.na")
                 )
             }
 
@@ -816,21 +816,21 @@ private struct BlackBoxReportView: View {
                 ModuleMetricGrid {
                     ModuleMetricCell(
                         labelKey: "blackbox.rf.min_rssi",
-                        value: rf.minimumRSSIDBm.map { String(format: "%.1f dBm", $0) } ?? "n/a"
+                        value: rf.minimumRSSIDBm.map { L10n.f("common.signal.dbm", $0) } ?? L10n.s("common.na")
                     )
                     ModuleMetricCell(
                         labelKey: "blackbox.rf.min_sinr",
-                        value: rf.minimumSINRDB.map { String(format: "%.1f dB", $0) } ?? "n/a"
+                        value: rf.minimumSINRDB.map { L10n.f("common.signal.db", $0) } ?? L10n.s("common.na")
                     )
                     ModuleMetricCell(
                         labelKey: "blackbox.rf.max_age",
-                        value: String(format: "%.3f s", rf.maximumCommandAgeSeconds)
+                        value: L10n.f("common.time.seconds_precise", rf.maximumCommandAgeSeconds)
                     )
                     ModuleMetricCell(
                         labelKey: "blackbox.rf.delivery",
                         value: rf.averageDeliveryRatio.map {
                             String(format: "%.2f %%", $0 * 100)
-                        } ?? "n/a"
+                        } ?? L10n.s("common.na")
                     )
                     ModuleMetricCell(
                         labelKey: "blackbox.rf.retries",
@@ -1098,7 +1098,7 @@ private struct DiagnosticsDetailScrollView<Content: View>: View {
 }
 
 private struct DiagnosticsPinnedHeaderView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     private let columns = [
         GridItem(.flexible(), spacing: 6),
@@ -1123,12 +1123,6 @@ private struct DiagnosticsPinnedHeaderView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .layoutPriority(1)
 
-                Spacer(minLength: 8)
-
-                StatusBadge(
-                    titleKey: viewModel.telemetry.armStateKey,
-                    tint: viewModel.isArmed ? GroundControlPalette.success : GroundControlPalette.warning
-                )
             }
 
             LazyVGrid(columns: columns, spacing: 6) {
@@ -1191,7 +1185,7 @@ private struct DiagnosticsPinnedHeaderView: View {
     }
 
     private func localized(_ key: String) -> String {
-        NSLocalizedString(key, comment: "")
+        L10n.s(key)
     }
 }
 

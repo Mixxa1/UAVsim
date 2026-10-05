@@ -588,6 +588,6 @@ extension UAVProfile {
 }
 
 private func localizedCatalogString(key: String, fallback: String) -> String {
-    let localized = NSLocalizedString(key, comment: "")
+    let localized = L10n.s(key)
     return localized == key ? fallback : localized
 }

@@ -8,6 +8,22 @@ import AppKit
 /// Any node can force a class with `node.userData["thermalClass"] = "foliage"` (etc.).
 enum ThermalSurfaceClassifier {
 
+    /// Material identity is more specific than the containing building/terrain node. Roof and
+    /// window slots must survive even when the whole imported mesh is named "building".
+    static func classify(material: SCNMaterial, fallback: ThermalMaterialClass) -> ThermalMaterialClass {
+        if let name = material.name {
+            if name.hasPrefix("world.facade.") { return .building }
+            if name.hasPrefix("world.roof.") { return .roof }
+            if let cls = classifyToken(name) {
+                return fallback == .metal && cls == .building ? .metal : cls
+            }
+        }
+        if let name = textureName(material.diffuse.contents), let cls = classifyToken(name) { return cls }
+        // Painted containers can have an internal material called "wall"; their coating is still
+        // metal-backed. Keep the established object override in this ambiguous case.
+        return fallback
+    }
+
     /// Explicit per-node override via `userData["thermalClass"]`. SceneKit's `userData` isn't
     /// surfaced as a Swift property in this SDK, so it's read through KVC.
     static func override(for node: SCNNode) -> ThermalMaterialClass? {
@@ -68,7 +84,7 @@ enum ThermalSurfaceClassifier {
         if has("tree") { return .foliage }
 
         if has("snow_patch", "snow_footstep", "snowfall", "snow") { return .snow }
-        if has("ice", "frost", "glacier") { return .ice }
+        if s == "ice" || has("ice_", "_ice", "frost", "glacier") { return .ice }
         // "sea" deliberately excluded: a bare 3-letter substring collides with real, unrelated
         // assets in this project — "seaCargoContainer"/"Sea_cargo_container_...usdz" (a metal
         // shipping container, confirmed misclassified as water) and "Seamless_Brittle_Stone.usdz"

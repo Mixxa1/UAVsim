@@ -39,6 +39,7 @@ final class ReplayVideoExportService: ObservableObject {
         settings: ReplayVideoExportSettings,
         outputURL: URL,
         cameraMode: ReplayCameraMode,
+        cameraSubjectID: String = "player",
         renderOverlay: Bool,
         selectedEvent: MissionReplayEvent? = nil,
         progressHandler: ((Double) -> Void)? = nil
@@ -61,6 +62,7 @@ final class ReplayVideoExportService: ObservableObject {
                 settings: settings,
                 outputURL: outputURL,
                 cameraMode: cameraMode,
+                cameraSubjectID: cameraSubjectID,
                 renderOverlay: renderOverlay,
                 selectedEvent: selectedEvent,
                 progressHandler: progressHandler
@@ -106,6 +108,7 @@ final class ReplayVideoExportService: ObservableObject {
         settings: ReplayVideoExportSettings,
         outputURL: URL,
         cameraMode: ReplayCameraMode,
+        cameraSubjectID: String,
         renderOverlay: Bool,
         selectedEvent: MissionReplayEvent?,
         progressHandler: ((Double) -> Void)?
@@ -207,6 +210,8 @@ final class ReplayVideoExportService: ObservableObject {
 
         let controller = MissionReplaySceneController()
         controller.loadSession(session, events: session.events)
+        await controller.waitForImportedWorld()
+        controller.setCameraSubject(cameraSubjectID)
         controller.prepareForVideoExport(renderOptions)
         controller.setCameraMode(cameraMode)
         if cameraMode == .cinematicEvent {
@@ -236,6 +241,7 @@ final class ReplayVideoExportService: ObservableObject {
                 let replayTime = min(trim.endTime, trim.startTime + videoTime * settings.playbackSpeed)
                 if let frame = frameForExportTime(replayTime, frames: sortedFrames) {
                     controller.update(frame: frame, replayTime: replayTime, duration: sourceDuration)
+                    if controller.hasImportedWorld { await controller.updateImportedWorldStreaming() }
                 }
 
                 guard let pool = adaptor.pixelBufferPool else {
@@ -367,7 +373,14 @@ final class ReplayVideoExportService: ObservableObject {
             batteryPercent: lerpOptional(start.batteryPercent, end.batteryPercent, t),
             payloadStatusDescription: chosen.payloadStatusDescription,
             warningCount: max(start.warningCount, end.warningCount),
-            rfSnapshot: chosen.rfSnapshot
+            machNumber: lerpOptional(start.machNumber, end.machNumber, t),
+            dynamicPressurePa: lerpOptional(start.dynamicPressurePa, end.dynamicPressurePa, t),
+            loadFactor: lerpOptional(start.loadFactor, end.loadFactor, t),
+            skinTemperatureK: lerpOptional(start.skinTemperatureK, end.skinTemperatureK, t),
+            envelopeLimitKey: chosen.envelopeLimitKey,
+            envelopeWorstFraction: lerpOptional(start.envelopeWorstFraction, end.envelopeWorstFraction, t),
+            rfSnapshot: chosen.rfSnapshot,
+            world: MissionReplayWorldSnapshot.interpolated(start.world, end.world, fraction: t)
         )
     }
 

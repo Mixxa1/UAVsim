@@ -25,9 +25,9 @@ enum WorkbenchCategory: Hashable, Identifiable {
         switch self {
         case .overview: return "Сборка"
         case .validation: return "Испытания"
-        case .blueprints: return "Пользовательские"
+        case .blueprints: return "Мои сборки"
         case .frame: return "Рама"
-        case .radio: return "RF-система"
+        case .radio: return "Связь"
         case let .slot(kind): return kind.shortName
         }
     }

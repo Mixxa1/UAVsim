@@ -7,7 +7,7 @@ enum PayloadCameraLifecycleState: String, Equatable {
     case rest
 
     var title: String {
-        NSLocalizedString(titleKey, comment: "")
+        L10n.s(titleKey)
     }
 
     var titleKey: String {

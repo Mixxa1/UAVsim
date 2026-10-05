@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct CameraModuleView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     @State private var showAdvancedControls = false
     @State private var showOSDEditor = false

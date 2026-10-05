@@ -7,6 +7,21 @@ struct MissionSetupView: View {
     let onCancel: () -> Void
     let onStart: (MissionScenarioConfiguration) -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var step: SetupStep = .scenario
+
+    private enum SetupStep: Int, CaseIterable, Identifiable {
+        case scenario, aircraft, conditions
+        var id: Int { rawValue }
+        var titleKey: String {
+            switch self {
+            case .scenario: return "mission.step.scenario"
+            case .aircraft: return "mission.step.aircraft"
+            case .conditions: return "mission.step.conditions"
+            }
+        }
+    }
+
     @State private var kind: MissionScenarioKind = .searchAndRescue
     @State private var difficulty: MissionDifficulty = .medium
     @State private var terrain: TerrainPreset = .forest
@@ -27,7 +42,7 @@ struct MissionSetupView: View {
     @State private var raceLibrary: [RaceTrackStore.Summary] = []
     @State private var selectedRaceTrackID: UUID?
     @State private var interception = InterceptMissionConfiguration()
-    @State private var aircraftPickerSlot: AircraftSlot?
+    @State private var activeAircraftSlot: AircraftSlot = .player
 
     /// One of the three aircraft an interception run puts in the air.
     enum AircraftSlot: String, Identifiable {
@@ -45,10 +60,6 @@ struct MissionSetupView: View {
             }
         }
     }
-
-    /// One height for every scenario chip, so the grid reads as a row of buttons rather than a
-    /// set of differently-sized boxes.
-    private static let scenarioChipHeight: CGFloat = 46
 
     /// Where the track for a racing mission comes from.
     private enum RaceTrackSource: String, CaseIterable, Identifiable {
@@ -167,25 +178,43 @@ struct MissionSetupView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    scenarioSection
-                    platformSection
+            HStack(spacing: 0) {
+                ForEach(SetupStep.allCases) { value in
+                    ShellStepButton(number: value.rawValue + 1, title: L10n.s(value.titleKey), isSelected: step == value) {
+                        step = value
+                    }
                 }
-                .padding(20)
             }
-
+            .padding(.horizontal, 20)
+            Divider().overlay(GroundControlPalette.border)
+            Group {
+                if step == .aircraft {
+                    aircraftWorkspace
+                        .padding(20)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 16) {
+                            if step == .scenario {
+                                scenarioSection
+                            } else {
+                                conditionsSection
+                            }
+                        }
+                        .padding(20)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .id(step)
+            .transition(reduceMotion ? .opacity : .panelSwap)
             footer
         }
-        .frame(maxWidth: 720, maxHeight: 720)
-        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.18), lineWidth: 1)
-        )
-        .sheet(item: $aircraftPickerSlot) { slot in
-            aircraftPickerSheet(slot)
-        }
+        .frame(maxWidth: 1080, maxHeight: .infinity)
+        .background(GroundControlPalette.panel)
+        .clipShape(RoundedRectangle(cornerRadius: 24))
+        .overlay(RoundedRectangle(cornerRadius: 24).stroke(Color.white.opacity(0.12)))
+        .animation(reduceMotion ? .easeOut(duration: 0.16) : Motion.panel, value: step)
         .onAppear {
             if selectedProfileID.isEmpty {
                 selectedProfileID = availableProfiles.first?.id ?? ""
@@ -198,6 +227,15 @@ struct MissionSetupView: View {
             }
             applyInterceptDifficulty(difficulty)
             resolveInterceptProfiles()
+        }
+        .onChange(of: difficulty) { _, newValue in
+            timeLimitMinutes = defaultTimeLimit(for: kind, difficulty: newValue)
+            applyInterceptDifficulty(newValue)
+        }
+        .onChange(of: resolvedProfile?.airframeClass) { _, airframeClass in
+            if let airframeClass {
+                terrain = terrain.compatiblePreset(for: airframeClass)
+            }
         }
         .onChange(of: kind) { _, newValue in
             if !compatiblePayloads.contains(payload) {
@@ -279,145 +317,300 @@ struct MissionSetupView: View {
     // MARK: Sections
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("mission.setup.title")
-                .font(.system(size: 24, weight: .bold))
-                .foregroundStyle(.white)
-            Text("mission.setup.subtitle")
-                .font(.subheadline)
-                .foregroundStyle(.white.opacity(0.7))
+        HStack(alignment: .top, spacing: 16) {
+            ShellSectionHeading(title: L10n.s("mission.setup.title"), subtitle: L10n.s("mission.setup.guided.subtitle"))
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 30, height: 30)
+                    .background(Color.white.opacity(0.06), in: Circle())
+            }
+            .buttonStyle(.plain)
+            .help(L10n.s("common.cancel"))
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(20)
-        .background(Color.white.opacity(0.04))
     }
 
-    /// Scenario picker + description, with that scenario's parameters opening directly below it in
-    /// the same card — picking a mission and immediately seeing (and tuning) its own parameters
-    /// reads more practical than a disconnected "Parameters" card further down the screen.
+    private func briefKey(for value: MissionScenarioKind) -> String {
+        switch value {
+        case .searchAndRescue: return "mission.brief.search"
+        case .fireResponse: return "mission.brief.fire"
+        case .agriculturalSpraying: return "mission.brief.agriculture"
+        case .droneRacing: return "mission.brief.race"
+        case .attachedPayloadIntercept: return "mission.brief.intercept"
+        }
+    }
+
     private var scenarioSection: some View {
-        sectionCard(titleKey: "mission.setup.section.scenario") {
-            VStack(alignment: .leading, spacing: 14) {
-                scenarioChooser
-
-                HStack(spacing: 12) {
-                    Image(systemName: kind.iconSystemName)
-                        .font(.system(size: 22, weight: .semibold))
-                        .foregroundStyle(.white)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(LocalizedStringKey(kind.titleKey))
-                            .font(.headline)
-                            .foregroundStyle(.white)
-                        Text(LocalizedStringKey(kind.subtitleKey))
-                            .font(.caption)
-                            .foregroundStyle(.white.opacity(0.7))
-                    }
-                    Spacer()
+        VStack(alignment: .leading, spacing: 20) {
+            Text("mission.setup.choose_task")
+                .font(.system(size: 17, weight: .semibold, design: .rounded))
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                ForEach(MissionScenarioKind.allCases) { value in
+                    Button { kind = value } label: { scenarioChip(value) }
+                        .buttonStyle(ShellButtonStyle(cornerRadius: 10, hoverScale: 1.008))
                 }
-
-                Divider().overlay(Color.white.opacity(0.12))
-
-                Text("mission.setup.section.parameters")
-                    .font(.caption.weight(.bold))
-                    .textCase(.uppercase)
-                    .foregroundStyle(.white.opacity(0.6))
-
-                parametersFields
             }
-            .animation(.easeInOut(duration: 0.2), value: kind)
-        }
-    }
-
-    /// A wrapping grid of chips rather than a segmented control. A segmented control divides the
-    /// available width equally and refuses to go below its content's intrinsic width, so a
-    /// scenario with a long name pushed the whole card wider than the dialog and everything
-    /// inside it sat visibly off-centre. Chips wrap onto a second row instead.
-    private var scenarioChooser: some View {
-        LazyVGrid(
-            columns: [GridItem(.adaptive(minimum: 168, maximum: 300), spacing: 8)],
-            alignment: .leading,
-            spacing: 8
-        ) {
-            ForEach(MissionScenarioKind.allCases) { value in
-                Button {
-                    kind = value
-                } label: {
-                    scenarioChip(value)
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: kind.iconSystemName)
+                    .font(.system(size: 24, weight: .medium))
+                    .foregroundStyle(GroundControlPalette.accent)
+                    .frame(width: 46, height: 46)
+                    .background(GroundControlPalette.accent.opacity(0.10), in: RoundedRectangle(cornerRadius: 14))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(LocalizedStringKey(kind.titleKey)).font(.headline)
+                    Text(LocalizedStringKey(kind.subtitleKey))
+                        .font(.callout)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-                .buttonStyle(.plain)
+                Spacer(minLength: 0)
             }
+            .padding(18)
+            .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 18))
         }
+        .foregroundStyle(.white)
     }
 
     private func scenarioChip(_ value: MissionScenarioKind) -> some View {
-        let isSelected = value == kind
-        return HStack(spacing: 8) {
+        let selected = value == kind
+        return HStack(alignment: .top, spacing: 12) {
             Image(systemName: value.iconSystemName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(isSelected ? GroundControlPalette.accent : .white.opacity(0.7))
-                .frame(width: 16)
-            // Every chip is the same box. A name long enough to wrap shrinks inside it instead of
-            // making its whole row taller than the others, which is what left the grid looking
-            // like a set of mismatched buttons.
-            Text(LocalizedStringKey(value.titleKey))
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
-                .multilineTextAlignment(.leading)
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(selected ? GroundControlPalette.accent : GroundControlPalette.textSecondary)
+                .frame(width: 30)
+            VStack(alignment: .leading, spacing: 6) {
+                Text(LocalizedStringKey(value.titleKey))
+                    .font(.system(size: 13, weight: .semibold)).lineLimit(2)
+                Text(LocalizedStringKey(briefKey(for: value)))
+                    .font(.system(size: 11))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .lineLimit(2)
+            }
             Spacer(minLength: 0)
+            Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                .foregroundStyle(selected ? GroundControlPalette.accent : Color.white.opacity(0.15))
         }
-        .padding(.horizontal, 10)
-        .frame(maxWidth: .infinity, minHeight: Self.scenarioChipHeight, maxHeight: Self.scenarioChipHeight, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(isSelected ? GroundControlPalette.accent.opacity(0.28) : Color.white.opacity(0.07))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? GroundControlPalette.accent : Color.clear, lineWidth: 1)
-        )
-        .contentShape(RoundedRectangle(cornerRadius: 10))
+        .foregroundStyle(.white)
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 88, maxHeight: 88, alignment: .topLeading)
+        .background(selected ? GroundControlPalette.accent.opacity(0.07) : Color.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(selected ? GroundControlPalette.accent.opacity(0.4) : GroundControlPalette.border))
     }
 
-    @ViewBuilder
-    private var parametersFields: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            labeledRow("mission.setup.difficulty") {
-                Picker("", selection: $difficulty) {
-                    ForEach(MissionDifficulty.allCases) { value in
-                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+    private var missionSummary: some View {
+        HStack(spacing: 14) {
+            Image(systemName: kind.iconSystemName).font(.title2).foregroundStyle(GroundControlPalette.accent)
+            VStack(alignment: .leading, spacing: 4) {
+                Text(LocalizedStringKey(kind.titleKey)).font(.headline)
+                Text(resolvedProfile?.uiDisplayName ?? L10n.s("mission.setup.uav.none_compatible"))
+                    .font(.callout).foregroundStyle(GroundControlPalette.textSecondary)
+            }
+            Spacer(minLength: 8)
+            Label("\(timeLimitMinutes) " + L10n.s("mission.setup.minutes"), systemImage: "clock")
+                .font(.caption.monospacedDigit()).foregroundStyle(GroundControlPalette.textSecondary)
+        }
+        .padding(18)
+        .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 16))
+    }
+
+    private var displayedAircraftSlot: AircraftSlot {
+        kind == .attachedPayloadIntercept ? activeAircraftSlot : .player
+    }
+
+    private var displayedAircraft: DroneModelProfile? {
+        let list = profiles(for: displayedAircraftSlot)
+        return list.first { $0.id == selection(for: displayedAircraftSlot) } ?? list.first
+    }
+
+    private var aircraftWorkspace: some View {
+        GeometryReader { geometry in
+            VStack(alignment: .leading, spacing: 12) {
+                if kind == .attachedPayloadIntercept {
+                    Picker("", selection: $activeAircraftSlot) {
+                        ForEach([AircraftSlot.player, .target, .observer]) { slot in
+                            Text(LocalizedStringKey(slot.titleKey)).tag(slot)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(height: 28)
+                }
+
+                if let profile = displayedAircraft {
+                    HStack(alignment: .firstTextBaseline, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(profile.uiDisplayName)
+                                .font(.system(size: 19, weight: .semibold))
+                            Text(profile.manufacturer)
+                                .font(.caption)
+                                .foregroundStyle(GroundControlPalette.textSecondary)
+                        }
+                        Spacer(minLength: 8)
+                        Text(profileBadgeText(for: profile))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundStyle(profileBadgeTint(for: profile))
+                            .lineLimit(1)
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .onChange(of: difficulty) { _, newValue in
-                    timeLimitMinutes = defaultTimeLimit(for: kind, difficulty: newValue)
-                    applyInterceptDifficulty(newValue)
+
+                HStack(alignment: .top, spacing: 16) {
+                    Group {
+                        if let profile = displayedAircraft {
+                            UAVLivePreviewView(profile: previewProfile(for: profile), runtimeProfile: profile)
+                                .accessibilityLabel(profile.uiDisplayName)
+                        } else {
+                            ShellEmptyState(symbol: "airplane", title: L10n.s("mission.setup.uav.none_compatible"),
+                                            detail: L10n.s("mission.setup.uav.compatibility_help"))
+                        }
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 10))
+
+                    ScrollView {
+                        if kind == .attachedPayloadIntercept {
+                            interceptFields
+                        } else {
+                            platformFields
+                        }
+                    }
+                    .frame(width: 250)
                 }
-            }
+                .frame(height: min(320, max(170, geometry.size.height * 0.44)))
 
-            if kind == .agriculturalSpraying {
-                agriBriefingRow
+                aircraftList
             }
+            .foregroundStyle(GroundControlPalette.textPrimary)
+        }
+    }
 
-            if kind == .droneRacing {
-                raceFields
+    private var aircraftList: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Text("mission.aircraft.model")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 24)
+                aircraftMetric(L10n.s("panel.mass"))
+                aircraftMetric(L10n.s("mission.aircraft.speed"))
+                aircraftMetric(L10n.s("mission.aircraft.duration"))
+                aircraftMetric(L10n.s("mission.aircraft.range"))
             }
+            .font(.caption.weight(.medium))
+            .foregroundStyle(GroundControlPalette.textSecondary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(Color.white.opacity(0.03))
 
-            if kind == .attachedPayloadIntercept {
-                interceptFields
-            }
-
-            labeledRow("mission.setup.time_of_day") {
-                Picker("", selection: $timeOfDay) {
-                    ForEach(TimeOfDay.allCases) { value in
-                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+            ScrollView {
+                LazyVStack(spacing: 0) {
+                    ForEach(profiles(for: displayedAircraftSlot)) { profile in
+                        aircraftListRow(profile)
                     }
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
             }
+            .frame(maxHeight: .infinity)
+        }
+        .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 10))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(GroundControlPalette.border))
+    }
+
+    private func aircraftListRow(_ profile: DroneModelProfile) -> some View {
+        let selected = profile.id == selection(for: displayedAircraftSlot)
+        let range = profile.resolvedUAVProfile?.nominalMaxRangeM
+        return Button { select(profile.id, for: displayedAircraftSlot) } label: {
+            HStack(spacing: 10) {
+                Image(systemName: selected ? "checkmark" : "circle")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(selected ? GroundControlPalette.accent : GroundControlPalette.textSecondary.opacity(0.5))
+                    .frame(width: 14)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(profile.uiDisplayName).font(.system(size: 12, weight: .medium)).lineLimit(2)
+                    Text(profile.manufacturer).font(.system(size: 10))
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                aircraftMetric(String(format: L10n.s("mission.aircraft.mass.value"), profile.takeoffMassKg))
+                aircraftMetric(String(format: L10n.s("mission.aircraft.speed.value"), profile.maxHorizontalSpeedMps * 3.6))
+                aircraftMetric(profile.maxFlightTimeMin > 0
+                    ? String(format: L10n.s("mission.aircraft.duration.value"), profile.maxFlightTimeMin) : "—")
+                aircraftMetric(range.flatMap { value in
+                    value > 0 ? String(format: L10n.s(value >= 1000 ? "mission.aircraft.range.km" : "mission.aircraft.range.m"),
+                                       value >= 1000 ? value / 1000 : value) : nil
+                } ?? "—")
+            }
+            .foregroundStyle(GroundControlPalette.textPrimary)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(minHeight: 52)
+            .background(selected ? GroundControlPalette.accent.opacity(0.08) : Color.clear)
+            .overlay(alignment: .bottom) { GroundControlPalette.border.frame(height: 1) }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityAddTraits(selected ? [.isSelected] : [])
+    }
+
+    private func aircraftMetric(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 11).monospacedDigit())
+            .lineLimit(1)
+            .frame(width: 76, alignment: .trailing)
+    }
+
+    private var conditionsSection: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            missionSummary
+
+            HStack(alignment: .top, spacing: 16) {
+                terrainConditions
+                weatherConditions
+            }
+
+            sectionCard(titleKey: "mission.setup.section.parameters") {
+                HStack(alignment: .top, spacing: 20) {
+                    labeledRow("mission.setup.difficulty") {
+                        Picker("", selection: $difficulty) {
+                            ForEach(MissionDifficulty.allCases) { value in
+                                Text(LocalizedStringKey(value.titleKey)).tag(value)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(height: 28)
+                    }
+                    .frame(maxWidth: .infinity)
+                    labeledRow("mission.setup.time_limit") {
+                        Stepper(value: $timeLimitMinutes, in: 3...(kind == .agriculturalSpraying ? 180 : 30)) {
+                            Text(String(format: L10n.s("mission.setup.time_limit.value"), timeLimitMinutes))
+                                .font(.callout.monospacedDigit())
+                        }
+                        .frame(height: 28)
+                    }
+                    .frame(width: 170)
+                }
+                if kind == .agriculturalSpraying { agriBriefingRow }
+                if kind == .droneRacing { raceFields }
+                if kind == .attachedPayloadIntercept { interceptBriefingRow }
+            }
+        }
+    }
+
+    private var terrainConditions: some View {
+        sectionCard(titleKey: "mission.conditions.terrain") {
+            GeometryReader { geometry in
+                Group {
+                    if let image = MapCardArtwork.image(for: terrain) {
+                        Image(nsImage: image).resizable().scaledToFill()
+                    } else {
+                        MapCardArtwork.placeholder(for: terrain)
+                    }
+                }
+                .frame(width: geometry.size.width, height: 165)
+                .clipped()
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            .frame(height: 165)
 
             labeledRow("mission.setup.terrain") {
                 Picker("", selection: $terrain) {
@@ -427,7 +620,7 @@ struct MissionSetupView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .tint(.white)
+                .frame(height: 28)
             }
 
             labeledRow("mission.setup.terrain_density") {
@@ -438,6 +631,36 @@ struct MissionSetupView: View {
                 }
                 .pickerStyle(.segmented)
                 .labelsHidden()
+                .frame(height: 28)
+            }
+        }
+    }
+
+    private var weatherConditions: some View {
+        sectionCard(titleKey: "mission.conditions.weather") {
+            HStack(spacing: 12) {
+                Image(systemName: weatherSymbol)
+                    .font(.system(size: 32, weight: .light))
+                    .foregroundStyle(GroundControlPalette.accent.opacity(0.85))
+                    .frame(width: 46, height: 54)
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(LocalizedStringKey(weather.titleKey)).font(.headline)
+                    Label(L10n.s(timeOfDay.titleKey), systemImage: timeOfDay.iconSystemName)
+                        .font(.caption)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            labeledRow("mission.setup.time_of_day") {
+                Picker("", selection: $timeOfDay) {
+                    ForEach(TimeOfDay.allCases) { value in
+                        Text(LocalizedStringKey(value.titleKey)).tag(value)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(height: 28)
             }
 
             labeledRow("mission.setup.weather") {
@@ -448,29 +671,49 @@ struct MissionSetupView: View {
                 }
                 .pickerStyle(.menu)
                 .labelsHidden()
-                .tint(.white)
+                .frame(height: 28)
             }
 
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(spacing: 4) {
                 HStack {
                     Text("mission.setup.weather_intensity")
-                        .font(.caption).foregroundStyle(.white.opacity(0.8))
                     Spacer()
-                    Text(String(format: "%.0f%%", weatherIntensity * 100))
-                        .font(.caption.monospacedDigit()).foregroundStyle(.white.opacity(0.8))
+                    Text(String(format: "%.0f%%", weatherIntensity * 100)).monospacedDigit()
                 }
+                .font(.caption)
                 Slider(value: $weatherIntensity, in: 0...1, step: 0.01)
             }
 
-            Stepper(value: $timeLimitMinutes, in: 3...30) {
-                HStack {
-                    Text("mission.setup.time_limit")
-                        .font(.caption).foregroundStyle(.white.opacity(0.8))
-                    Spacer()
-                    Text(String(format: L10n.s("mission.setup.time_limit.value"), timeLimitMinutes))
-                        .font(.caption.monospacedDigit()).foregroundStyle(.white)
-                }
+            Divider().overlay(GroundControlPalette.border)
+            HStack {
+                Label(L10n.s("mission.conditions.visibility"), systemImage: "eye")
+                Spacer()
+                Text(String(format: "%.0f%%", weatherFactors.visibilityFactor * 100)).monospacedDigit()
             }
+            HStack {
+                Label(L10n.s("mission.conditions.energy"), systemImage: "battery.100percent")
+                Spacer()
+                Text(String(format: "×%.2f", weatherFactors.batteryDrainMultiplier)).monospacedDigit()
+            }
+            .help(L10n.s("mission.conditions.factors_help"))
+        }
+        .font(.caption)
+    }
+
+    private var weatherFactors: WeatherFactors {
+        WeatherModel(preset: weather, intensity: Float(weatherIntensity), windDirectionDeg: 0,
+                     windSpeedMps: 0, gusts: 0).effectiveFactors
+    }
+
+    private var weatherSymbol: String {
+        switch weather {
+        case .normal: return timeOfDay.iconSystemName
+        case .wind: return "wind"
+        case .rain: return "cloud.rain"
+        case .snow: return "cloud.snow"
+        case .fog: return "cloud.fog"
+        case .smog: return "sun.haze"
+        case .thunderstorm: return "cloud.bolt.rain"
         }
     }
 
@@ -538,106 +781,6 @@ struct MissionSetupView: View {
             .sorted { $0.displayName < $1.displayName }
     }
 
-    /// The three aircraft this mission puts in the air, side by side: the one the operator flies,
-    /// the one being intercepted, and the one watching. They belong together — the whole run is
-    /// the relationship between them — and each opens its own picker rather than unrolling another
-    /// scrolling grid into the middle of the form.
-    private var aircraftSlotRow: some View {
-        HStack(alignment: .top, spacing: 10) {
-            aircraftSlot(.player, titleKey: "mission.setup.uav")
-            aircraftSlot(.target, titleKey: "intercept.target.profile")
-            aircraftSlot(.observer, titleKey: "intercept.observer.profile")
-        }
-    }
-
-    private func aircraftSlot(_ slot: AircraftSlot, titleKey: String) -> some View {
-        let profile = profiles(for: slot).first { $0.id == selection(for: slot) }
-        return VStack(alignment: .leading, spacing: 6) {
-            Text(LocalizedStringKey(titleKey))
-                .font(.caption).foregroundStyle(.white.opacity(0.8))
-                .lineLimit(1)
-            Button {
-                aircraftPickerSlot = slot
-            } label: {
-                VStack(alignment: .leading, spacing: 6) {
-                    UAVLivePreviewView(
-                        profile: profile.flatMap(previewProfile(for:)),
-                        runtimeProfile: profile
-                    )
-                    .frame(height: 84)
-                    .background(GroundControlPalette.shell, in: RoundedRectangle(cornerRadius: 8))
-
-                    Text(profile?.uiDisplayName ?? "—")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.white)
-                        .lineLimit(1)
-                    HStack(spacing: 4) {
-                        Text("mission.setup.aircraft.change")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(GroundControlPalette.accent)
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 8, weight: .bold))
-                            .foregroundStyle(GroundControlPalette.accent)
-                    }
-                }
-                .padding(8)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12), lineWidth: 1)
-                )
-            }
-            .buttonStyle(.plain)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    /// The picker itself, in a sheet. One grid, once, instead of three of them stacked inside a
-    /// form the operator has to scroll past to reach the start button.
-    private func aircraftPickerSheet(_ slot: AircraftSlot) -> some View {
-        let list = profiles(for: slot)
-        return VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text(LocalizedStringKey(slot.titleKey))
-                    .font(.headline)
-                    .foregroundStyle(.white)
-                Spacer()
-                Button("mission.setup.aircraft.done") { aircraftPickerSlot = nil }
-                    .buttonStyle(.borderedProminent)
-            }
-
-            ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 210), spacing: 10)], spacing: 10) {
-                    ForEach(list) { profile in
-                        Button {
-                            select(profile.id, for: slot)
-                            aircraftPickerSlot = nil
-                        } label: {
-                            UAVSelectionCardView(
-                                name: profile.uiDisplayName,
-                                manufacturer: profile.manufacturer,
-                                previewProfile: previewProfile(for: profile),
-                                runtimePreviewProfile: profile,
-                                massKg: profile.takeoffMassKg,
-                                speedMps: profile.resolvedUAVProfile?.nominalCruiseSpeedMps ?? profile.maxHorizontalSpeedMps,
-                                flightTimeSec: profile.resolvedUAVProfile?.nominalFlightTimeSec,
-                                rangeMeters: profile.resolvedUAVProfile?.nominalMaxRangeM,
-                                badgeText: profileBadgeText(for: profile),
-                                badgeTint: profileBadgeTint(for: profile),
-                                isSelected: profile.id == selection(for: slot)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(2)
-            }
-        }
-        .padding(18)
-        .frame(width: 720, height: 560)
-        .background(GroundControlPalette.shell)
-    }
-
     private func profiles(for slot: AircraftSlot) -> [DroneModelProfile] {
         switch slot {
         case .player: return compatibleProfiles
@@ -664,10 +807,6 @@ struct MissionSetupView: View {
 
     private var interceptFields: some View {
         VStack(alignment: .leading, spacing: 14) {
-            interceptBriefingRow
-
-            aircraftSlotRow
-
             labeledRow("intercept.side") {
                 Picker("", selection: $interception.side) {
                     ForEach(InterceptMissionSide.allCases) { value in
@@ -675,6 +814,7 @@ struct MissionSetupView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .fixedSize(horizontal: false, vertical: true)
                 .labelsHidden()
             }
 
@@ -700,13 +840,14 @@ struct MissionSetupView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                .fixedSize(horizontal: false, vertical: true)
                     .labelsHidden()
                     .tint(.white)
                 }
             }
 
             labeledRow("intercept.module.title") {
-                HStack(spacing: 8) {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 112), spacing: 8)], spacing: 8) {
                     ForEach(AttachedModuleShape.selectable(for: interception.side)) { shape in
                         Button {
                             interception.moduleShape = shape
@@ -734,6 +875,7 @@ struct MissionSetupView: View {
                         }
                     }
                     .pickerStyle(.segmented)
+                .fixedSize(horizontal: false, vertical: true)
                     .labelsHidden()
                 }
 
@@ -834,28 +976,31 @@ struct MissionSetupView: View {
     /// mission bolts under the aircraft, so what is picked here is what gets carried.
     private func moduleCard(_ shape: AttachedModuleShape) -> some View {
         let isSelected = interception.moduleShape == shape
-        return VStack(spacing: 5) {
+        return VStack(alignment: .leading, spacing: 6) {
             AttachedModulePreviewView(shape: shape)
-                .frame(height: 66)
+                .frame(height: 76)
                 .background(GroundControlPalette.shell, in: RoundedRectangle(cornerRadius: 7))
+                .clipShape(RoundedRectangle(cornerRadius: 7))
             Text(LocalizedStringKey(shape.titleKey))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(isSelected ? .white : .white.opacity(0.75))
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(String(format: "%.2f kg", shape.massKg))
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, minHeight: 30, maxHeight: 30, alignment: .topLeading)
+            Text(L10n.f("payload.mass_value", Double(shape.massKg)))
                 .font(.caption2.monospacedDigit())
                 .foregroundStyle(.white.opacity(0.5))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
         }
-        .padding(6)
-        .frame(maxWidth: .infinity)
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: 9)
                 .fill(isSelected ? GroundControlPalette.accent.opacity(0.22) : Color.white.opacity(0.05))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 9)
-                .stroke(isSelected ? GroundControlPalette.accent : Color.white.opacity(0.1), lineWidth: 1)
+                .strokeBorder(isSelected ? GroundControlPalette.accent : Color.white.opacity(0.1), lineWidth: 1)
         )
         .contentShape(RoundedRectangle(cornerRadius: 9))
     }
@@ -888,6 +1033,7 @@ struct MissionSetupView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .fixedSize(horizontal: false, vertical: true)
                 .labelsHidden()
             }
 
@@ -915,6 +1061,7 @@ struct MissionSetupView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .fixedSize(horizontal: false, vertical: true)
                 .labelsHidden()
             }
 
@@ -983,75 +1130,30 @@ struct MissionSetupView: View {
         )
     }
 
-    private var platformSection: some View {
-        sectionCard(titleKey: "mission.setup.section.platform") {
-            VStack(alignment: .leading, spacing: 14) {
-                // The interception setup already shows this aircraft beside the target and the
-                // observer, where the choice actually belongs. Repeating the whole grid here would
-                // be a second, disagreeing place to pick the same thing.
-                if kind != .attachedPayloadIntercept {
-                    labeledRow("mission.setup.uav") {
-                    if compatibleProfiles.isEmpty {
-                        Text("mission.setup.uav.none_compatible")
-                            .font(.caption2)
-                            .foregroundStyle(GroundControlPalette.danger)
-                            .fixedSize(horizontal: false, vertical: true)
-                    } else {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 220), spacing: 10)], spacing: 10) {
-                            ForEach(compatibleProfiles) { profile in
-                                Button {
-                                    selectedProfileID = profile.id
-                                } label: {
-                                    UAVSelectionCardView(
-                                        name: profile.uiDisplayName,
-                                        manufacturer: profile.manufacturer,
-                                        previewProfile: previewProfile(for: profile),
-                                        runtimePreviewProfile: profile,
-                                        massKg: profile.takeoffMassKg,
-                                        speedMps: profile.resolvedUAVProfile?.nominalCruiseSpeedMps ?? profile.maxHorizontalSpeedMps,
-                                        flightTimeSec: profile.resolvedUAVProfile?.nominalFlightTimeSec ?? profile.maxFlightTimeMin * 60.0,
-                                        rangeMeters: profile.resolvedUAVProfile?.nominalMaxRangeM,
-                                        badgeText: profileBadgeText(for: profile),
-                                        badgeTint: profileBadgeTint(for: profile),
-                                        isSelected: profile.id == selectedProfileID
-                                    )
-                                }
-                                .buttonStyle(.plain)
-                            }
+    private var platformFields: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            // Interception selects its carried module in its own controls.
+            if kind.requiresPayload, kind != .attachedPayloadIntercept {
+                labeledRow("mission.setup.payload") {
+                    Picker("", selection: $payload) {
+                        ForEach(compatiblePayloads) { type in
+                            Text(LocalizedStringKey(payloadTitleKey(type))).tag(type)
                         }
                     }
-                    }
-                }
-
-                // The interception mission chooses its module by shape and mass in its own
-                // parameters. The generic payload list names the mounting hardware the simulator
-                // models — "sensor module", "cargo box" — which is not a choice anybody makes when
-                // loading an interceptor, and showing both asks the same question twice.
-                if kind.requiresPayload, kind != .attachedPayloadIntercept {
-                    labeledRow("mission.setup.payload") {
-                        Picker("", selection: $payload) {
-                            ForEach(compatiblePayloads) { type in
-                                Text(LocalizedStringKey(payloadTitleKey(type))).tag(type)
-                            }
-                        }
-                        .pickerStyle(.menu)
-                        .labelsHidden()
-                        .tint(.white)
-                    }
-                }
-
-                Text(LocalizedStringKey(payloadHintKey))
-                    .font(.caption2)
-                    .foregroundStyle(.white.opacity(0.55))
+                    .pickerStyle(.menu)
                     .fixedSize(horizontal: false, vertical: true)
-
-                if payload == .fireHose {
-                    hoseRiggingFields
-                }
-                if payload == .fireCapsuleLauncher {
-                    capsuleRiggingFields
+                    .labelsHidden()
+                    .tint(.white)
                 }
             }
+
+            Text(LocalizedStringKey(payloadHintKey))
+                .font(.caption2)
+                .foregroundStyle(.white.opacity(0.55))
+                .fixedSize(horizontal: false, vertical: true)
+
+            if payload == .fireHose { hoseRiggingFields }
+            if payload == .fireCapsuleLauncher { capsuleRiggingFields }
         }
     }
 
@@ -1065,6 +1167,7 @@ struct MissionSetupView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .fixedSize(horizontal: false, vertical: true)
                 .labelsHidden()
             }
 
@@ -1098,6 +1201,7 @@ struct MissionSetupView: View {
                     }
                 }
                 .pickerStyle(.segmented)
+                .fixedSize(horizontal: false, vertical: true)
                 .labelsHidden()
             }
 
@@ -1126,34 +1230,39 @@ struct MissionSetupView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            Button(action: onCancel) {
-                Text("common.cancel")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(.white.opacity(0.85))
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 12)
-                    .background(Color.white.opacity(0.10), in: RoundedRectangle(cornerRadius: 12))
+            Button {
+                if step == .scenario { onCancel() }
+                else { step = SetupStep(rawValue: step.rawValue - 1) ?? .scenario }
+            } label: {
+                Label(L10n.s(step == .scenario ? "common.cancel" : "common.back"), systemImage: "chevron.left")
+                    .font(.system(size: 13, weight: .semibold))
+                    .padding(.horizontal, 16).padding(.vertical, 12)
+                    .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
             }
-            .buttonStyle(.plain)
-
-            Spacer()
-
-            Button(action: start) {
-                HStack(spacing: 8) {
-                    Image(systemName: "play.fill")
-                    Text("mission.setup.start")
+            .buttonStyle(ShellButtonStyle(cornerRadius: 12, hoverScale: 1))
+            Spacer(minLength: 12)
+            if step == .conditions {
+                Button(action: start) {
+                    Label(L10n.s("mission.setup.start"), systemImage: "play.fill")
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(.horizontal, 22).padding(.vertical, 12)
+                        .background(GroundControlPalette.accent, in: RoundedRectangle(cornerRadius: 12))
                 }
-                .font(.subheadline.weight(.bold))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 26)
-                .padding(.vertical, 12)
-                .background(GroundControlPalette.accent, in: RoundedRectangle(cornerRadius: 12))
+                .buttonStyle(ShellButtonStyle(cornerRadius: 12, hoverScale: 1))
+                .disabled(resolvedProfile == nil)
+            } else {
+                Button { step = SetupStep(rawValue: step.rawValue + 1) ?? .conditions } label: {
+                    Label(L10n.s("mission.setup.next"), systemImage: "arrow.right")
+                        .font(.system(size: 13, weight: .bold))
+                        .padding(.horizontal, 22).padding(.vertical, 12)
+                        .background(GroundControlPalette.accent, in: RoundedRectangle(cornerRadius: 12))
+                }
+                .buttonStyle(ShellButtonStyle(cornerRadius: 12, hoverScale: 1))
             }
-            .buttonStyle(.plain)
-            .disabled(resolvedProfile == nil)
         }
-        .padding(20)
-        .background(Color.white.opacity(0.04))
+        .foregroundStyle(.white)
+        .padding(.horizontal, 24).padding(.vertical, 18)
+        .background(GroundControlPalette.shell)
     }
 
     // MARK: Helpers

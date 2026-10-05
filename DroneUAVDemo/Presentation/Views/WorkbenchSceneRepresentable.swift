@@ -277,31 +277,22 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
             let bounds = visualBounds(of: node, relativeTo: scene.rootNode)
             let center = bounds.center
             let size = bounds.size
-            let extent = max(size.x, size.z, size.y * 2.8, Float(0.18))
             let isWinged = viewModel.build.vehicleArchitecture != .multicopter
-            // Looking slightly to the right/below the model moves it away from
-            // the inspector and the bottom carousel without translating the UAV
-            // off the physical centre of its table.
-            let target = center + SIMD3<Float>(
-                extent * (isWinged ? 0.12 : 0.09),
-                -extent * (isWinged ? 0.085 : 0.045),
-                0)
+            // The scene has its own viewport beside the inspector and above the shelf.
+            // Fit the complete bounding sphere to its narrower field of view, including
+            // portrait-shaped viewports and unusually large imported airframes.
+            let target = center
             cameraOrbitTarget = target
-            if isWinged {
-                minimumCameraDistance = max(extent * 0.82, 0.62)
-                maximumCameraDistance = max(
-                    minimumCameraDistance + 0.40,
-                    min(max(extent * 2.05, 1.75), 3.05))
-            } else {
-                minimumCameraDistance = max(extent, 0.34)
-                maximumCameraDistance = max(
-                    minimumCameraDistance + 0.16,
-                    min(max(extent * 2.25, 0.86), 1.02))
-            }
-            let initialDistance = min(max(
-                extent * (isWinged ? 1.64 : 1.9),
-                isWinged ? 1.30 : 0.78), maximumCameraDistance)
-            camera.camera?.fieldOfView = isWinged ? 46 : 34
+            let radius = max(simd_length(size) * 0.5, 0.09)
+            let verticalHalfAngle = Float(isWinged ? 46.0 : 38.0) * .pi / 360
+            let viewport = scnView?.bounds.size ?? CGSize(width: 800, height: 500)
+            let aspect = Float(max(viewport.width, 1) / max(viewport.height, 1))
+            let horizontalHalfAngle = atan(tan(verticalHalfAngle) * aspect)
+            let initialDistance = radius * 1.18 / sin(min(verticalHalfAngle, horizontalHalfAngle))
+            minimumCameraDistance = max(radius * 1.05, 0.16)
+            maximumCameraDistance = max(initialDistance * 2.2, minimumCameraDistance + 0.4)
+            camera.camera?.projectionDirection = .vertical
+            camera.camera?.fieldOfView = CGFloat(isWinged ? 46 : 38)
             let viewingDirection = simd_normalize(isWinged
                 ? SIMD3<Float>(0.62, 0.53, 1.32)
                 : SIMD3<Float>(0.84, 0.62, 1.18))
@@ -362,6 +353,15 @@ struct WorkbenchSceneRepresentable: NSViewRepresentable {
 final class WorkbenchSCNView: SCNView {
     weak var coordinator: WorkbenchSceneRepresentable.Coordinator?
     private var downPoint: CGPoint = .zero
+    private var framingSize: CGSize = .zero
+
+    override func layout() {
+        super.layout()
+        guard bounds.width > 1, bounds.height > 1,
+              abs(bounds.width - framingSize.width) > 24 || abs(bounds.height - framingSize.height) > 24 else { return }
+        framingSize = bounds.size
+        if let scene { coordinator?.refitCamera(in: scene) }
+    }
 
     override func mouseDown(with event: NSEvent) {
         downPoint = convert(event.locationInWindow, from: nil)

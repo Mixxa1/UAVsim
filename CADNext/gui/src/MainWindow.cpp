@@ -61,6 +61,7 @@
 #include "cadnext/gui/PropertyPanel.hpp"
 #include "cadnext/gui/SketchToolBar.hpp"
 #include "cadnext/gui/ToolBar.hpp"
+#include "cadnext/gui/ToolIcons.hpp"
 #include "cadnext/gui/NativeCadImport.hpp"
 #include "cadnext/gui/AcisSatWriter.hpp"
 #include "cadnext/gui/DwgWriter.hpp"
@@ -6033,8 +6034,13 @@ void MainWindow::createMenus() {
     analysisMenu->addAction(tr("CFD — обдув и аэродинамика…"), this, [this]() { showAerodynamics(); });
     auto* testToolbar = new QToolBar(tr("Испытания"), this);
     addToolBar(Qt::BottomToolBarArea, testToolbar);
-    testToolbar->addAction(tr("🌬 CFD — запустить обдув…"), this, [this]() { showAerodynamics(); });
-    testToolbar->addAction(tr("Прочность и частоты…"), this, [this]() { showStructuralStudy(); });
+    // Two buttons on a row of their own: the names cost no room here, so they stay next to the glyphs.
+    testToolbar->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    testToolbar->setIconSize(QSize(kToolIconSize, kToolIconSize));
+    testToolbar->addAction(toolIcon(ToolIcon::Aerodynamics), tr("CFD — запустить обдув…"), this,
+                           [this]() { showAerodynamics(); });
+    testToolbar->addAction(toolIcon(ToolIcon::Structural), tr("Прочность и частоты…"), this,
+                           [this]() { showStructuralStudy(); });
     analysisMenu->addAction(tr("Прочность и частоты детали…"), this, [this]() { showStructuralStudy(); });
     analysisMenu->addAction(tr("Открыть результат расчёта…"), this, [this]() {
         const QString path = QFileDialog::getOpenFileName(

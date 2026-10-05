@@ -33,13 +33,13 @@ enum ThermalPaletteMapper {
         switch palette {
         case .whiteHot:
             let g = 0.03 + 0.95 * t
-            return NSColor(calibratedRed: CGFloat(g), green: CGFloat(g), blue: CGFloat(g), alpha: 1.0)
+            return NSColor(srgbRed: CGFloat(g), green: CGFloat(g), blue: CGFloat(g), alpha: 1.0)
         case .blackHot:
             let g = 0.98 - 0.95 * t
-            return NSColor(calibratedRed: CGFloat(g), green: CGFloat(g), blue: CGFloat(g), alpha: 1.0)
+            return NSColor(srgbRed: CGFloat(g), green: CGFloat(g), blue: CGFloat(g), alpha: 1.0)
         case .iron:
             let c = ironRamp(t)
-            return NSColor(calibratedRed: c.r, green: c.g, blue: c.b, alpha: 1.0)
+            return NSColor(srgbRed: c.r, green: c.g, blue: c.b, alpha: 1.0)
         }
     }
 
@@ -61,6 +61,7 @@ enum ThermalPaletteMapper {
         return color(forNormalized: n, palette: palette)
     }
 
+    // Display-referred sRGB, also used by the imported shader after conversion to linear light.
     // Iron / "ironbow" ramp: deep navy → purple → magenta → red → orange → yellow → near-white.
     // Deliberately no green/cyan stop, so it reads as a thermal palette and not a debug heatmap.
     private static let ironStops: [(t: Double, r: CGFloat, g: CGFloat, b: CGFloat)] = [

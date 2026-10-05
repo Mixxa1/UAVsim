@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ControlPanelView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     @Binding var appLanguage: AppLanguage
 
     @State private var showAbstractEditor: Bool = false

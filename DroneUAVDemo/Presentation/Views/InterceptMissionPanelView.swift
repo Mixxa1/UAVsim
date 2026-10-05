@@ -7,7 +7,7 @@ import SwiftUI
 /// one: the scenario HUD is drawn over the viewport with hit testing off so it cannot swallow a
 /// mouse-look drag, and a control nobody can click is worse than no control at all.
 struct InterceptMissionPanelView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     private var state: InterceptMissionHUDState { viewModel.interceptHUD }
 

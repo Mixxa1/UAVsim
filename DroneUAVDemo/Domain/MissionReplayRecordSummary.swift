@@ -19,6 +19,6 @@ struct MissionReplayRecordSummary: Identifiable, Codable, Equatable {
     static func makeTitle(from date: Date) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return "Replay \(formatter.string(from: date))"
+        return "\(L10n.s("replay.record.title")) \(formatter.string(from: date))"
     }
 }

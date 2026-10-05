@@ -3,7 +3,7 @@ import SwiftUI
 /// In-simulation overlay for an active mission scenario: shows the objective, a countdown,
 /// detection lock-on progress, and the final outcome banner.
 struct MissionScenarioHUDView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     private var isFireResponse: Bool { viewModel.activeMissionScenarioKind == .fireResponse }
     private var isAgriSpraying: Bool { viewModel.activeMissionScenarioKind == .agriculturalSpraying }

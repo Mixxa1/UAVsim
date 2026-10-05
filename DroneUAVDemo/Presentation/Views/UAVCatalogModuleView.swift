@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct UAVCatalogModuleView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     @State private var showAbstractEditor = false
 

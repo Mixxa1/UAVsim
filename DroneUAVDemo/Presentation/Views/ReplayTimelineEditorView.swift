@@ -147,8 +147,8 @@ struct ReplayTimelineEditorView: View {
     private func fmt(_ t: TimeInterval) -> String {
         let total = Int(max(0, t))
         let tenths = Int((t - Double(total)) * 10)
-        if total < 60 { return String(format: "%d.%ds", total, tenths) }
-        return String(format: "%dm%02ds", total / 60, total % 60)
+        if total < 60 { return L10n.f("replay.timeline.seconds", total, tenths) }
+        return String(format: "%02d:%02d", total / 60, total % 60)
     }
 
     private func eventColor(_ type: MissionReplayEventType) -> Color {

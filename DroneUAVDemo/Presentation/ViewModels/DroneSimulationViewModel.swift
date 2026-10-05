@@ -588,8 +588,10 @@ extension DroneSimulationViewModel {
 }
 
 @MainActor
-final class DroneSimulationViewModel: ObservableObject {
+final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSource {
     private static let simulationTickInterval: TimeInterval = 1.0 / 60.0
+
+    lazy var uiUpdates = SimulationUIUpdates(source: self)
 
     @Published private(set) var controlValues: DroneControlValues
     @Published private(set) var telemetry: TelemetrySnapshot
@@ -2418,6 +2420,7 @@ final class DroneSimulationViewModel: ObservableObject {
     private var previousReplayArmedState: Bool = false
     private var previousReplayAutopilotActive: Bool = false
     private var previousReplayWarningMessages: Set<String> = []
+    private var didCheckpointMissionResult = false
     private var groundContactAccumulator: Float = 0.0
     private var stableGroundAccumulator: Float = 0.0
     private var airborneAccumulator: Float = 0.0
@@ -3490,6 +3493,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func stopRuntimeForExit() {
+        finishMissionReplayRecording()
         clearInterceptMission()
         simulationTimer?.invalidate()
         simulationTimer = nil
@@ -4429,6 +4433,9 @@ final class DroneSimulationViewModel: ObservableObject {
                 values.throttle = max(values.throttle, 0.06)
             }, markManual: false)
         }
+        // Start synchronously; signal-loss and paused ticks can return before the lifecycle pass.
+        updateMissionReplayLifecycle()
+        recordMissionReplayFrameIfNeeded(force: true)
     }
 
     private func beginTailsitterVerticalTakeoffOnArm() {
@@ -4497,6 +4504,7 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     func reset() {
+        finishMissionReplayRecording()
         // An interception run belongs to the aircraft being respawned: its actors, effects and
         // event ledger go with it. `restartInterceptMission()` puts a fresh one back afterwards
         // without regenerating the world around it.
@@ -6543,7 +6551,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func updateThermalForRenderFrame(atTime time: TimeInterval, cameraMode: CameraMode) {
-        let wantsThermal = cameraMode == .payloadOptics
+        // A queued render callback may belong to the camera that was just left.
+        // Always resolve from the current selection, never from that stale callback.
+        let wantsThermal = cameraConfiguration.mode == .payloadOptics
             && payloadCameraOpticsState.mode == .thermalStub
             && payloadCameraOpticsState.isAvailable
         sceneController.updateThermalPresentation(active: wantsThermal)
@@ -7363,6 +7373,8 @@ final class DroneSimulationViewModel: ObservableObject {
                 setRaceTrackBuilder(active: true)
             }
         }
+        startMissionReplayIfNeeded()
+        recordMissionReplayFrameIfNeeded(force: true)
     }
 
     // MARK: - Mission scenario (Attached-payload interception)
@@ -7430,6 +7442,8 @@ final class DroneSimulationViewModel: ObservableObject {
               config.parameters.kind == .attachedPayloadIntercept,
               didBootstrapMissionScenario else { return }
         bootstrapInterceptMission(config: config, dock: sceneController.currentDockSpawnPoint())
+        startMissionReplayIfNeeded()
+        recordMissionReplayFrameIfNeeded(force: true)
     }
 
     // MARK: Lifecycle
@@ -7847,6 +7861,18 @@ final class DroneSimulationViewModel: ObservableObject {
         guard !events.isEmpty else { return }
         let records = events.compactMap { event -> MissionEvent? in
             guard interceptEventGate?.accept(event) == true else { return nil }
+            if missionReplayRecorder.isRecording {
+                let position: SIMD3<Float>?
+                switch event.kind {
+                case .impact(let impact): position = impact.position
+                case .effect(let effect): position = effect.position
+                default: position = nil
+                }
+                missionReplayRecorder.recordEvent(MissionReplayEvent(
+                    id: event.id, timestamp: missionReplayTimestamp(), type: .scenarioEvent,
+                    message: L10n.s(event.kind.detailKey), position: position.map(CodableVector3D.init),
+                    interception: event))
+            }
             var context = MissionEventContext.empty
             context.interception = event
             return MissionEvent(
@@ -8830,6 +8856,9 @@ final class DroneSimulationViewModel: ObservableObject {
             refreshCompassOverlay()
             refreshPayloadCameraStatus(deltaTime: TimeInterval(dt))
             syncPayloadLifecycleEvents()
+            updateMissionReplayLifecycle()
+            recordMissionReplayFrameIfNeeded()
+            recordMissionReplayWarningsIfNeeded()
             return
         }
 
@@ -10068,6 +10097,7 @@ final class DroneSimulationViewModel: ObservableObject {
         flushDamageEventAdapters()
         recordMissionReplayFrameIfNeeded()
         recordMissionReplayWarningsIfNeeded()
+        checkpointCompletedMissionIfNeeded()
 
         autosaveAccumulator += dt
         if autosaveAccumulator >= 6.0 {
@@ -13045,6 +13075,9 @@ final class DroneSimulationViewModel: ObservableObject {
     }
 
     private func syncCameraSystem(from previousMode: CameraMode? = nil, resetOrientation: Bool = false) {
+        if cameraConfiguration.mode != .payloadOptics {
+            sceneController.updateThermalPresentation(active: false)
+        }
         if let previousMode {
             sceneController.syncCameraTransition(from: previousMode, to: cameraConfiguration.mode)
             if previousMode != cameraConfiguration.mode {
@@ -32507,7 +32540,63 @@ private extension DroneFlightMode {
 
 // MARK: - Mission Replay Recording
 
+extension DroneSimulationViewModel {
+    func prepareReplayLibraryForPresentation() {
+        saveMissionReplayCheckpoint()
+        replayLibraryViewModel.refresh()
+    }
+}
+
 private extension DroneSimulationViewModel {
+
+    func startMissionReplayIfNeeded() {
+        guard !missionReplayRecorder.isRecording else { return }
+        missionReplayRecorder.startSession(timestamp: 0, context: makeMissionReplayContextSnapshot())
+        didCheckpointMissionResult = false
+        previousReplayWarningMessages = []
+        isMissionReplayRecording = true
+    }
+
+    func saveMissionReplayCheckpoint() {
+        guard missionReplayRecorder.isRecording else { return }
+        recordMissionReplayFrameIfNeeded(force: true)
+        missionReplayRecorder.updateRFArtifacts(makeMissionReplayRFArtifacts())
+        guard let session = missionReplayRecorder.checkpoint() else { return }
+        let report = missionReportBuilder.buildReport(from: session)
+        replayLibraryViewModel.saveAndEnforce(session: session, report: report)
+    }
+
+    func checkpointCompletedMissionIfNeeded() {
+        guard !didCheckpointMissionResult, missionReplayRecorder.isRecording else { return }
+        guard hasCompletedRecordedMission else { return }
+        saveMissionReplayCheckpoint()
+        didCheckpointMissionResult = true
+    }
+
+    var hasCompletedRecordedMission: Bool {
+        interceptSession?.director.result != nil || missionScenarioOutcome != nil ||
+            fireResponseOutcome != nil || agriSprayOutcome != nil || raceRuntime?.isFinished == true
+    }
+
+    /// Capture the world before reset/exit removes actors, effects and detached parts. Natural
+    /// landing uses the same path, while an airborne exit no longer discards the whole flight.
+    func finishMissionReplayRecording() {
+        if missionReplayRecorder.isRecording {
+            recordMissionReplayFrameIfNeeded(force: true)
+            missionReplayRecorder.updateRFArtifacts(makeMissionReplayRFArtifacts())
+            missionReplayRecorder.stopSession(timestamp: missionReplayTimestamp())
+            lastMissionReplaySession = missionReplayRecorder.lastCompletedSession
+            if let session = missionReplayRecorder.lastCompletedSession {
+                let report = missionReportBuilder.buildReport(from: session)
+                lastMissionReport = report
+                replayLibraryViewModel.saveAndEnforce(session: session, report: report)
+            }
+        }
+        isMissionReplayRecording = false
+        replayStopPendingAfterDisarm = false
+        previousReplayArmedState = false
+        previousReplayAutopilotActive = false
+    }
 
     func missionReplayTimestamp() -> TimeInterval {
         guard let startedAt = missionReplayRecorder.currentSessionStartedAt else { return 0 }
@@ -32518,15 +32607,13 @@ private extension DroneSimulationViewModel {
         let currentArmedState = isArmed
 
         if !previousReplayArmedState && currentArmedState {
-            if !missionReplayRecorder.isRecording {
-                missionReplayRecorder.startSession(timestamp: 0, context: makeMissionReplayContextSnapshot())
-            }
+            startMissionReplayIfNeeded()
             replayStopPendingAfterDisarm = false
             isMissionReplayRecording = true
             previousReplayWarningMessages = []
-            recordMissionReplayEvent(.armed, message: "UAV armed")
+            recordMissionReplayEvent(.armed, message: L10n.s("replay.event.armed"))
         } else if previousReplayArmedState && !currentArmedState {
-            recordMissionReplayEvent(.disarmed, message: "UAV disarmed")
+            recordMissionReplayEvent(.disarmed, message: L10n.s("replay.event.disarmed"))
             // Keep recording the physical aftermath. A motor/FC failure can
             // disarm the vehicle high in the air; the fall, secondary ground
             // impact and final rest belong to the same replay session.
@@ -32535,34 +32622,31 @@ private extension DroneSimulationViewModel {
 
         if replayStopPendingAfterDisarm,
            !currentArmedState,
+           missionScenarioConfiguration == nil || hasCompletedRecordedMission,
            state.motionState == .settled,
            stableGroundAccumulator >= 0.45,
+           !(interceptScene?.hasReplayAftermath ?? false),
+           !sceneController.hasReplayDebris,
+           !(interceptSession?.actors.contains {
+               !$0.snapshot.functionalState.canAttempt &&
+               ![.grounded, .settled, .sliding, .rolling].contains($0.state.motionState)
+           } ?? false),
            missionReplayRecorder.isRecording {
-            let ts = missionReplayTimestamp()
-            missionReplayRecorder.updateRFArtifacts(makeMissionReplayRFArtifacts())
-            missionReplayRecorder.stopSession(timestamp: ts)
-            lastMissionReplaySession = missionReplayRecorder.lastCompletedSession
-            if let session = missionReplayRecorder.lastCompletedSession {
-                let report = missionReportBuilder.buildReport(from: session)
-                lastMissionReport = report
-                replayLibraryViewModel.saveAndEnforce(session: session, report: report)
-            }
-            isMissionReplayRecording = false
-            replayStopPendingAfterDisarm = false
+            finishMissionReplayRecording()
         }
         previousReplayArmedState = currentArmedState
 
         let currentAutopilotActive = missionExecutionState.status == .running || autoNavigationController.isActive
         if !previousReplayAutopilotActive && currentAutopilotActive {
-            recordMissionReplayEvent(.autopilotEnabled, message: "Autopilot enabled: \(mode.rawValue)")
+            recordMissionReplayEvent(.autopilotEnabled, message: L10n.f("replay.event.autopilot_on", mode.title))
         } else if previousReplayAutopilotActive && !currentAutopilotActive {
-            recordMissionReplayEvent(.autopilotDisabled, message: "Autopilot disabled: \(mode.rawValue)")
+            recordMissionReplayEvent(.autopilotDisabled, message: L10n.f("replay.event.autopilot_off", mode.title))
         }
         previousReplayAutopilotActive = currentAutopilotActive
     }
 
-    func recordMissionReplayFrameIfNeeded() {
-        guard missionReplayRecorder.isRecording else { return }
+    func recordMissionReplayFrameIfNeeded(force: Bool = false) {
+        guard missionReplayRecorder.isRecording, force || missionReplayRecorder.needsFrame else { return }
         let isAutopilotActive = missionExecutionState.status == .running || autoNavigationController.isActive
         let autopilotDescription: String? = isAutopilotActive ? mode.rawValue : nil
         let frame = MissionReplayFrame(
@@ -32589,9 +32673,23 @@ private extension DroneSimulationViewModel {
             skinTemperatureK: Double(state.aeroThermal.hottestK),
             envelopeLimitKey: state.flightEnvelope.bindingLimit.localizationKey,
             envelopeWorstFraction: Double(state.flightEnvelope.worstFraction),
-            rfSnapshot: makeMissionReplayRFSnapshot()
+            rfSnapshot: makeMissionReplayRFSnapshot(),
+            world: makeMissionReplayWorldSnapshot()
         )
-        missionReplayRecorder.recordFrame(frame)
+        missionReplayRecorder.recordFrame(frame, force: force)
+    }
+
+    func makeMissionReplayWorldSnapshot() -> MissionReplayWorldSnapshot {
+        var nodes = sceneController.captureReplayVisuals(recorder: missionReplayRecorder, displayName: selectedDroneProfile.displayName)
+        var effects: [MissionReplayEffectSnapshot] = []
+        if let session = interceptSession {
+            nodes += interceptScene?.captureReplayVisuals(session: session, recorder: missionReplayRecorder) ?? []
+            effects = session.effects.effects.map {
+                MissionReplayEffectSnapshot(id: $0.id, kind: $0.kind.rawValue, position: $0.position,
+                    normal: $0.normal, age: max(0, session.worldTime - $0.startedAt), lifetime: $0.lifetime)
+            }
+        }
+        return MissionReplayWorldSnapshot(nodes: nodes, effects: effects)
     }
 
     func makeMissionReplayRFSnapshot() -> MissionReplayRFSnapshot {
@@ -32677,7 +32775,13 @@ private extension DroneSimulationViewModel {
             payloadTypeRawValue: payloadMountState == .occupied ? payloadDraftConfiguration.payloadType.rawValue : nil,
             payloadResolvedName: payloadMountState == .occupied ? payloadDraftConfiguration.resolvedName : nil,
             hasPayloadAttachedAtStart: payloadMountState == .occupied,
-            recordedAtAppVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+            recordedAtAppVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+            terrainDensity: terrain.density,
+            importedWorld: attachedMeshWorld.map {
+                MissionReplayImportedWorldReference(kind: .photogrammetric, identifier: $0.sourceIdentifier, tileKey: $0.tileKey)
+            } ?? attachedOpenDataWorld.map {
+                MissionReplayImportedWorldReference(kind: .openData, identifier: $0.packageIdentifier)
+            }
         )
     }
 }

@@ -18,6 +18,7 @@ enum MissionReplayEventType: String, Codable, Equatable {
     case waypointReached
     case missionCompleted
     case missionAborted
+    case scenarioEvent
     case payloadAttached
     case payloadReleased
     case payloadImpact
@@ -44,6 +45,7 @@ struct MissionReplayEvent: Identifiable, Codable, Equatable {
     /// older builds decodable while allowing the player/export/LAN layers to
     /// reproduce the actual event instead of parsing a display string.
     let damage: MissionReplayDamagePayload?
+    let interception: InterceptMissionEvent?
 
     init(
         id: UUID,
@@ -51,7 +53,8 @@ struct MissionReplayEvent: Identifiable, Codable, Equatable {
         type: MissionReplayEventType,
         message: String,
         position: CodableVector3D?,
-        damage: MissionReplayDamagePayload? = nil
+        damage: MissionReplayDamagePayload? = nil,
+        interception: InterceptMissionEvent? = nil
     ) {
         self.id = id
         self.timestamp = timestamp
@@ -59,6 +62,7 @@ struct MissionReplayEvent: Identifiable, Codable, Equatable {
         self.message = message
         self.position = position
         self.damage = damage
+        self.interception = interception
     }
 }
 

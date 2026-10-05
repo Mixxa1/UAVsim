@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct ScenarioModuleView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     @State private var showWeatherTuning = false
 
     private static let angleFormatter: NumberFormatter = {

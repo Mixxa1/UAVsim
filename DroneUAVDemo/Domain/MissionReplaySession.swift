@@ -18,6 +18,9 @@ struct MissionReplaySession: Identifiable, Codable, Equatable {
     var context: MissionReplayContextSnapshot?
     /// Optional so recordings produced before RF artifact capture remain readable.
     var rfArtifacts: MissionReplayRFArtifacts? = nil
+    var visualAssets: [String: Data]? = nil
+    /// Storage keeps binary scene archives beside the JSON, avoiding base64 copies of meshes.
+    var visualAssetFiles: [String: String]? = nil
 
     var duration: TimeInterval {
         if let endedAt { return endedAt.timeIntervalSince(startedAt) }

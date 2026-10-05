@@ -41,7 +41,7 @@ struct MissionReportBuilder {
         let missionRelatedEventCount = events.filter {
             switch $0.type {
             case .waypointReached, .missionCompleted, .missionAborted,
-                 .payloadReleased, .payloadImpact:
+                 .payloadReleased, .payloadImpact, .scenarioEvent:
                 return true
             default:
                 return false
@@ -80,78 +80,71 @@ struct MissionReportBuilder {
         )
     }
 
-    private func fmt1(_ v: Double) -> String {
-        String(format: "%.1f", v)
+    /// Regenerate presentation text in the selected app language without changing recorded data.
+    func localizedReport(_ report: MissionReport) -> MissionReport {
+        MissionReport(id: report.id, generatedAt: report.generatedAt, sessionID: report.sessionID,
+            summary: report.summary, events: report.events, warnings: report.warnings,
+            textSummary: buildTextSummary(summary: report.summary, events: report.events))
     }
 
-    private func fmtBattery(_ v: Double?) -> String {
-        guard let v else { return "n/a" }
-        return fmt1(v)
+    private func fmt1(_ value: Double) -> String {
+        String(format: "%.1f", locale: L10n.currentLanguage().locale, value)
     }
 
     private func buildTextSummary(summary: MissionReportSummary, events: [MissionReplayEvent]) -> String {
-        var lines: [String] = []
-        lines.append("BLACK BOX MISSION REPORT")
-        lines.append("")
-        lines.append("Flight:")
-        lines.append("- Duration: \(fmt1(summary.durationSeconds)) s")
-        lines.append("- Frames recorded: \(summary.frameCount)")
-        lines.append("- Events: \(summary.eventCount)")
-        lines.append("- Warnings: \(summary.warningCount)")
-        lines.append("")
-        lines.append("Performance:")
-        lines.append("- Max speed: \(fmt1(summary.maxSpeedMetersPerSecond)) m/s")
-        lines.append("- Average speed: \(fmt1(summary.averageSpeedMetersPerSecond)) m/s")
-        lines.append("- Max altitude: \(fmt1(summary.maxAltitudeMeters)) m")
-        lines.append("")
-        lines.append("Battery:")
-        lines.append("- Start battery: \(fmtBattery(summary.startBatteryPercent)) %")
-        lines.append("- Min battery: \(fmtBattery(summary.minBatteryPercent)) %")
-        lines.append("- Battery used: \(fmtBattery(summary.batteryUsedPercent)) %")
-        lines.append("")
-        lines.append("Autopilot:")
-        lines.append("- Autopilot events: \(summary.autopilotEventCount)")
-        lines.append("- Mission-related events: \(summary.missionRelatedEventCount)")
-        if let rf = summary.rf {
+        var lines = [L10n.s("replay.report.title"), "", L10n.s("blackbox.section.flight")]
+        func metric(_ key: String, _ value: String) {
+            lines.append("- \(L10n.s(key)): \(value)")
+        }
+        func section(_ key: String) {
             lines.append("")
-            lines.append("RF control link:")
-            lines.append("- Samples: \(rf.sampleCount)")
-            lines.append("- Minimum RSSI: \(fmtOptional(rf.minimumRSSIDBm)) dBm")
-            lines.append("- Minimum SINR: \(fmtOptional(rf.minimumSINRDB)) dB")
-            lines.append("- Minimum margin: \(fmtOptional(rf.minimumLinkMarginDB)) dB")
-            lines.append("- Mean PER: \(fmtPercent(rf.averagePacketErrorRate))")
-            lines.append("- Mean delivery: \(fmtPercent(rf.averageDeliveryRatio))")
-            lines.append("- Maximum command age: \(fmt1(rf.maximumCommandAgeSeconds)) s")
-            lines.append("- Retry attempts: \(rf.retryAttempts)")
-            lines.append("- TTL expired: \(rf.expiredPackets)")
-            lines.append("- Back-pressure samples: \(rf.backpressureSampleCount)")
-            lines.append("- Lost samples: \(rf.lostSampleCount)")
-            if let baselineBucketCount = rf.baselineBucketCount {
-                lines.append("- Calibration baseline buckets: \(baselineBucketCount)")
+            lines.append(L10n.s(key))
+        }
+        func battery(_ value: Double?) -> String {
+            value.map { "\(fmt1($0)) %" } ?? L10n.s("common.na")
+        }
+        metric("blackbox.duration", L10n.f("common.time.seconds", summary.durationSeconds))
+        metric("blackbox.frames", String(summary.frameCount))
+        metric("blackbox.events", String(summary.eventCount))
+        metric("blackbox.warnings", String(summary.warningCount))
+        section("blackbox.section.performance")
+        metric("blackbox.max_speed", L10n.f("common.speed.meters_per_second", summary.maxSpeedMetersPerSecond))
+        metric("blackbox.avg_speed", L10n.f("common.speed.meters_per_second", summary.averageSpeedMetersPerSecond))
+        metric("blackbox.max_alt", L10n.f("common.distance.m_precise", summary.maxAltitudeMeters))
+        section("blackbox.section.battery")
+        metric("blackbox.battery_start", battery(summary.startBatteryPercent))
+        metric("blackbox.battery_min", battery(summary.minBatteryPercent))
+        metric("blackbox.battery_used", battery(summary.batteryUsedPercent))
+        section("blackbox.section.autopilot")
+        metric("blackbox.autopilot_events", String(summary.autopilotEventCount))
+        metric("blackbox.mission_events", String(summary.missionRelatedEventCount))
+        if let rf = summary.rf {
+            section("blackbox.section.radio")
+            metric("blackbox.rf.samples", String(rf.sampleCount))
+            metric("blackbox.rf.min_rssi", rf.minimumRSSIDBm.map { L10n.f("common.signal.dbm", $0) } ?? L10n.s("common.na"))
+            metric("blackbox.rf.min_sinr", rf.minimumSINRDB.map { L10n.f("common.signal.db", $0) } ?? L10n.s("common.na"))
+            metric("blackbox.rf.min_margin", rf.minimumLinkMarginDB.map { L10n.f("common.signal.db", $0) } ?? L10n.s("common.na"))
+            metric("blackbox.rf.mean_per", fmtPercent(rf.averagePacketErrorRate))
+            metric("blackbox.rf.delivery", fmtPercent(rf.averageDeliveryRatio))
+            metric("blackbox.rf.max_age", L10n.f("common.time.seconds_precise", rf.maximumCommandAgeSeconds))
+            metric("blackbox.rf.retries", String(rf.retryAttempts))
+            metric("blackbox.rf.expired", String(rf.expiredPackets))
+            metric("blackbox.rf.backpressure", String(rf.backpressureSampleCount))
+            metric("blackbox.rf.lost", String(rf.lostSampleCount))
+            if let count = rf.baselineBucketCount { metric("blackbox.rf.baseline_buckets", String(count)) }
+            if let count = rf.acceptanceScenarioCount, let passed = rf.acceptancePassedCount {
+                metric("blackbox.rf.acceptance", "\(passed)/\(count)")
             }
-            if let acceptanceScenarioCount = rf.acceptanceScenarioCount,
-               let acceptancePassedCount = rf.acceptancePassedCount {
-                lines.append("- Acceptance suite: \(acceptancePassedCount)/\(acceptanceScenarioCount) passed")
-            }
-            if let qosPolicyCount = rf.qosPolicyCount {
-                lines.append("- QoS policies captured: \(qosPolicyCount)")
-            }
-            if let performanceGateCount = rf.performanceGateCount,
-               let performanceGatePassedCount = rf.performanceGatePassedCount {
-                lines.append("- RF scale gates: \(performanceGatePassedCount)/\(performanceGateCount) passed")
+            if let count = rf.qosPolicyCount { metric("blackbox.rf.qos_policies", String(count)) }
+            if let count = rf.performanceGateCount, let passed = rf.performanceGatePassedCount {
+                metric("blackbox.rf.performance_gates", "\(passed)/\(count)")
             }
         }
-        lines.append("")
-        lines.append("Events:")
-
-        let display = Array(events.prefix(40))
-        for event in display {
-            lines.append("- \(fmt1(event.timestamp)) \(event.type.rawValue): \(event.message)")
+        section("blackbox.events")
+        for event in events.prefix(40) {
+            lines.append("- \(L10n.f("replay.event.timestamp", event.timestamp)): \(L10n.s(event.message))")
         }
-        if events.count > 40 {
-            lines.append("- ... \(events.count - 40) more events")
-        }
-
+        if events.count > 40 { lines.append(L10n.f("blackbox.events.more", events.count - 40)) }
         return lines.joined(separator: "\n")
     }
 
@@ -198,12 +191,8 @@ struct MissionReportBuilder {
         return values.reduce(0, +) / Double(values.count)
     }
 
-    private func fmtOptional(_ value: Double?) -> String {
-        value.map(fmt1) ?? "n/a"
-    }
-
     private func fmtPercent(_ value: Double?) -> String {
-        guard let value else { return "n/a" }
+        guard let value else { return L10n.s("common.na") }
         return "\(fmt1(value * 100)) %"
     }
 }

@@ -7,7 +7,14 @@ import SwiftUI
 /// under them is derived from those numbers rather than quoted, so raising the rate visibly costs
 /// the operator distance instead of being asserted to.
 struct ControlLinkRadioView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
+    @State private var showsParameters = false
+
+    private typealias Intent = ELRSControlIntent
+
+    private func suggestedMode(_ intent: Intent) -> ELRSMode {
+        ELRSLinkCatalog.suggestedMode(for: intent, band: mode.band)
+    }
 
     private var fitted: Bool { viewModel.controlLinkConfiguration != nil }
     private var configuration: ELRSConfiguration {
@@ -25,13 +32,27 @@ struct ControlLinkRadioView: View {
                     .foregroundStyle(GroundControlPalette.warning)
                     .fixedSize(horizontal: false, vertical: true)
             } else if fitted {
-                bandPicker
-                modePicker
-                HStack(alignment: .top, spacing: 14) {
-                    telemetryPicker
-                    powerPicker
+                intentPicker
+                HStack(spacing: 24) {
+                    summaryMetric("control_link.response", value: L10n.f("control_link.response.value", mode.slotLatencyMS))
+                    summaryMetric("control_link.update_rate", value: L10n.f("control_link.update_rate.value", mode.packetRateHz))
                 }
-                readouts
+                Text("control_link.basic_hint")
+                    .font(.caption2)
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                DisclosureGroup("common.parameters", isExpanded: $showsParameters) {
+                    VStack(alignment: .leading, spacing: 12) {
+                        bandPicker
+                        modePicker
+                        HStack(alignment: .top, spacing: 14) {
+                            telemetryPicker
+                            powerPicker
+                        }
+                        readouts
+                    }
+                    .padding(.top, 10)
+                }
             } else {
                 Text("control_link.stock_hint")
                     .font(.caption2)
@@ -46,6 +67,39 @@ struct ControlLinkRadioView: View {
             GroundControlPalette.inset,
             in: RoundedRectangle(cornerRadius: 12, style: .continuous)
         )
+    }
+
+    private var intentPicker: some View {
+        HStack(spacing: 8) {
+            ForEach(Intent.allCases) { intent in
+                let candidate = suggestedMode(intent)
+                let selected = candidate.id == mode.id
+                Button { viewModel.setControlLinkMode(candidate) } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(LocalizedStringKey("control_link.intent.\(intent.rawValue)"))
+                            .font(.caption.weight(.semibold))
+                        Text(LocalizedStringKey("control_link.intent.\(intent.rawValue).hint"))
+                            .font(.caption2)
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                    .padding(10)
+                    .background(selected ? GroundControlPalette.accent.opacity(0.14) : GroundControlPalette.panelRaised,
+                        in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(RoundedRectangle(cornerRadius: 9)
+                        .stroke(selected ? GroundControlPalette.accent : GroundControlPalette.border, lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    private func summaryMetric(_ key: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(LocalizedStringKey(key)).font(.caption2).foregroundStyle(GroundControlPalette.textSecondary)
+            Text(value).font(.callout.monospacedDigit().weight(.semibold))
+        }
     }
 
     private var header: some View {
@@ -142,11 +196,11 @@ struct ControlLinkRadioView: View {
                                              ? GroundControlPalette.textPrimary
                                              : GroundControlPalette.textSecondary)
                         Spacer(minLength: 4)
-                        Text(String(format: "%.0f dBm", candidate.sensitivityDBm))
+                        Text(L10n.f("control_link.sensitivity.value", candidate.sensitivityDBm))
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(GroundControlPalette.textSecondary)
-                        Text(String(
-                            format: "%.0f км",
+                        Text(L10n.f(
+                            "control_link.range.value",
                             candidate.freeSpaceRangeM(
                                 txPowerDBm: configuration.transmitPowerDBm
                             ) / 1000
@@ -200,7 +254,7 @@ struct ControlLinkRadioView: View {
                 set: { viewModel.setControlLinkTransmitPowerDBm($0) }
             )) {
                 ForEach(ELRSLinkCatalog.transmitPowerLevelsDBm, id: \.self) { power in
-                    Text(String(format: "%.0f мВт", pow(10, power / 10))).tag(power)
+                    Text(L10n.f("control_link.power.value", pow(10, power / 10))).tag(power)
                 }
             }
             .labelsHidden()
@@ -212,12 +266,12 @@ struct ControlLinkRadioView: View {
     private var readouts: some View {
         VStack(alignment: .leading, spacing: 4) {
             row(titleKey: "control_link.sensitivity",
-                value: String(format: "%.0f dBm", mode.sensitivityDBm))
+                value: L10n.f("control_link.sensitivity.value", mode.sensitivityDBm))
             row(titleKey: "control_link.slot_latency",
-                value: String(format: "%.1f мс", mode.slotLatencyMS))
+                value: L10n.f("control_link.response.value", mode.slotLatencyMS))
             row(titleKey: "control_link.range",
-                value: String(
-                    format: "%.0f км",
+                value: L10n.f(
+                    "control_link.range.value",
                     mode.freeSpaceRangeM(txPowerDBm: configuration.transmitPowerDBm) / 1000
                 ))
             // What the telemetry setting actually costs, in the currency it is spent in.

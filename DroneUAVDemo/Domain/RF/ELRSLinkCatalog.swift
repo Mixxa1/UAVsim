@@ -79,7 +79,7 @@ enum ELRSTelemetryRatio: String, Codable, CaseIterable, Hashable, Sendable, Iden
     }
 
     var displayName: String {
-        guard let denominator else { return "Off" }
+        guard let denominator else { return L10n.s("common.off") }
         return "1:\(denominator)"
     }
 }
@@ -128,17 +128,20 @@ struct ELRSMode: Identifiable, Hashable, Sendable {
     }
 
     var displayName: String {
-        let rate = packetRateHz.rounded() == packetRateHz
-            ? String(format: "%.0f Hz", packetRateHz)
-            : String(format: "%.0f Hz", packetRateHz)
+        let rate = L10n.f("control_link.rate.value", packetRateHz)
         let suffix: String
         switch (channelCount, packetRepeats) {
-        case (8, _): suffix = " 8ch"
+        case (8, _): suffix = L10n.f("control_link.channels.value", channelCount)
         case (_, let repeats) where repeats > 1: suffix = " DVDA"
         default: suffix = ""
         }
         return "\(rate)\(suffix) \(modulation == .flrc ? "FLRC" : "LoRa")"
     }
+}
+
+enum ELRSControlIntent: String, CaseIterable, Identifiable {
+    case response, balanced, range
+    var id: String { rawValue }
 }
 
 enum ELRSLinkCatalog {
@@ -339,6 +342,26 @@ enum ELRSLinkCatalog {
         case .mhz900: return mhz900Modes
         case .ghz24: return ghz24Modes
         }
+    }
+
+    static func suggestedMode(for intent: ELRSControlIntent, band: ELRSBand) -> ELRSMode {
+        let available = modes(for: band)
+        let maximumRate = available.map(\.packetRateHz).max() ?? 250
+        let desiredRate: Double
+        switch intent {
+        case .response: desiredRate = min(500, maximumRate)
+        case .balanced: desiredRate = min(250, maximumRate / 2)
+        case .range: desiredRate = available.map(\.packetRateHz).min() ?? 50
+        }
+        return available.min {
+            let firstDistance = abs($0.packetRateHz - desiredRate)
+            let secondDistance = abs($1.packetRateHz - desiredRate)
+            if firstDistance != secondDistance { return firstDistance < secondDistance }
+            // Rates can have multiple encodings. Prefer the stronger receiver margin at
+            // the same command rate, so the balance preset does not lose range to 8-channel modes.
+            if $0.sensitivityDBm != $1.sensitivityDBm { return $0.sensitivityDBm < $1.sensitivityDBm }
+            return $0.id < $1.id
+        } ?? defaultMode(for: band)
     }
 
     static func mode(id: String) -> ELRSMode? {

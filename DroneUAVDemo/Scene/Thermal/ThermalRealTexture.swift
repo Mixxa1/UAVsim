@@ -1,5 +1,6 @@
 import AppKit
 import SceneKit
+import ImageIO
 
 /// Resolves the **real** diffuse texture of a scene material into a grayscale luminance image
 /// usable as a `multiply` channel on a thermal proxy. This is what makes thermal "texture-aware":
@@ -15,6 +16,21 @@ import SceneKit
 enum ThermalRealTexture {
     private static var cache: [String: NSImage?] = [:]
     private static let ciContext = CIContext(options: [.useSoftwareRenderer: false])
+
+    static func image(for diffuse: SCNMaterialProperty) -> NSImage? {
+        if let image = diffuse.contents as? NSImage { return image }
+        let url = (diffuse.contents as? URL) ?? (diffuse.contents as? NSURL).map { $0 as URL }
+        guard let url else { return nil }
+        return cached(key: "color:\(url.absoluteString)") {
+            guard let data = embeddedTextureData(for: url),
+                  let source = CGImageSourceCreateWithData(data as CFData, nil),
+                  let image = CGImageSourceCreateThumbnailAtIndex(source, 0, [
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: 64
+                  ] as CFDictionary) else { return nil }
+            return NSImage(cgImage: image, size: NSSize(width: image.width, height: image.height))
+        }
+    }
 
     /// Grayscale luminance image (compressed to ~[0.5, 1.0] so it only shades) for the material's
     /// diffuse, or nil if the material has no real texture (flat `NSColor`).

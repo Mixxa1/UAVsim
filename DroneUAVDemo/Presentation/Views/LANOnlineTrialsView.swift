@@ -26,151 +26,139 @@ struct LANOnlineTrialsView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .center, spacing: 12) {
-                Button(action: onClose) {
-                    HStack(spacing: 8) {
-                        Image(systemName: "chevron.left")
-                        Text("common.back")
-                    }
-                    .font(.caption.weight(.bold))
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(.white.opacity(0.82))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .background(panelFill, in: RoundedRectangle(cornerRadius: 8))
-
-                Spacer()
+        VStack(alignment: .leading, spacing: 20) {
+            Button(action: onClose) {
+                Label(L10n.s("common.back"), systemImage: "chevron.left")
+                    .font(.caption.weight(.semibold))
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(GroundControlPalette.textSecondary)
 
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("online.menu.multi_simulation")
-                    .font(.system(size: 30, weight: .bold))
-                    .foregroundStyle(.white)
-                Text("online.subtitle")
+                    .font(.system(size: 28, weight: .bold))
+                Label(L10n.s("online.guide.network"), systemImage: "network")
                     .font(.callout)
-                    .foregroundStyle(.white.opacity(0.68))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
             }
 
-            // v1.5: left column (mode cards + setup form) and right column (session panel)
-            // share the same HStack so their tops are flush.
-            HStack(alignment: .top, spacing: 14) {
-                VStack(alignment: .leading, spacing: 14) {
-                    HStack(spacing: 12) {
-                        entryModePanel(
-                            title: "LAN",
-                            subtitle: L10n.s("online.mode.lan.local_network"),
-                            systemImage: "network",
-                            isActive: true,
-                            isDisabled: false
-                        )
+            participantPanel
 
-                        entryModePanel(
-                            title: "Server",
-                            subtitle: L10n.s("online.mode.server.badge_later"),
-                            systemImage: "server.rack",
-                            isActive: false,
-                            isDisabled: true
-                        )
-                    }
-
-                    lanSetupPanel
+            if !viewModel.isSessionActive {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 16, alignment: .top)], spacing: 16) {
+                    hostPanel
+                    joinPanel
                 }
-                .frame(width: 390, alignment: .topLeading)
+            }
 
-                if viewModel.state.connectionState != .idle {
-                    sessionStatusPanel
-                }
+            if let error = viewModel.state.lastErrorMessage {
+                Label(error, systemImage: "exclamationmark.triangle.fill")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if viewModel.state.connectionState != .idle {
+                sessionStatusPanel
             }
         }
+        .foregroundStyle(.white)
         .frame(maxWidth: 840, alignment: .leading)
         .onChange(of: viewModel.shouldOpenTrialRuntime) { _, shouldOpen in
             requestRuntimeOpenIfNeeded(shouldOpen: shouldOpen)
         }
-        // P2P v1.3.1: backup in case .onChange misses an already-true value on appear.
         .onAppear {
             requestRuntimeOpenIfNeeded(shouldOpen: viewModel.shouldOpenTrialRuntime)
         }
     }
 
-    private var lanSetupPanel: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            sectionTitle("LAN")
-
+    private var participantPanel: some View {
+        HStack(alignment: .top, spacing: 16) {
             VStack(alignment: .leading, spacing: 7) {
                 formLabel(L10n.s("online.participant_name"))
                 TextField(L10n.s("online.participant.placeholder"), text: $viewModel.displayName)
                     .textFieldStyle(.roundedBorder)
                     .disabled(viewModel.isSessionActive)
             }
+            .frame(maxWidth: .infinity)
 
             VStack(alignment: .leading, spacing: 7) {
                 formLabel(L10n.s("online.role"))
-                Picker(L10n.s("online.role"), selection: $viewModel.selectedRole) {
+                Picker("", selection: $viewModel.selectedRole) {
                     ForEach(LANParticipantRole.allCases) { role in
                         Text(role.displayName).tag(role)
                     }
                 }
                 .pickerStyle(.segmented)
+                .labelsHidden()
+                .frame(height: 24)
                 .onChange(of: viewModel.selectedRole) { _, role in
                     viewModel.selectRole(role)
                 }
             }
+            .frame(width: 220)
 
-            Button {
-                viewModel.createHostSession()
-            } label: {
+            VStack(alignment: .leading, spacing: 7) {
+                formLabel(L10n.s("online.port"))
+                TextField("7777", text: $viewModel.portText)
+                    .textFieldStyle(.roundedBorder)
+                    .disabled(viewModel.isSessionActive)
+            }
+            .frame(width: 72)
+        }
+        .padding(16)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(panelStroke(cornerRadius: 12))
+    }
+
+    private var hostPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(L10n.s("online.setup.host.title"), systemImage: "plus.circle")
+                .font(.headline)
+            Text("online.setup.host.detail")
+                .font(.caption)
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 7) {
+                formLabel(L10n.s("online.network.my_ip"))
+                Text("\(localIPAddress):\(viewModel.portText)")
+                    .font(.callout.monospacedDigit())
+                    .textSelection(.enabled)
+                    .frame(height: 24, alignment: .leading)
+            }
+            Spacer(minLength: 0)
+            Button { viewModel.createHostSession() } label: {
                 actionLabel(L10n.s("online.lan.create"), systemImage: "plus.circle")
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isSessionActive)
-            .opacity(viewModel.isSessionActive ? 0.42 : 1.0)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, minHeight: 210, maxHeight: 210, alignment: .topLeading)
+        .background(panelFill, in: RoundedRectangle(cornerRadius: 12))
+        .overlay(panelStroke(cornerRadius: 12))
+    }
 
-            Divider()
-                .overlay(Color.white.opacity(0.12))
-
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 7) {
-                    formLabel(L10n.s("online.ip_address"))
-                    TextField("127.0.0.1", text: $viewModel.joinAddress)
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(viewModel.isSessionActive)
-                }
-
-                VStack(alignment: .leading, spacing: 7) {
-                    formLabel(L10n.s("online.port"))
-                    TextField("7777", text: $viewModel.portText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 86)
-                        .disabled(viewModel.isSessionActive)
-                }
+    private var joinPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(L10n.s("online.setup.join.title"), systemImage: "arrow.right.circle")
+                .font(.headline)
+            Text("online.setup.join.detail")
+                .font(.caption)
+                .foregroundStyle(GroundControlPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 7) {
+                formLabel(L10n.s("online.ip_address"))
+                TextField("127.0.0.1", text: $viewModel.joinAddress)
+                    .textFieldStyle(.roundedBorder)
             }
-
-            Button {
-                viewModel.joinSession()
-            } label: {
+            Spacer(minLength: 0)
+            Button { viewModel.joinSession() } label: {
                 actionLabel(L10n.s("online.connect"), systemImage: "arrow.right.circle")
             }
             .buttonStyle(.plain)
-            .disabled(viewModel.isSessionActive)
-            .opacity(viewModel.isSessionActive ? 0.42 : 1.0)
-
-            if let error = viewModel.state.lastErrorMessage {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                    Text(error)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(Color(red: 1.0, green: 0.63, blue: 0.36))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 8)
-                .background(Color.black.opacity(0.24), in: RoundedRectangle(cornerRadius: 8))
-            }
         }
         .padding(16)
-        .frame(width: 390, alignment: .topLeading)
+        .frame(maxWidth: .infinity, minHeight: 210, maxHeight: 210, alignment: .topLeading)
         .background(panelFill, in: RoundedRectangle(cornerRadius: 12))
         .overlay(panelStroke(cornerRadius: 12))
     }
@@ -332,8 +320,8 @@ struct LANOnlineTrialsView: View {
             .buttonStyle(.plain)
             .padding(16)
         }
-        .frame(width: 390)
-        .frame(minHeight: 520, maxHeight: 640)
+        .frame(maxWidth: .infinity)
+        .frame(height: 520)
         .background(panelFill, in: RoundedRectangle(cornerRadius: 12))
         .overlay(panelStroke(cornerRadius: 12))
     }
@@ -446,46 +434,6 @@ struct LANOnlineTrialsView: View {
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(Color(red: 0.35, green: 0.86, blue: 0.58).opacity(0.30), lineWidth: 1)
-        )
-    }
-
-    private func entryModePanel(
-        title: String,
-        subtitle: String,
-        systemImage: String,
-        isActive: Bool,
-        isDisabled: Bool
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 9) {
-            HStack {
-                Image(systemName: systemImage)
-                    .font(.system(size: 20, weight: .semibold))
-                Spacer()
-                if isDisabled {
-                    Text("online.mode.server.badge_later")
-                        .font(.system(size: 9, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white.opacity(0.44))
-                }
-            }
-
-            VStack(alignment: .leading, spacing: 3) {
-                Text(title)
-                    .font(.headline)
-                Text(subtitle)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(isDisabled ? 0.42 : 0.66))
-            }
-        }
-        .foregroundStyle(.white.opacity(isDisabled ? 0.42 : 0.92))
-        .padding(14)
-        .frame(width: 180, height: 112, alignment: .topLeading)
-        .background(
-            (isActive ? Color.white.opacity(0.12) : Color.white.opacity(0.045)),
-            in: RoundedRectangle(cornerRadius: 12)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.white.opacity(isActive ? 0.34 : 0.14), lineWidth: 1)
         )
     }
 

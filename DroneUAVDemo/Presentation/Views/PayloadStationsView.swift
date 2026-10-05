@@ -6,7 +6,7 @@ import SwiftUI
 /// runtime is built around, while this one is about the airframe's other stations — where they
 /// are, what they can take, and how much of the mass budget is left.
 struct PayloadStationsView: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     @State private var lastRejection: PayloadLoadoutRejection?
     @State private var expandedMount: PayloadMount?

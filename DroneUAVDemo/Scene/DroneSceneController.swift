@@ -568,6 +568,7 @@ final class DroneSceneController {
 
     // MARK: Thermal camera
     private var thermalRenderer: ThermalProxyRenderer?
+    private weak var thermalImportedRoot: SCNNode?
     private var thermalRenderingActive = false
     private var thermalContext = ThermalEnvironmentContext.neutral
     private var thermalPalette: ThermalPalette = .whiteHot
@@ -576,10 +577,13 @@ final class DroneSceneController {
     private var thermalBrightness: Double = 0.0
     private var thermalNoiseAmount: Double = 0.5
     private var thermalNormalization = ThermalNormalizationState.neutral
+    private var thermalNormalizationTarget = ThermalNormalizationState.neutral
+    private var lastThermalNormalizationRefresh: CFTimeInterval?
     private var thermalSavedBackground: Any?
     private var thermalSavedFogStart: CGFloat?
     private var thermalSavedFogEnd: CGFloat?
     private var thermalPresentationDirty = true
+    private var lastImportedThermalRefresh: CFTimeInterval = 0
 
     private struct SupplementalCollisionObstacle {
         let obstacle: CollisionObstacle
@@ -1047,6 +1051,29 @@ final class DroneSceneController {
 
     /// Per-frame gate. Toggles the payload camera between the real scene and the thermal proxy
     /// scene (idempotent), and recolours only when something actually changed.
+    func captureReplayVisuals(recorder: MissionReplayRecorder, displayName: String) -> [MissionReplayVisualSnapshot] {
+        var nodes = [MissionReplayVisualCapture.snapshot(id: "player", node: droneNode, recorder: recorder,
+            role: "player", displayName: displayName, camera: resolvedPointOfView(for: .fpv))]
+        for (id, visual) in wingmanVisuals {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: "wingman:\(id)", node: visual.rootNode,
+                recorder: recorder, role: "wingman"))
+        }
+        for node in onlineTrialPlaceholderRootNode.childNodes {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: node.name ?? "remote:\(ObjectIdentifier(node))",
+                node: node, recorder: recorder, role: "participant"))
+        }
+        for (key, node) in detachedVehiclePartNodes {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: "player-debris:\(key)", node: node, recorder: recorder, poseNode: node.presentation))
+        }
+        for (id, node) in droppedPayloadNodes.merging(fireCapsuleDropNodes, uniquingKeysWith: { first, _ in first })
+            .merging(remoteDropNodes, uniquingKeysWith: { first, _ in first }) {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: "payload:\(id)", node: node, recorder: recorder))
+        }
+        return nodes.sorted { $0.id < $1.id }
+    }
+
+    var hasReplayDebris: Bool { !detachedVehiclePartNodes.isEmpty }
+
     func updateThermalPresentation(active: Bool) {
         if active != thermalRenderingActive {
             thermalRenderingActive = active
@@ -1058,6 +1085,15 @@ final class DroneSceneController {
         }
 
         guard thermalRenderingActive else { return }
+        // LOD streaming can install meshes between weather/palette changes.
+        let now = CACurrentMediaTime()
+        let rangeSettling = abs(thermalNormalization.displayMinCelsius - thermalNormalizationTarget.displayMinCelsius) > 0.05
+            || abs(thermalNormalization.displayMaxCelsius - thermalNormalizationTarget.displayMaxCelsius) > 0.05
+        if thermalRenderer?.hasPendingImportedGeometry == true || rangeSettling
+            || (installedWorld != nil && now - lastImportedThermalRefresh >= 0.5) {
+            lastImportedThermalRefresh = now
+            thermalPresentationDirty = true
+        }
         if thermalPresentationDirty {
             refreshThermalPresentation()
             thermalPresentationDirty = false
@@ -1068,7 +1104,8 @@ final class DroneSceneController {
         if let thermalRenderer {
             return thermalRenderer
         }
-        let renderer = ThermalProxyRenderer(sceneRoot: scene.rootNode, groundNode: groundNode)
+        let renderer = ThermalProxyRenderer(sceneRoot: scene.rootNode, groundNode: groundNode,
+                                            importedRoot: thermalImportedRoot)
         // The renderer is created lazily on first thermal activation, which can happen before or
         // after a mission scenario spawns its target — hand it whatever target is current now.
         renderer.setMissionTarget(missionTargetNode)
@@ -1084,14 +1121,13 @@ final class DroneSceneController {
         thermalSavedFogEnd = scene.fogEndDistance
         neutralizeFogForThermal()
         payloadCamera?.categoryBitMask = RenderCategory.thermalProxy
+        lastThermalNormalizationRefresh = nil
         thermalPresentationDirty = true
     }
 
     private func deactivateThermalRendering() {
         payloadCamera?.categoryBitMask = RenderCategory.visibleInPayloadOptics
-        if let saved = thermalSavedBackground {
-            scene.background.contents = saved
-        }
+        scene.background.contents = thermalSavedBackground
         thermalSavedBackground = nil
         if let start = thermalSavedFogStart {
             scene.fogStartDistance = start
@@ -1106,8 +1142,8 @@ final class DroneSceneController {
     /// `scene.fog*` is a scene-wide property (not per-camera) — the EO atmospheric haze colour
     /// (near-white for snow/fog presets) was blending into thermal proxy fragments by distance,
     /// painting far snow/ground white regardless of its actual temperature. Thermal already
-    /// represents fog/haze degradation by widening the normalization band (less apparent
-    /// contrast), so the literal screen-space fog blend is pushed out beyond the payload camera's
+    /// represents fog/haze as radiance attenuation, so the literal screen-space fog blend is
+    /// pushed out beyond the payload camera's
     /// far clip while thermal is active — it never reaches any rendered fragment.
     private func neutralizeFogForThermal() {
         scene.fogStartDistance = CameraClipping.payloadOpticsFar * 4
@@ -1133,7 +1169,16 @@ final class DroneSceneController {
             groundClass: groundClass,
             environmentRevision: environmentRevision
         )
-        thermalNormalization = ThermalNormalizationModel.make(population: population, context: context)
+        thermalNormalizationTarget = ThermalNormalizationModel.make(population: population, context: context)
+        let now = CACurrentMediaTime()
+        thermalNormalization = ThermalNormalizationModel.stabilized(thermalNormalizationTarget,
+            previous: lastThermalNormalizationRefresh == nil ? nil : thermalNormalization,
+            elapsedSeconds: now - (lastThermalNormalizationRefresh ?? now))
+        if abs(thermalNormalization.displayMinCelsius - thermalNormalizationTarget.displayMinCelsius) < 0.05
+            && abs(thermalNormalization.displayMaxCelsius - thermalNormalizationTarget.displayMaxCelsius) < 0.05 {
+            thermalNormalization = thermalNormalizationTarget
+        }
+        lastThermalNormalizationRefresh = now
 
         renderer.updatePresentation(
             context: context,
@@ -1170,8 +1215,8 @@ final class DroneSceneController {
             weather: currentWeather,
             terrain: terrainPreset,
             sceneProfile: profile,
-            isNight: missionTimeOfDay.isNight,
-            timeOfDayHours: missionTimeOfDay.timeOfDayHours
+            isNight: worldClock.isNight,
+            timeOfDayHours: (worldClock.hourOfDay * 12).rounded() / 12
         )
     }
 
@@ -1187,8 +1232,8 @@ final class DroneSceneController {
         }
     }
 
-    /// Diagnostics snapshot for the debug overlay. The center probe casts a ray down the payload
-    /// camera's forward axis and reads the hit proxy's stored temperature/class.
+    /// Diagnostics snapshot for the debug overlay. The center probe estimates brightness
+    /// temperature from the hit material, normal, view and distance; it does not sample imagery.
     func thermalDiagnostics(includeCenterProbe: Bool) -> ThermalDiagnosticsSnapshot {
         var center: (cls: ThermalMaterialClass, temp: Double, name: String?)?
         if includeCenterProbe, thermalRenderingActive {
@@ -1239,7 +1284,11 @@ final class DroneSceneController {
             ]
         )
         for result in results {
-            if let probe = renderer.probe(node: result.node) {
+            let hit = SIMD3<Double>(Double(result.worldCoordinates.x), Double(result.worldCoordinates.y), Double(result.worldCoordinates.z))
+            let normal = simd_normalize(SIMD3<Double>(Double(result.worldNormal.x), Double(result.worldNormal.y), Double(result.worldNormal.z)))
+            let viewVector = SIMD3<Double>(Double(origin.x), Double(origin.y), Double(origin.z)) - hit
+            if let probe = renderer.probe(node: result.node, geometryIndex: result.geometryIndex,
+                normal: normal, view: simd_normalize(viewVector), distance: simd_length(viewVector)) {
                 return (probe.materialClass, probe.temperatureCelsius, probe.name)
             }
         }
@@ -5366,6 +5415,9 @@ final class DroneSceneController {
         MainActor.assumeIsolated {
             installedWorld?.rootNode.removeFromParentNode()
             installedWorld = world
+            thermalImportedRoot = world?.rootNode
+            thermalRenderer?.setImportedRoot(thermalImportedRoot)
+            invalidateThermalScene()
             publishWorldRegistry(for: world)
             // A survey cloud is geo-anchored to the world it was captured over; a new world would
             // leave those points floating in the wrong place, so start each world clean.
@@ -5879,15 +5931,21 @@ final class DroneSceneController {
             // `currentWeather` is assigned from `weather` above, so the key sees the new weather.
             applySkyAppearance(for: terrain)
 
-            let isSnow = weather.preset == .snow
-            if terrain.preset != .city {
-                scenePopulationService.refreshTreeVisuals(snowWeatherActive: isSnow)
-            }
-            refreshGroundMaterial(for: terrain)
-            buildSnowDecorations(for: terrain)
+            if installedWorld != nil {
+                // Imported meshes/imagery survive a weather change. Update only temperatures;
+                // clearing thousands of proxies here would restart streaming on every wind edit.
+                thermalPresentationDirty = true
+            } else {
+                let isSnow = weather.preset == .snow
+                if terrain.preset != .city {
+                    scenePopulationService.refreshTreeVisuals(snowWeatherActive: isSnow)
+                }
+                refreshGroundMaterial(for: terrain)
+                buildSnowDecorations(for: terrain)
 
-            // Weather change re-creates tree/ground visuals → thermal proxies are stale.
-            invalidateThermalScene()
+                // Procedural weather changes can replace actual ground/tree geometry.
+                invalidateThermalScene()
+            }
         }
     }
 
@@ -9815,6 +9873,7 @@ final class DroneSceneController {
     /// aimed from the clock's own elevation and azimuth and the whole scene's shadows travel with
     /// it across the day.
     func applyWorldClock(_ clock: WorldClock) {
+        let previousThermalMinute = Int((worldClock.hourOfDay * 12).rounded())
         worldClock = clock
         let previousTimeOfDay = missionTimeOfDay
         missionTimeOfDay = clock.legacyTimeOfDay
@@ -9887,7 +9946,8 @@ final class DroneSceneController {
         }
         #endif
 
-        if previousTimeOfDay != missionTimeOfDay {
+        if previousTimeOfDay != missionTimeOfDay
+            || (thermalRenderingActive && previousThermalMinute != Int((clock.hourOfDay * 12).rounded())) {
             refreshThermalContextForTimeOfDay()
         }
     }
@@ -9909,7 +9969,9 @@ final class DroneSceneController {
     /// Applies a mission time-of-day setting: re-runs lighting/sky for the current terrain and
     /// refreshes the thermal context so `isNight`/`timeOfDayHours` flow into the thermal pipeline.
     func applyMissionTimeOfDay(_ timeOfDay: TimeOfDay) {
+        worldClock = WorldClock(startHour: timeOfDay.timeOfDayHours)
         missionTimeOfDay = timeOfDay
+        aimSunLight(for: worldClock)
         if let terrain = lastTerrainConfig {
             applyTerrainVisualStyle(terrain)
         } else {
@@ -9920,6 +9982,7 @@ final class DroneSceneController {
 
     private func refreshThermalContextForTimeOfDay() {
         thermalContext = makeThermalContext()
+        thermalPresentationDirty = true
     }
 
     // MARK: - Mission scenario entities

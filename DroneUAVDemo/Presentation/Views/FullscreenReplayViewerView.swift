@@ -94,6 +94,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     private var qualityBadge:     NSTextField?
     private var cameraModeLabel:  NSTextField?
     private var cameraModePopup:  NSPopUpButton?
+    private var cameraSubjectPopup: NSPopUpButton?
     private var topDownHeightLabel: NSTextField?
     private var topDownHeightSlider: NSSlider?
     private var mountModeSegmented: NSSegmentedControl?
@@ -123,6 +124,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
                      report: MissionReport?,
                      initialTime: TimeInterval,
                      initialCameraMode: ReplayCameraMode = .freeObserver,
+                     initialCameraSubjectID: String = "player",
                      selectedEvent: MissionReplayEvent? = nil) {
         current?.requestClose()
 
@@ -133,6 +135,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
             report:  report,
             initialTime: initialTime,
             initialCameraMode: initialCameraMode,
+            initialCameraSubjectID: initialCameraSubjectID,
             selectedEvent: selectedEvent
         )
     }
@@ -143,6 +146,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
                        report: MissionReport?,
                        initialTime: TimeInterval,
                        initialCameraMode: ReplayCameraMode,
+                       initialCameraSubjectID: String,
                        selectedEvent: MissionReplayEvent?) {
         self.session = session
 
@@ -151,6 +155,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         player.load(session: session)
         if initialTime > 0 { player.seek(to: initialTime) }
         sceneController.loadSession(session, events: events)
+        sceneController.setCameraSubject(initialCameraSubjectID)
         sceneController.update(frame: player.currentFrame)
         sceneController.setSelectedEvent(selectedEvent ?? events.first)
         sceneController.setCameraMode(initialCameraMode)
@@ -289,6 +294,21 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         cameraPopup.autoresizingMask = [.minXMargin]
         bar.addSubview(cameraPopup)
         cameraModePopup = cameraPopup
+
+        if sceneController.cameraSubjects.count > 1 {
+            let subjects = NSPopUpButton(frame: NSRect(x: bar.bounds.width - 465, y: 36, width: 270, height: 20))
+            subjects.font = .systemFont(ofSize: 10)
+            for subject in sceneController.cameraSubjects {
+                subjects.addItem(withTitle: subject.title)
+                subjects.lastItem?.representedObject = subject.id
+                if subject.id == sceneController.cameraSubjectID { subjects.select(subjects.lastItem) }
+            }
+            subjects.target = self
+            subjects.action = #selector(cameraSubjectChanged(_:))
+            subjects.autoresizingMask = [.minXMargin]
+            bar.addSubview(subjects)
+            cameraSubjectPopup = subjects
+        }
 
         let heightLabel = NSTextField(labelWithString: String(format: localized("replay.fullscreen.height_format"), Int(sceneController.topDownHeight)))
         heightLabel.font = .systemFont(ofSize: 10, weight: .semibold)
@@ -492,6 +512,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
             guard let self, !self.isClosing else { return }
             self.player.update(deltaTime: 1.0 / 60.0)
             self.sceneController.update(frame: self.player.currentFrame)
+            if self.sceneController.hasImportedWorld { self.sceneController.updateImportedWorldStreaming() }
             self.updateUI()
         }
         RunLoop.main.add(t, forMode: .common)
@@ -568,16 +589,16 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
             let vel   = frame.velocity.simd
             let speed = (vel.x * vel.x + vel.y * vel.y + vel.z * vel.z).squareRoot()
             let bat   = frame.batteryPercent.map { String(format: "%.0f%%", $0) } ?? "—"
-            let ap    = frame.autopilotDescription ?? "—"
+            let ap    = frame.autopilotDescription.map { DroneFlightMode(rawValue: $0).map { localized($0.titleKey) } ?? $0 } ?? "—"
             let speedLabel = localized("replay.frame.speed_short")
             let modeLabel = localized("replay.frame.mode_short")
             let apLabel = localized("replay.frame.autopilot_short")
             let batLabel = localized("replay.frame.battery_short")
             var text = "X \(String(format: "%.1f", frame.position.x))   " +
-                "Y \(String(format: "%.1f", frame.position.y)) m   " +
+                "Y \(String(format: "%.1f", frame.position.y)) \(localized("replay.unit.meters"))   " +
                 "Z \(String(format: "%.1f", frame.position.z))   " +
-                "\(speedLabel) \(String(format: "%.1f", speed)) m/s   " +
-                "\(modeLabel) \(frame.flightModeDescription)   " +
+                "\(speedLabel) \(String(format: "%.1f", speed)) \(localized("replay.unit.meters_per_second"))   " +
+                "\(modeLabel) \(DroneFlightMode(rawValue: frame.flightModeDescription).map { localized($0.titleKey) } ?? frame.flightModeDescription)   " +
                 "\(apLabel) \(ap)   " +
                 "\(batLabel) \(bat)"
             if frame.warningCount > 0 {
@@ -626,10 +647,8 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     }
 
     private func fmtTime(_ t: TimeInterval) -> String {
-        let total = Int(max(0, t))
-        let ms    = Int((t - Double(total)) * 10)
-        if total < 60 { return String(format: "%d.%ds", total, ms) }
-        return String(format: "%dm%02ds", total / 60, total % 60)
+        let tenths = Int(max(0, t) * 10)
+        return String(format: "%02d:%02d.%d", tenths / 600, (tenths / 10) % 60, tenths % 10)
     }
 
     // MARK: - Button / slider actions
@@ -659,6 +678,13 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         guard let rawValue = sender.selectedItem?.representedObject as? String,
               let mode = ReplayCameraMode(rawValue: rawValue) else { return }
         setCameraMode(mode)
+    }
+
+    @objc private func cameraSubjectChanged(_ sender: NSPopUpButton) {
+        guard let id = sender.selectedItem?.representedObject as? String else { return }
+        sceneController.setCameraSubject(id)
+        sceneController.update(frame: player.currentFrame)
+        updateUI()
     }
 
     @objc private func topDownHeightChanged(_ sender: NSSlider) {

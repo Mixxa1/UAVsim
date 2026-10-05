@@ -125,6 +125,7 @@ struct SettingsView: View {
         }
         .frame(minWidth: 720, idealWidth: 980, maxWidth: 1080, minHeight: 560, idealHeight: 720, maxHeight: 820)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
+        .clipShape(RoundedRectangle(cornerRadius: 20))
         .overlay(
             RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.18), lineWidth: 1)
         )

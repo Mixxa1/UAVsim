@@ -193,6 +193,7 @@ enum UAVWorldFacadeMaterialFactory {
 
     private static var facadeCache: [UAVWorldFacadeClass: SCNMaterial] = [:]
     private static var roofCache: [UAVWorldFacadeClass: SCNMaterial] = [:]
+    private static var glazingMaskCache: [UAVWorldFacadeClass: NSImage] = [:]
     private static let cacheLock = NSLock()
 
     /// Materials for a building, in the slot order `UAVWorldBuildingGeometryFactory` emits:
@@ -225,6 +226,52 @@ enum UAVWorldFacadeMaterialFactory {
         defer { cacheLock.unlock() }
         facadeCache.removeAll()
         roofCache.removeAll()
+        glazingMaskCache.removeAll()
+    }
+
+    /// Exact semantic mask for the procedural facade: glazing is white, masonry/trim black.
+    /// Nine small shared tiles cover the entire city. Thermal rendering never decodes facade
+    /// imagery or creates per-building textures to guess which pixels are windows.
+    static func thermalGlazingMask(for materialName: String?) -> NSImage? {
+        guard let materialName, materialName.hasPrefix("world.facade."),
+              let cls = UAVWorldFacadeClass(rawValue: String(materialName.dropFirst("world.facade.".count))) else {
+            return nil
+        }
+        cacheLock.lock()
+        defer { cacheLock.unlock() }
+        if let image = glazingMaskCache[cls] { return image }
+        let style = style(for: cls)
+        let dimension = CGFloat(tilePixels)
+        let image = NSImage(size: NSSize(width: dimension, height: dimension))
+        image.lockFocus()
+        if let context = NSGraphicsContext.current?.cgContext {
+            NSColor.black.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: dimension, height: dimension))
+            let width = dimension * style.windowWidthFraction
+            let height = dimension * style.windowHeightFraction
+            let window = CGRect(x: (dimension - width) * 0.5,
+                                y: (dimension - height) * 0.5 + dimension * 0.04,
+                                width: width, height: height)
+            NSColor.white.setFill()
+            if style.isRibbonGlazing {
+                context.fill(CGRect(x: 0, y: window.minY, width: dimension, height: height))
+                NSColor.black.setFill()
+                let mullion = dimension * 0.025
+                context.fill(CGRect(x: 0, y: window.minY, width: mullion, height: height))
+                context.fill(CGRect(x: dimension - mullion, y: window.minY, width: mullion, height: height))
+            } else {
+                context.fill(window)
+                NSColor.black.setFill()
+                let muntin = max(dimension * 0.008, 1)
+                context.fill(CGRect(x: window.midX - muntin * 0.5, y: window.minY,
+                                    width: muntin, height: height))
+                context.fill(CGRect(x: window.minX, y: window.midY - muntin * 0.5,
+                                    width: width, height: muntin))
+            }
+        }
+        image.unlockFocus()
+        glazingMaskCache[cls] = image
+        return image
     }
 
     // MARK: - Material construction
@@ -232,6 +279,7 @@ enum UAVWorldFacadeMaterialFactory {
     private static func makeFacadeMaterial(for facadeClass: UAVWorldFacadeClass) -> SCNMaterial {
         let style = style(for: facadeClass)
         let material = SCNMaterial()
+        material.name = "world.facade.\(facadeClass.rawValue)"
         material.lightingModel = .physicallyBased
         material.diffuse.contents = makeFacadeTexture(style: style, facadeClass: facadeClass)
         material.roughness.contents = style.roughness
@@ -260,6 +308,7 @@ enum UAVWorldFacadeMaterialFactory {
 
     private static func makeRoofMaterial(for facadeClass: UAVWorldFacadeClass) -> SCNMaterial {
         let material = SCNMaterial()
+        material.name = "world.roof.\(facadeClass.rawValue)"
         material.lightingModel = .physicallyBased
 
         // Roofs are what a UAV actually looks at most of the time, and real ones are not the

@@ -276,7 +276,7 @@ struct DamageState {
         let top = damaged
             .sorted { health(for: $0) < health(for: $1) }
             .prefix(3)
-            .map { "\(NSLocalizedString($0.titleKey, comment: "")): \(Int(health(for: $0) * 100))%" }
+            .map { "\(L10n.s($0.titleKey)): \(Int(health(for: $0) * 100))%" }
 
         return top.joined(separator: ", ")
     }

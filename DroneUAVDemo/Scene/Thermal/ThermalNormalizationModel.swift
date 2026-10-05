@@ -1,72 +1,38 @@
 import Foundation
+import simd
 
-/// Builds the display range (`displayMin`/`displayMax`).
-///
-/// The range is anchored to a fixed band expressed *relative to ambient* per scene profile, and
-/// only **expands** to cover a colder/hotter population — it never contracts to fit the warmest
-/// object present. That distinction is the whole point:
-///
-///  - It's camera-independent (the band is a function of weather + map, not of what's on screen),
-///    so panning never re-stretches the palette — the old "tone jumps when the camera rotates" bug
-///    is structurally impossible.
-///  - The warmest *present* surface is never forced to the bright end. In a snow scene the trees
-///    are warmer than the snow, but because the band already reserves warm headroom they read as a
-///    mid-tone, not glowing yellow. The bright top is reserved for genuinely hot things (people /
-///    fire / engines — out of scope in this environment-only patch), which would expand the band.
+/// Sample material responses and facade orientations, not the camera image: panning cannot
+/// pump exposure, and cold sky cannot flatten the entire city. The range can contract as surfaces
+/// cool, with temporal smoothing at the caller.
 enum ThermalNormalizationModel {
-
-    /// Fixed display band relative to ambient, per scene profile (cold, warm). `warm` carries
-    /// headroom above the hottest ordinary surface so the environment sits in the lower ~60%.
-    private static func fixedBand(for profile: ThermalSceneProfile) -> (cold: Double, warm: Double) {
-        // Tuned (see scenario sweep) so cool vegetation lands in the lower-mid of the palette,
-        // man-made/sunlit surfaces in the upper-mid, and the bright top stays reserved.
-        switch profile {
-        case .neutral: return (-14, 24)
-        case .forest: return (-15, 22)
-        case .field: return (-14, 24)
-        case .city: return (-13, 27)
-        case .snow: return (-24, 18)
-        case .waterCoast: return (-15, 22)
-        case .mountain: return (-15, 24)
-        }
-    }
-
     static func make(
         population: [(materialClass: ThermalMaterialClass, weight: Double)],
         context: ThermalEnvironmentContext
     ) -> ThermalNormalizationState {
-        let ambient = context.ambientTemperatureCelsius
-        let band = fixedBand(for: context.sceneProfile)
-        var displayMin = ambient + band.cold
-        var displayMax = ambient + band.warm
-
-        // Expand (only) to cover outliers in the present population — never contract.
+        let up = SIMD3<Double>(0, 1, 0)
+        let walls: [SIMD3<Double>] = [SIMD3(1, 0, 0), SIMD3(-1, 0, 0), SIMD3(0, 0, 1), SIMD3(0, 0, -1)]
         var samples: [(temp: Double, weight: Double)] = []
-        samples.reserveCapacity(population.count)
-        for entry in population where entry.weight > 0 {
-            let temp = ThermalMaterialModel.meanTemperature(for: entry.materialClass, context: context)
-            samples.append((temp, entry.weight))
+        for entry in population where entry.weight > 0 && entry.materialClass != .sky {
+            let cls = entry.materialClass
+            let normals = [.building, .glass, .metal, .generic].contains(cls) ? walls + [up] : [up]
+            for normal in normals {
+                let views = cls == .glass
+                    ? [normal, simd_normalize(normal * 0.4 + SIMD3(0, -0.9, 0))] : [normal]
+                for view in views {
+                    let temp = ThermalMaterialModel.apparentSurfaceTemperature(for: cls,
+                        context: context, normal: normal, view: view)
+                    samples.append((temp, entry.weight / Double(normals.count * views.count)))
+                }
+            }
         }
-        if !samples.isEmpty {
-            // Use 2nd/98th percentile so a single stray class can't yank the band.
-            let popLow = weightedPercentile(samples, 0.02)
-            let popHigh = weightedPercentile(samples, 0.98)
-            displayMin = min(displayMin, popLow)
-            displayMax = max(displayMax, popHigh)
+        let ambient = context.ambientTemperatureCelsius
+        var displayMin = samples.isEmpty ? ambient - 3 : weightedPercentile(samples, 0.02) - 3
+        var displayMax = samples.isEmpty ? ambient + 10 : weightedPercentile(samples, 0.98) + 4
+        // A small warm target must remain visible even in a dense forest population.
+        if population.contains(where: { $0.materialClass == .body && $0.weight > 0 }) {
+            displayMax = max(displayMax, ThermalMaterialModel.meanTemperature(for: .body, context: context) + 2)
         }
-
-        // Haze/rain lowers effective contrast: widen the band so temperature differences span less
-        // of the palette (matches a degraded sensor in low visibility).
-        let haze = max(context.fogDensity, context.rainIntensity * 0.6)
-        if haze > 0.01 {
-            let mid = (displayMin + displayMax) * 0.5
-            let widen = 1.0 + 0.30 * haze
-            displayMin = mid + (displayMin - mid) * widen
-            displayMax = mid + (displayMax - mid) * widen
-        }
-
-        // Never collapse to a flat tone.
-        let minSpan = 14.0
+        let minSpan = context.sceneProfile == .snow ? 24.0 : 18.0
         if displayMax - displayMin < minSpan {
             let mid = (displayMin + displayMax) * 0.5
             displayMin = mid - minSpan * 0.5
@@ -77,6 +43,15 @@ enum ThermalNormalizationModel {
             displayMinCelsius: displayMin,
             displayMaxCelsius: displayMax
         )
+    }
+
+    static func stabilized(_ target: ThermalNormalizationState, previous: ThermalNormalizationState?,
+                           elapsedSeconds: Double) -> ThermalNormalizationState {
+        guard let previous else { return target }
+        let blend = 1 - exp(-max(0, elapsedSeconds) / 1.5)
+        return ThermalNormalizationState(
+            displayMinCelsius: previous.displayMinCelsius + (target.displayMinCelsius - previous.displayMinCelsius) * blend,
+            displayMaxCelsius: previous.displayMaxCelsius + (target.displayMaxCelsius - previous.displayMaxCelsius) * blend)
     }
 
     private static func weightedPercentile(

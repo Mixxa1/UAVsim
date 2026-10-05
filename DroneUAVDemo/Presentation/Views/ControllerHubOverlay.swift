@@ -20,7 +20,7 @@ enum ControllerHubSection: String, CaseIterable, Identifiable {
 }
 
 struct ControllerHubOverlay: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
     @ObservedObject var settingsStore: ControllerSettingsStore
 
     let onClose: () -> Void

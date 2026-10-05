@@ -34,8 +34,9 @@ int main(int argc, char** argv) {
     window.initializeViewport();
 
     // --open-structural-result lets another program (the Workbench) show a result where the part
-    // lives. --screenshot grabs the window it opened and exits — documentation images and a
-    // check of the real window without anyone at the keyboard.
+    // lives. --screenshot grabs the window it opened (the part window when nothing else is asked
+    // for) and exits — documentation images and a check of the real window without anyone at the
+    // keyboard.
     QCommandLineParser options;
     const QCommandLineOption openResult(QStringLiteral("open-structural-result"),
                                         QStringLiteral("Open a cadnext_structural result file (strength or modal)."), QStringLiteral("path"));
@@ -76,6 +77,12 @@ int main(int argc, char** argv) {
         }
     } else {
         window.show();
+        if (options.isSet(screenshot)) {
+            const QString target = options.value(screenshot);
+            QTimer::singleShot(1500, &window, [&window, target]() {
+                QApplication::exit(window.grab().save(target) ? 0 : 3);
+            });
+        }
     }
 
     return QApplication::exec();

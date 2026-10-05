@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Compact aircraft "dossier" card shared by Mission Setup's platform picker and the sidebar UAV
-/// Catalog module — live 3D preview on top, name/manufacturer, a handful of headline specs, and a
+/// Compact aircraft card for the sidebar UAV catalogue — live 3D preview on top,
+/// name/manufacturer, a handful of headline specs, and a
 /// confidence/custom badge. Deliberately presentation-only (plain values in, no `DroneModelProfile`
 /// or `UAVCatalogEntry` coupling) so both screens can feed it from their own domain types.
 ///
@@ -57,14 +57,13 @@ struct UAVSelectionCardView<ExpandedContent: View>: View {
                 .background(GroundControlPalette.shell, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
 
             VStack(alignment: .leading, spacing: 3) {
-                HStack(alignment: .top, spacing: 6) {
-                    Text(name)
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(GroundControlPalette.textPrimary)
-                        .lineLimit(1)
-                    Spacer(minLength: 4)
-                    badge
-                }
+                Text(name)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(GroundControlPalette.textPrimary)
+                    .lineLimit(2)
+                    .frame(height: 32, alignment: .topLeading)
+
+                badge
 
                 if let manufacturer {
                     Text(manufacturer)
@@ -90,6 +89,7 @@ struct UAVSelectionCardView<ExpandedContent: View>: View {
                     }
                 }
                 .padding(.top, 2)
+                .frame(minHeight: 60, alignment: .topLeading)
             }
 
             expandedContent()
@@ -115,6 +115,8 @@ struct UAVSelectionCardView<ExpandedContent: View>: View {
     private var badge: some View {
         Text(badgeText)
             .font(.caption2.weight(.semibold))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(Capsule().fill(badgeTint.opacity(0.18)))

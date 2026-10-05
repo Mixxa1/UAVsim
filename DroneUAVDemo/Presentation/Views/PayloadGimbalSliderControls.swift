@@ -58,7 +58,7 @@ struct NativeAxisSlider: NSViewRepresentable {
 /// `CameraModuleView` drive `adjustRangefinderGimbal` — but placed directly over the live feed so
 /// aiming doesn't require leaving the viewport to open the Camera module.
 struct PayloadGimbalSliderControls: View {
-    @ObservedObject var viewModel: DroneSimulationViewModel
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
 
     private var isEnabled: Bool { viewModel.payloadCameraOpticsState.isAvailable }
 

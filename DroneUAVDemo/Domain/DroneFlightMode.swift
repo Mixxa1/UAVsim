@@ -10,7 +10,7 @@ enum DroneFlightMode: String, CaseIterable {
     case landing
 
     var title: String {
-        NSLocalizedString(titleKey, comment: "")
+        L10n.s(titleKey)
     }
 
     var titleKey: String {
@@ -41,7 +41,7 @@ enum FlightControlMode: String, CaseIterable, Identifiable {
     var id: String { rawValue }
 
     var title: String {
-        NSLocalizedString(titleKey, comment: "")
+        L10n.s(titleKey)
     }
 
     var titleKey: String {
