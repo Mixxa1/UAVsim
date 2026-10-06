@@ -35,6 +35,7 @@ struct DroneVisualModel {
     let visualBoundsCenter: SIMD3<Float>
     let visualBoundsSize: SIMD3<Float>
     let tiltPivotNodes: [SCNNode]
+    let articulatedNodes: [UAVArticulatedNode]
 
     init(
         rootNode: SCNNode,
@@ -45,7 +46,8 @@ struct DroneVisualModel {
         payloadMountNode: SCNNode,
         visualBoundsCenter: SIMD3<Float> = .zero,
         visualBoundsSize: SIMD3<Float> = SIMD3<Float>(repeating: 0.36),
-        tiltPivotNodes: [SCNNode] = []
+        tiltPivotNodes: [SCNNode] = [],
+        articulatedNodes: [UAVArticulatedNode] = []
     ) {
         self.rootNode = rootNode
         self.propellerNodes = propellerNodes
@@ -56,6 +58,7 @@ struct DroneVisualModel {
         self.visualBoundsCenter = visualBoundsCenter
         self.visualBoundsSize = visualBoundsSize
         self.tiltPivotNodes = tiltPivotNodes
+        self.articulatedNodes = articulatedNodes
     }
 }
 
@@ -154,6 +157,26 @@ func bladeReference(
 
 let profileIDs = Set(profiles.map { $0.id })
 let modelIDs = Set(library.coveredIDs)
+if UAVExpansionCatalog.ids.count != 30 { fail("additional flight catalogue must contain 30 aircraft") }
+if profileIDs.count != profiles.count { fail("duplicate catalogue profile IDs") }
+for definition in UAVExpansionCatalog.definitions {
+    let runtime = LIPODroneModelRepository.runtimeProfile(from: definition.profile)
+    if runtime.sourceURL == nil { fail("\(definition.id): source URL missing") }
+    if definition.profile.massCategory == nil { fail("\(definition.id): cannot appear in any mass-category filter") }
+    if definition.isVTOL && (runtime.propulsionUnitTemplate.count != definition.rotors.count) {
+        fail("\(definition.id): propulsion template differs from the authored rotor rig")
+    }
+    if let wing = runtime.fixedWingParameters,
+       !(wing.minSafeAirspeed > 0 && wing.cruiseAirspeed > wing.minSafeAirspeed && wing.maxAirspeed >= wing.cruiseAirspeed) {
+        fail("\(definition.id): invalid fixed-wing speed envelope")
+    }
+    if let moduleID = definition.flight.cameraModuleId {
+        if CameraModuleCatalog.module(id: moduleID) == nil { fail("\(definition.id): integrated camera missing") }
+        if UAVCameraFitmentCatalog.fitment(for: definition.profile).allowsOperatorCameraPayload {
+            fail("\(definition.id): stock integrated camera incorrectly treated as detachable payload")
+        }
+    }
+}
 
 for id in profileIDs.subtracting(modelIDs).sorted() {
     fail("no bundled model for catalogue profile '\(id)'")
@@ -205,6 +228,28 @@ for profile in profiles.sorted(by: { $0.id < $1.id }) {
     }
     if liveAnimations > 0 {
         fail("\(profile.id): \(liveAnimations) imported animations survived import")
+    }
+
+    // New rigid camera/canard assemblies must respond to live simulation input,
+    // with fixed pivots, after their packaged demonstration clips are removed.
+    if visual.articulatedNodes.count != library.articulationCount(for: profile.id) {
+        fail("\(profile.id): articulated camera/control assembly is missing")
+    }
+    for rig in visual.articulatedNodes {
+        let rest = rig.node.simdTransform
+        let pivot = rig.node.simdWorldPosition
+        rig.applyCamera(yawDegrees: 15, pitchDegrees: -20)
+        rig.applyControl(elevatorDeflection: 0.65)
+        if simd_length(rig.node.simdWorldPosition - pivot) > 0.00001 {
+            fail("\(profile.id): camera/control pivot translates when actuated")
+        }
+        let turned = rig.node.simdTransform
+        if simd_length(turned.columns.0 - rest.columns.0)
+            + simd_length(turned.columns.1 - rest.columns.1)
+            + simd_length(turned.columns.2 - rest.columns.2) < 0.01 {
+            fail("\(profile.id): camera/control assembly did not move")
+        }
+        rig.node.simdTransform = rest
     }
 
     // Does spinning the wrapper actually turn the disc in its own plane?

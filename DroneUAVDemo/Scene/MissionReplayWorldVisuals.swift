@@ -52,8 +52,7 @@ enum MissionReplayVisualCapture {
         var changes: [String: MissionReplayNodeState] = [:]
         for (identity, child) in liveNodes {
             guard let path = paths[identity], !path.isEmpty else { continue }
-            let state = MissionReplayNodeState(pose: MissionReplayPose(position: child.simdPosition,
-                rotation: child.simdOrientation.vector, scale: child.simdScale), opacity: Double(child.opacity))
+            let state = localState(of: child)
             if baseline[path] != state { changes[path] = state }
         }
         let absent = paths.compactMap { identity, path in liveNodes[identity] == nil ? path : nil }
@@ -70,11 +69,18 @@ enum MissionReplayVisualCapture {
         var states: [String: MissionReplayNodeState] = [:]
         visit(node, path: "") { child, path in
             guard !path.isEmpty else { return }
-            states[path] = MissionReplayNodeState(
-                pose: MissionReplayPose(position: child.simdPosition, rotation: child.simdOrientation.vector, scale: child.simdScale),
-                opacity: Double(child.opacity))
+            states[path] = localState(of: child)
         }
         return states
+    }
+
+    static func localState(of node: SCNNode) -> MissionReplayNodeState {
+        let colour = (node.geometry?.firstMaterial?.multiply.contents as? NSColor)?.usingColorSpace(.deviceRGB)
+        let tint = colour.map { SIMD4<Float>(Float($0.redComponent), Float($0.greenComponent), Float($0.blueComponent), Float($0.alphaComponent)) }
+        let roll = (node.value(forKey: "userData") as? NSDictionary)?["wheelRoll"] as? Double
+        return MissionReplayNodeState(pose: MissionReplayPose(position: node.simdPosition,
+            rotation: node.simdOrientation.vector, scale: node.simdScale), opacity: Double(node.opacity),
+            materialTint: tint, wheelRoll: roll)
     }
 
     static func visit(_ node: SCNNode, path: String, action: (SCNNode, String) -> Void) {
@@ -89,7 +95,7 @@ final class MissionReplayWorldVisuals {
     private let root = SCNNode()
     private var assets: [String: Data] = [:]
     private var instances: [String: (assetID: String, node: SCNNode)] = [:]
-    private var effects: [UUID: SCNNode] = [:]
+    private var effects: [UUID: WorldDamageEffectVisual] = [:]
     private var baselines: [String: [String: MissionReplayNodeState]] = [:]
     private var previousChildChanges: [String: [String: MissionReplayNodeState]] = [:]
     private weak var playerRoot: SCNNode?
@@ -107,12 +113,17 @@ final class MissionReplayWorldVisuals {
         assetFailures = false
         self.assets = assets
         self.playerRoot = playerRoot
+        root.name = "mission-replay-world"
+        root.addChildNode(WorldDamageEffectVisual.makePreparationNode())
         scene.rootNode.addChildNode(root)
     }
 
     func node(for id: String) -> SCNNode? { id == "player" ? playerRoot : instances[id]?.node }
 
     func update(_ world: MissionReplayWorldSnapshot) {
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
         snapshots = world.nodes
         let live = Set(world.nodes.map(\.id))
         for id in Array(instances.keys) where !live.contains(id) {
@@ -172,6 +183,11 @@ final class MissionReplayWorldVisuals {
                     child.simdOrientation = simd_quatf(vector: state.pose.rotation)
                     child.simdScale = state.pose.scale
                     child.opacity = CGFloat(state.opacity)
+                    if state.materialTint != previousChanges[path]?.materialTint {
+                        let tint = state.materialTint ?? SIMD4<Float>(repeating: 1)
+                        let colour = NSColor(calibratedRed: CGFloat(tint.x), green: CGFloat(tint.y), blue: CGFloat(tint.z), alpha: CGFloat(tint.w))
+                        for material in child.geometry?.materials ?? [] { material.multiply.contents = colour }
+                    }
                 }
             }
             previousChildChanges[snapshot.id] = snapshot.nodeStates ?? [:]
@@ -184,90 +200,18 @@ final class MissionReplayWorldVisuals {
     private func updateEffects(_ values: [MissionReplayEffectSnapshot]) {
         let live = Set(values.map(\.id))
         for id in Array(effects.keys) where !live.contains(id) {
-            effects.removeValue(forKey: id)?.removeFromParentNode()
+            effects.removeValue(forKey: id)?.node.removeFromParentNode()
         }
         for effect in values {
-            let node: SCNNode
-            if let existing = effects[effect.id] { node = existing } else {
-                node = makeEffect(effect)
-                root.addChildNode(node)
-                effects[effect.id] = node
+            let instance: WorldDamageEffectVisual
+            if let existing = effects[effect.id] { instance = existing } else {
+                instance = WorldDamageEffectVisual(kind: InterceptEffectKind(rawValue: effect.kind) ?? .contact,
+                    scale: effect.scale ?? 1)
+                instance.node.name = "replay.effect.\(effect.id)"
+                root.addChildNode(instance.node); effects[effect.id] = instance
             }
-            node.simdPosition = effect.position
-            let age = Float(max(0, effect.age))
-            let life = Float(max(0.01, effect.lifetime))
-            let fade = max(0, 1 - age / life)
-            let kind = InterceptEffectKind(rawValue: effect.kind) ?? .contact
-            let outward = simd_length_squared(effect.normal) > 0.0001 ? simd_normalize(effect.normal) : SIMD3<Float>(0, 1, 0)
-            let orientation = simd_quatf(from: SIMD3<Float>(0, 1, 0), to: outward)
-            for (index, particle) in node.childNodes.enumerated() {
-                let seed = Float(index + 1)
-                let direction = orientation.act(SIMD3<Float>(sin(seed * 2.4), 0.4 + abs(cos(seed)), cos(seed * 1.8)))
-                var scale: Float
-                var opacity: Float
-                switch kind {
-                case .smoke:
-                    let rise = max(0, age - seed * 0.15)
-                    particle.simdPosition = direction * rise * 0.22 + SIMD3<Float>(0, rise * 0.55, 0)
-                    scale = 0.3 + rise * 0.22
-                    opacity = fade * 0.45
-                case .fire:
-                    let phase = (age * 1.2 + seed * 0.13).truncatingRemainder(dividingBy: 1)
-                    particle.simdPosition = direction * 0.22 + SIMD3<Float>(0, phase * 1.8, 0)
-                    scale = 0.25 + (1 - phase) * 0.45
-                    opacity = fade * (1 - phase) * 0.85
-                case .contact, .secondary:
-                    let burst = kind == .secondary ? Float(2.4) : 1
-                    particle.simdPosition = direction * age * 5 * burst - SIMD3<Float>(0, 4.9 * age * age, 0)
-                    scale = (0.04 + max(0, 1 - age) * 0.05) * burst
-                    opacity = max(0, 1 - age / 0.8)
-                    if index == 0 {
-                        particle.simdPosition = .zero
-                        scale = (0.25 + age * 1.8) * burst
-                        opacity = exp(-age * 7) * fade
-                    }
-                }
-                particle.simdScale = SIMD3<Float>(repeating: scale)
-                particle.opacity = CGFloat(opacity)
-            }
+            instance.node.simdPosition = effect.position
+            instance.update(age: effect.age, lifetime: effect.lifetime, normal: effect.normal, wind: effect.wind ?? .zero)
         }
     }
-
-    private func makeEffect(_ effect: MissionReplayEffectSnapshot) -> SCNNode {
-        let root = SCNNode()
-        root.name = "replay.effect.\(effect.id)"
-        for _ in 0..<18 {
-            let sprite = SCNPlane(width: 2, height: 2)
-            let material = SCNMaterial()
-            material.lightingModel = .constant
-            material.diffuse.contents = Self.effectSprite
-            material.multiply.contents = effect.kind == "smoke" ? NSColor(white: 0.25, alpha: 1)
-                : NSColor(calibratedRed: 1, green: effect.kind == "contact" ? 0.75 : 0.32, blue: 0.08, alpha: 1)
-            material.writesToDepthBuffer = false
-            material.blendMode = effect.kind == "smoke" ? .alpha : .add
-            material.isDoubleSided = true
-            sprite.firstMaterial = material
-            let node = SCNNode(geometry: sprite)
-            node.constraints = [SCNBillboardConstraint()]
-            root.addChildNode(node)
-        }
-        return root
-    }
-
-    private static let effectSprite: NSImage = {
-        let bitmap = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 32, pixelsHigh: 32,
-            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
-            colorSpaceName: .deviceRGB, bytesPerRow: 128, bitsPerPixel: 32)!
-        for y in 0..<32 {
-            for x in 0..<32 {
-                let dx = (Double(x) + 0.5) / 16 - 1, dy = (Double(y) + 0.5) / 16 - 1
-                let alpha = pow(max(0, 1 - sqrt(dx * dx + dy * dy)), 1.6)
-                let pixel = bitmap.bitmapData!.advanced(by: y * 128 + x * 4)
-                pixel[0] = 255; pixel[1] = 255; pixel[2] = 255; pixel[3] = UInt8(alpha * 255)
-            }
-        }
-        let image = NSImage(size: NSSize(width: 32, height: 32))
-        image.addRepresentation(bitmap)
-        return image
-    }()
 }

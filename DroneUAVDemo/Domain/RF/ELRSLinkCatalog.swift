@@ -142,6 +142,8 @@ struct ELRSMode: Identifiable, Hashable, Sendable {
 enum ELRSControlIntent: String, CaseIterable, Identifiable {
     case response, balanced, range
     var id: String { rawValue }
+    var titleKey: String { "control_link.intent.\(rawValue)" }
+    var hintKey: String { "\(titleKey).hint" }
 }
 
 enum ELRSLinkCatalog {

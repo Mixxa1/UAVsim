@@ -877,6 +877,18 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     @Published private(set) var interceptHUD = InterceptMissionHUDState()
     private var interceptSession: InterceptMissionSession?
     private var interceptScene: InterceptMissionScene?
+    @Published private(set) var groundVehicleHUD = GroundVehicleMissionHUD()
+    private var groundVehicleMission: GroundVehicleMissionRuntime?
+    private var groundVehicleActor: InterceptVehicleRuntime?
+    private var groundVehicleScene: InterceptMissionScene?
+    private var groundVehicleOrigin = SIMD2<Float>.zero
+    private var groundVehicleAreaRadius: Float = 250
+    private var groundVehicleWorldTime: TimeInterval = 0
+    private var groundVehicleHUDAccumulator: Float = 0
+    private var groundVehicleSightAccumulator: Float = 0
+    private var groundVehicleInCamera = false
+    private var groundVehicleLineOfSight = false
+    private var groundVehicleTouching = false
     /// Ordered idempotency for the run's event log; rebuilt on every restart.
     private var interceptEventGate: InterceptEventGate?
     /// The player's undamaged radio layout, captured once at launch so the per-tick damage
@@ -6849,23 +6861,24 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     // MARK: - Battery and telemetry
 
     func chargeDroneAndContinue() {
-        batteryState.chargePercent = 100
         showBatteryDepletedDialog = false
+        guard !batteryState.hasFireDamage else { return }
+        batteryState.chargePercent = 100
         setFlightMode(.hover, reason: "battery_recovery_hover")
         lockControlsToCurrentState(overrideThrottle: Double(resolvedFlightBaseline(for: .hover).hoverLockThrottle))
     }
 
     /// Battery thermal-runaway/rupture: visual consequence only (flame + smoke, instant power
     /// loss) — no secondary component damage, matching a fire that starts *because* the pack
-    /// failed rather than one more structural failure of its own. Idempotent: a second trigger
-    /// while already on fire is a no-op, so the impact path and the per-tick overheat/discharge
-    /// checks can both call this without double-igniting.
+    /// failed rather than one more structural failure of its own. A failed pack stays failed
+    /// after the visual effect ends, until repair/reset replaces it.
     private func igniteBatteryFireIfNeeded(reason: String) {
-        guard !batteryFireActive, componentGraph.component(id: "battery") != nil else { return }
+        guard !batteryState.hasFireDamage, componentGraph.component(id: "battery") != nil else { return }
+        batteryState.hasFireDamage = true
+        showBatteryDepletedDialog = false
         batteryFireActive = true
         batteryFireIgnitedAtSimulationTime = TimeInterval(simulationTime)
-        // Otherwise this would still read >= batteryOverheatDurationSec on the very next check
-        // once the fire's own timeline clears batteryFireActive, re-igniting it immediately.
+        // The failed pack no longer accumulates sustained-load time.
         sustainedMaxThrottleSeconds = 0.0
         batteryState.chargePercent = 0.0
         damageEventRecorder.record(
@@ -6890,7 +6903,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     /// sitting at 0% on the ground is not the failure mode) — mirrors `BatteryState.isDepleted`'s
     /// 0.1% floor.
     private func updateBatteryFireState(deltaTime: Float) {
-        if !batteryFireActive {
+        if !batteryState.hasFireDamage {
             if isArmed, state.throttle >= Self.batteryOverheatThrottleThreshold {
                 sustainedMaxThrottleSeconds += deltaTime
             } else {
@@ -7293,6 +7306,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         switch params.kind {
         case .attachedPayloadIntercept:
             bootstrapInterceptMission(config: config, dock: dock)
+        case .vehiclePursuit, .vehicleEscort:
+            bootstrapGroundVehicleMission(config: config, dock: dock)
         case .searchAndRescue:
             let placement = MissionScenarioPlacement.generate(
                 parameters: params,
@@ -7422,7 +7437,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     func selectInterceptObservation(_ vehicleID: String) {
         guard let session = interceptSession, session.observation.select(vehicleID) else { return }
         session.director.record(.observationSource(vehicleID))
-        synchronizeInterceptCamera()
+        synchronizeInterceptCamera(showFeed: true)
         publishInterceptHUD()
     }
 
@@ -7439,9 +7454,13 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     /// reset key — reinstates the mission rather than quietly leaving the world empty.
     private func rebuildInterceptMissionAfterReset() {
         guard let config = missionScenarioConfiguration,
-              config.parameters.kind == .attachedPayloadIntercept,
+              config.parameters.kind == .attachedPayloadIntercept || config.parameters.kind.isGroundVehicleMission,
               didBootstrapMissionScenario else { return }
-        bootstrapInterceptMission(config: config, dock: sceneController.currentDockSpawnPoint())
+        if config.parameters.kind.isGroundVehicleMission {
+            bootstrapGroundVehicleMission(config: config, dock: sceneController.currentDockSpawnPoint())
+        } else {
+            bootstrapInterceptMission(config: config, dock: sceneController.currentDockSpawnPoint())
+        }
         startMissionReplayIfNeeded()
         recordMissionReplayFrameIfNeeded(force: true)
     }
@@ -7493,7 +7512,11 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         }
         let targetCourse = isTransitingTarget || isDelivery ? SIMD3<Float>(0, 0, 1) : SIMD3<Float>(0, 0, -1)
 
-        let target = adapter.makeActor(
+        let target = settings.targetsGroundVehicle ? adapter.makeGroundActor(
+            id: InterceptCallsign.target, model: settings.groundVehicleModel ?? .cabover,
+            position: groundVehicleSpawn(dock: dock, offset: SIMD2<Float>(0, -65)),
+            adapterProfile: targetProfile, seed: config.parameters.seed &+ 101
+        ) : adapter.makeActor(
             id: InterceptCallsign.target,
             role: .target,
             profile: targetProfile,
@@ -7702,7 +7725,148 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         )
     }
 
+    // MARK: - Ground vehicle missions
+
+    private func groundVehicleSpawn(dock: SIMD3<Float>, offset: SIMD2<Float>) -> SIMD3<Float> {
+        let profile = GroundVehicleProfile()
+        let aim = SIMD2<Float>(dock.x, dock.z) + offset
+        // Check the entire parked footprint, not just the point under the centre of the cab.
+        for index in 0..<96 {
+            let ring = Float(index / 12) * 5
+            let angle = Float(index % 12) * (.pi / 6)
+            let p = aim + SIMD2<Float>(cos(angle), sin(angle)) * ring
+            guard abs(p.x) < terrain.worldHalfExtent * 0.85, abs(p.y) < terrain.worldHalfExtent * 0.85 else { continue }
+            guard let y = sceneController.groundVehicleSurfaceHeight(at: p, clearanceRadius: 0.35,
+                maximumHeight: dock.y + 5), abs(y - dock.y) < 5 else { continue }
+            let probe = SIMD3<Float>(p.x, y, p.y)
+            let obstacles = sceneController.nearbyEnvironmentObstacles(from: probe, to: probe, margin: 12)
+            let field = GroundVehicleObstacleField(obstacles: obstacles, groundY: y, height: profile.size.y)
+            guard field.index.clear(p, p, profile.size.z * 0.55) else { continue }
+            return SIMD3<Float>(p.x, y, p.y)
+        }
+        // The dock's launch corridor is already cleared by scene generation.
+        let p = SIMD2<Float>(dock.x + 12, dock.z)
+        let y = sceneController.groundVehicleSurfaceHeight(at: p, clearanceRadius: 0.35,
+            maximumHeight: dock.y + 1) ?? dock.y
+        return SIMD3<Float>(p.x, y, p.y)
+    }
+
+    private func bootstrapGroundVehicleMission(config: MissionScenarioConfiguration, dock: SIMD3<Float>) {
+        clearInterceptMission()
+        let adapter = InterceptMissionScene(scene: scene, showsCallsigns: config.parameters.difficulty != .hard)
+        groundVehicleOrigin = SIMD2<Float>(dock.x, dock.z)
+        groundVehicleAreaRadius = min(400, terrain.worldHalfExtent * 0.78)
+        let reach = min(170, groundVehicleAreaRadius * 0.62)
+        let spawn = groundVehicleSpawn(dock: dock, offset: SIMD2<Float>(0, -45))
+        let actor = adapter.makeGroundActor(id: "CAR-01", model: config.groundVehicleModel,
+            position: spawn, adapterProfile: selectedDroneProfile, seed: config.parameters.seed &+ 505)
+        let offsets = [SIMD2<Float>(reach * 0.65, -reach * 0.65), SIMD2<Float>(0, -reach),
+                       SIMD2<Float>(-reach * 0.65, -reach * 0.55), SIMD2<Float>(-reach * 0.5, 0)]
+        let route = offsets.map { offset -> SIMD2<Float> in
+            let p = groundVehicleSpawn(dock: dock, offset: offset)
+            return SIMD2<Float>(p.x, p.z)
+        }
+        groundVehicleMission = GroundVehicleMissionRuntime(escort: config.parameters.kind == .vehicleEscort,
+            difficulty: config.parameters.difficulty, timeLimit: config.parameters.timeLimitSeconds, route: route)
+        groundVehicleActor = actor; groundVehicleScene = adapter
+        groundVehicleHUD.remaining = config.parameters.timeLimitSeconds
+        if config.parameters.kind == .vehicleEscort, let end = route.last {
+            let height = sceneController.groundVehicleSurfaceHeight(at: end, clearanceRadius: 0.35,
+                maximumHeight: .greatestFiniteMagnitude) ?? dock.y
+            adapter.setDeliveryZone(centre: SIMD3<Float>(end.x, height, end.y), radius: 12, shape: .medicalPack)
+        }
+        adapter.updateGroundWorld(actor, now: 0, deltaTime: 0,
+            ground: { [sceneController] p, r in
+                sceneController.groundVehicleSurfaceHeight(at: SIMD2<Float>(p.x, p.z), clearanceRadius: r,
+                    maximumHeight: p.y + 0.7) ?? .nan
+            }, wind: .zero)
+        setCameraMode(.payloadOptics)
+    }
+
+    private func clearGroundVehicleMission() {
+        groundVehicleScene?.clear(); groundVehicleScene = nil
+        groundVehicleActor = nil; groundVehicleMission = nil
+        groundVehicleHUD = GroundVehicleMissionHUD()
+        groundVehicleWorldTime = 0; groundVehicleHUDAccumulator = 0; groundVehicleSightAccumulator = 0
+        groundVehicleInCamera = false; groundVehicleLineOfSight = false; groundVehicleTouching = false
+    }
+
+    private func simulateGroundVehicleWorld(previousState: DroneState, deltaTime: Float) {
+        guard let actor = groundVehicleActor, let mission = groundVehicleMission else { return }
+        groundVehicleWorldTime += TimeInterval(deltaTime)
+        let moving = state.physicalState == .airborne || mission.elapsed > 0
+        let destination = moving && mission.result == nil ? mission.destination
+            : SIMD2<Float>(actor.state.position.x, actor.state.position.z)
+        let obstacles = sceneController.nearbyEnvironmentObstacles(
+            from: actor.state.position, to: actor.state.position, margin: 125)
+        let reports = actor.stepGroundVehicle(deltaTime: deltaTime, destination: destination,
+            threat: mission.escort ? nil : state.position, evasive: !mission.escort,
+            origin: groundVehicleOrigin, areaRadius: groundVehicleAreaRadius,
+            grip: GroundVehicleRuntime.surfaceGrip(weather), obstacles: obstacles,
+            ground: { [sceneController] p, r in
+                sceneController.groundVehicleSurfaceHeight(at: SIMD2<Float>(p.x, p.z), clearanceRadius: r,
+                    maximumHeight: p.y + 0.7) ?? .nan
+            })
+        for report in reports {
+            recordMissionReplayEvent(.impact, message: L10n.s("ground.event.obstacle"), position: report.contactPoint)
+        }
+        if let contact = VehiclePairContactService.firstContact(firstPrevious: previousState, first: state,
+            firstProfile: vehicleContactProfile, secondPrevious: actor.previousState,
+            second: actor.state, secondProfile: actor.contactProfile) {
+            let fresh = !groundVehicleTouching; groundVehicleTouching = true
+            let resolved = VehiclePairContactService.resolve(contact: contact, firstPrevious: previousState,
+                secondPrevious: actor.previousState, first: &state, firstGraph: &componentGraph,
+                firstClass: selectedDroneProfile.airframeClass, second: &actor.state, secondGraph: &actor.graph,
+                secondClass: .multirotor, deltaTime: deltaTime, applyDamage: fresh, secondReceivesComponentDamage: false)
+            if fresh {
+                actor.receive(resolved.second)
+                applyImpactConsequences(resolved.first); refreshDamagePhysicsModels()
+                recordMissionReplayEvent(.impact, message: L10n.s("ground.event.contact"), position: contact.point)
+            }
+        } else { groundVehicleTouching = false }
+    }
+
+    private func updateGroundVehicleMission(deltaTime: Float) {
+        guard let actor = groundVehicleActor, var mission = groundVehicleMission else { return }
+        groundVehicleScene?.updateGroundWorld(actor, now: groundVehicleWorldTime, deltaTime: deltaTime,
+            ground: { [sceneController] p, r in
+                sceneController.groundVehicleSurfaceHeight(at: SIMD2<Float>(p.x, p.z), clearanceRadius: r,
+                    maximumHeight: p.y + r) ?? .nan
+            }, wind: finiteVector(weather.windVector, fallback: .zero))
+        groundVehicleSightAccumulator += deltaTime
+        if groundVehicleSightAccumulator >= 0.2 {
+            groundVehicleSightAccumulator = 0
+            let target = actor.state.position + SIMD3<Float>(0, 1.7, 0)
+            groundVehicleLineOfSight = sceneController.isLineOfSightClearToMissionTarget(from: state.position, to: target)
+            let watching = cameraConfiguration.mode == .payloadOptics && isMountedPayloadCameraAvailable
+            let sample = watching ? sceneController.payloadCameraMissionSample(targetWorldPosition: target,
+                maxRangeMeters: 300, coneHalfAngleDegrees: Float(payloadCameraController.opticsState.currentFieldOfViewDegrees) * 0.4) : nil
+            groundVehicleInCamera = sample?.lineOfSightClear == true
+        }
+        let before = mission.result
+        let distance = simd_distance(state.position, actor.state.position)
+        mission.tick(deltaTime: TimeInterval(deltaTime), playerAirborne: state.physicalState == .airborne,
+            playerLost: state.damageCondition == .destroyed || state.physicalState == .crashed,
+            carPosition: SIMD2<Float>(actor.state.position.x, actor.state.position.z),
+            carCondition: actor.snapshot.functionalState, distance: distance,
+            inCamera: groundVehicleInCamera, lineOfSight: groundVehicleLineOfSight)
+        groundVehicleMission = mission
+        groundVehicleHUDAccumulator += deltaTime
+        if groundVehicleHUDAccumulator >= 0.1 || before != mission.result {
+            groundVehicleHUDAccumulator = 0
+            groundVehicleHUD = GroundVehicleMissionHUD(remaining: mission.remaining, progress: mission.progress,
+                lostSeconds: mission.lostSeconds, lossLimit: mission.lossLimit, distance: distance,
+                speed: simd_length(actor.state.velocity) * 3.6, condition: actor.snapshot.functionalState,
+                inCamera: groundVehicleInCamera, result: mission.result)
+        }
+        if before == nil, let result = mission.result {
+            recordMissionReplayEvent(result.isSuccess ? .missionCompleted : .missionAborted, message: L10n.s(result.titleKey))
+            checkpointCompletedMissionIfNeeded()
+        }
+    }
+
     private func clearInterceptMission() {
+        clearGroundVehicleMission()
         sceneController.observationPointOfView = nil
         sceneController.setNoseMountedEquipment(nil)
         interceptModuleComponent = nil
@@ -7742,6 +7906,12 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             },
             obstacles: { [sceneController] from, to, margin in
                 sceneController.nearbyEnvironmentObstacles(from: from, to: to, margin: margin)
+            },
+            groundVehicleSurface: { [sceneController] position, radius in
+                sceneController.groundVehicleSurfaceHeight(
+                    at: SIMD2<Float>(position.x, position.z), clearanceRadius: radius,
+                    maximumHeight: position.y + 0.7
+                ) ?? .nan
             }
         )
         for report in reports { applyImpactConsequences(report) }
@@ -7759,11 +7929,11 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             session,
             deltaTime: deltaTime,
             ground: { [sceneController] position, radius in
-                sceneController.supportSurfaceHeight(
+                sceneController.groundVehicleSurfaceHeight(
                     at: SIMD2<Float>(position.x, position.z),
                     clearanceRadius: radius,
                     maximumHeight: position.y + radius
-                ) ?? 0
+                ) ?? .nan
             },
             wind: finiteVector(weather.windVector, fallback: .zero)
         )
@@ -7861,6 +8031,10 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         guard !events.isEmpty else { return }
         let records = events.compactMap { event -> MissionEvent? in
             guard interceptEventGate?.accept(event) == true else { return nil }
+            if case .effect(let effect) = event.kind, effect.kind == .explosion {
+                simulationAudio.playOneShot(.chargeDetonation, at: effect.position,
+                    delaySeconds: simulationAudio.propagationDelay(from: effect.position))
+            }
             if missionReplayRecorder.isRecording {
                 let position: SIMD3<Float>?
                 switch event.kind {
@@ -7889,15 +8063,16 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         missionTimeline = missionEventRecorder.record(contentsOf: records)
     }
 
-    private func synchronizeInterceptCamera() {
+    private func synchronizeInterceptCamera(showFeed: Bool = false) {
         guard let session = interceptSession else { return }
         let isRemote = session.observation.isObservingRemoteSource
         sceneController.observationPointOfView = isRemote
             ? interceptScene?.camera(for: session.observation.activeVehicleID)
             : nil
-        // A handoff is a change of picture, so the operator has to be looking at the picture for
-        // it to mean anything. Returning to their own aircraft leaves the camera where it is.
-        if isRemote { setCameraMode(.fpv) }
+        // Automatic feed recovery must not interrupt someone already watching the impact from
+        // outside. Explicit source selection opens that feed; FPV/payload views follow a handoff.
+        let watchingFeed = [.fpv, .payload, .payloadOptics].contains(cameraConfiguration.mode)
+        if isRemote && (showFeed || watchingFeed) { setCameraMode(.fpv) }
     }
 
     private func publishInterceptHUD() {
@@ -7929,7 +8104,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             delivery: session.delivery?.state ?? .carried,
             deliveryZoneRange: session.delivery?.planarRange(from: state.position) ?? 0,
             isOverDeliveryZone: session.delivery?.isOverZone(state.position) ?? false,
-            canRelease: session.delivery?.state == .carried && session.director.isActive
+            canRelease: session.delivery?.state == .carried && session.director.isActive,
+            targetIsGroundVehicle: session.target.isGroundVehicle
         )
         if interceptHUD != value { interceptHUD = value }
     }
@@ -9774,6 +9950,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             sustainedForces: sustainedForces
         )
         simulateInterceptWorld(previousState: previousState, deltaTime: dt)
+        simulateGroundVehicleWorld(previousState: previousState, deltaTime: dt)
         enforceComponentFunctionalState()
 
         if needsCollisionAnalysisRefresh {
@@ -9914,7 +10091,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             updateControlValues({ values in
                 values.throttle = 0.0
             }, markManual: false)
-            if !showBatteryDepletedDialog {
+            if batteryState.shouldOfferRecharge, componentGraph.integrity(id: "battery") > 0.001,
+               !showBatteryDepletedDialog {
                 showBatteryDepletedDialog = true
             }
         }
@@ -9953,6 +10131,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         sysMark("payload")
         updateMissionScenarioRuntime(deltaTime: TimeInterval(dt))
         updateInterceptMission(deltaTime: dt)
+        updateGroundVehicleMission(deltaTime: dt)
         updateFireResponseRuntime(deltaTime: TimeInterval(dt))
         updateAgriSprayRuntime(deltaTime: TimeInterval(dt))
         updateRaceRuntime(deltaTime: TimeInterval(dt))
@@ -10160,7 +10339,12 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     private func applyImpactConsequences(_ report: ImpactReport) {
         // Vehicle-to-vehicle contacts were already normalised into mission impacts by the session
         // that resolved them; only terrain and environment hits arrive here needing one.
-        if report.obstacleSource != InterceptContactSource.vehicle { interceptSession?.recordEnvironment(report) }
+        if report.obstacleSource != InterceptContactSource.vehicle {
+            interceptSession?.resolvePlayerEnvironment(report, player: &state, playerGraph: &componentGraph,
+                obstacles: { [sceneController] from, to, margin in
+                    sceneController.nearbyEnvironmentObstacles(from: from, to: to, margin: margin)
+                })
+        }
         applyImpactAudio(report)
         let wasAlreadyDamaged = recordedPhysicalImpactCount > 0
         lastCollisionSource = report.obstacleSource ?? lastCollisionSource
@@ -10890,7 +11074,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         // The interception mission's own aircraft. They are locally simulated rather than
         // networked, so the mixer hears them through the same one-loop-per-aircraft path as a
         // wingman: full state available, no inference needed beyond an aeroplane's shaft speed.
-        for actor in interceptSession?.actors ?? [] {
+        for actor in (interceptSession?.actors ?? []) + [groundVehicleActor].compactMap({ $0 }) {
             sources.append(RemoteVehicleAudioSource(
                 id: actor.audioID,
                 profile: actor.audioProfile,
@@ -20650,6 +20834,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             sceneController.clearBatteryFireVisual()
             batteryFireActive = false
             batteryFireIgnitedAtSimulationTime = nil
+            batteryState.hasFireDamage = false
             sustainedMaxThrottleSeconds = 0.0
         }
         componentGraph = graph
@@ -32574,7 +32759,7 @@ private extension DroneSimulationViewModel {
     }
 
     var hasCompletedRecordedMission: Bool {
-        interceptSession?.director.result != nil || missionScenarioOutcome != nil ||
+        interceptSession?.director.result != nil || groundVehicleMission?.result != nil || missionScenarioOutcome != nil ||
             fireResponseOutcome != nil || agriSprayOutcome != nil || raceRuntime?.isFinished == true
     }
 
@@ -32626,6 +32811,7 @@ private extension DroneSimulationViewModel {
            state.motionState == .settled,
            stableGroundAccumulator >= 0.45,
            !(interceptScene?.hasReplayAftermath ?? false),
+           !(groundVehicleScene?.hasReplayAftermath ?? false),
            !sceneController.hasReplayDebris,
            !(interceptSession?.actors.contains {
                !$0.snapshot.functionalState.canAttempt &&
@@ -32686,7 +32872,19 @@ private extension DroneSimulationViewModel {
             nodes += interceptScene?.captureReplayVisuals(session: session, recorder: missionReplayRecorder) ?? []
             effects = session.effects.effects.map {
                 MissionReplayEffectSnapshot(id: $0.id, kind: $0.kind.rawValue, position: $0.position,
-                    normal: $0.normal, age: max(0, session.worldTime - $0.startedAt), lifetime: $0.lifetime)
+                    normal: $0.normal, age: max(0, session.worldTime - $0.startedAt), lifetime: $0.lifetime,
+                    scale: $0.scale, wind: finiteVector(weather.windVector, fallback: .zero))
+            }
+        }
+        if let actor = groundVehicleActor {
+            nodes += groundVehicleScene?.captureReplayVisuals(actors: [actor], recorder: missionReplayRecorder) ?? []
+        }
+        for actor in (interceptSession?.actors ?? []) + [groundVehicleActor].compactMap({ $0 }) {
+            guard let road = actor.groundVehicle else { continue }
+            effects += road.effects.map {
+                MissionReplayEffectSnapshot(id: $0.id, kind: $0.kind.rawValue, position: $0.position,
+                    normal: $0.normal, age: max(0, road.worldTime - $0.startedAt), lifetime: $0.lifetime,
+                    scale: $0.scale, wind: finiteVector(weather.windVector, fallback: .zero))
             }
         }
         return MissionReplayWorldSnapshot(nodes: nodes, effects: effects)

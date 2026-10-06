@@ -25,9 +25,8 @@ struct InterceptObservationSource {
 
 /// Which source the operator is watching, and how the mission got there.
 ///
-/// The handoff is deliberately slow: the picture degrades, then it is lost, then NO SIGNAL holds
-/// for a moment, and only then does the observer take over. An immediate cut on the frame of
-/// contact would be cinematography, not a video system.
+/// Transient link loss is debounced. A camera known to be destroyed cannot recover, so an
+/// already receiving observer takes over immediately; no camera or aircraft is moved to do it.
 struct InterceptObservationRuntime {
     private(set) var sources: [String: InterceptObservationSource] = [:]
     private(set) var activeVehicleID = InterceptCallsign.attacker
@@ -42,24 +41,28 @@ struct InterceptObservationRuntime {
     /// plan allows a short interference burst as a *consequence* of a contact; the link budget
     /// still decides whether the picture returns afterwards.
     private var disruptedUntil: [String: TimeInterval] = [:]
+    private var destroyedSources: Set<String> = []
 
     var active: InterceptObservationSource? { sources[activeVehicleID] }
 
     /// Takes a source off the air for a moment. Called when the attached module goes off next to
     /// the aircraft carrying it — the operator loses the picture at the instant of contact, which
     /// is the whole reason the observer exists.
-    mutating func disrupt(vehicleID: String, until: TimeInterval) {
+    mutating func disrupt(vehicleID: String, until: TimeInterval, permanently: Bool = false) {
         disruptedUntil[vehicleID] = max(disruptedUntil[vehicleID] ?? 0, until)
+        if permanently { destroyedSources.insert(vehicleID) }
     }
 
     func isDisrupted(_ vehicleID: String, now: TimeInterval) -> Bool {
-        (disruptedUntil[vehicleID] ?? 0) > now
+        destroyedSources.contains(vehicleID) || (disruptedUntil[vehicleID] ?? 0) > now
     }
 
     /// Whether some observer can actually see the target right now. The strict confirmation
     /// policy needs this; the permissive one does not consult it at all.
     var observerCanConfirm: Bool {
-        sources.values.contains { $0.role == .observer && $0.available && $0.hasLineOfSight }
+        sources.values.contains {
+            $0.role == .observer && $0.available && $0.hasLineOfSight && !destroyedSources.contains($0.vehicleID)
+        }
     }
 
     var isObservingRemoteSource: Bool { activeVehicleID != InterceptCallsign.attacker }
@@ -70,7 +73,7 @@ struct InterceptObservationRuntime {
     /// source simply refuses.
     @discardableResult
     mutating func select(_ vehicleID: String) -> Bool {
-        guard let source = sources[vehicleID], source.available else { return false }
+        guard let source = sources[vehicleID], source.available, !destroyedSources.contains(vehicleID) else { return false }
         guard activeVehicleID != vehicleID else { return true }
         activeVehicleID = vehicleID
         revision &+= 1
@@ -103,12 +106,14 @@ struct InterceptObservationRuntime {
 
         // Only loss of the currently watched attacker initiates an automatic handoff — an
         // observer that drops out while nobody is watching it must not reshuffle the feed.
-        guard source.role == .attacker, now - (lossStartedAt ?? now) >= noSignalHold else { return events }
+        let cannotRecover = destroyedSources.contains(source.vehicleID) || !source.cameraFunctional
+        guard source.role == .attacker,
+              cannotRecover || now - (lossStartedAt ?? now) >= noSignalHold else { return events }
 
         // Chosen by call sign, not by which angle looks best.
         let candidate = sources.values
             .sorted { $0.vehicleID < $1.vehicleID }
-            .first { $0.role == .observer && $0.available && $0.hasLineOfSight }
+            .first { $0.role == .observer && $0.available && $0.hasLineOfSight && !isDisrupted($0.vehicleID, now: now) }
         guard let observer = candidate else {
             phase = .unavailable
             return events

@@ -94,12 +94,14 @@ final class SimulationAudioService {
         let catalog: AudioAssetCatalog
         let buffers: [String: AVAudioPCMBuffer]
         let airflowFallback: AVAudioPCMBuffer?
+        let detonationFallback: AVAudioPCMBuffer?
         let seconds: TimeInterval
     }
     /// Assets this service generates rather than loads. They live outside the pack manifest
     /// because there is no file to describe, but they are addressed by the same ids and play
     /// through the same voices as everything else.
     private var syntheticDescriptors: [String: AudioAssetDescriptor] = [:]
+    private var soundScheduleGeneration: UInt64 = 0
 
     // MARK: Voices
 
@@ -227,6 +229,8 @@ final class SimulationAudioService {
             catalog: catalog,
             buffers: buffers,
             airflowFallback: airflowFallback,
+            detonationFallback: buffers[Self.bufferKey(AudioAssetID.chargeDetonation.rawValue, 1)] == nil
+                ? Self.makeDetonationCue() : nil,
             seconds: CACurrentMediaTime() - started
         )
     }
@@ -236,6 +240,9 @@ final class SimulationAudioService {
         buffers = pack.buffers
         if let airflow = pack.airflowFallback {
             registerSynthetic(.airflowLoop, buffer: airflow, defaultGainDb: -6.0, loop: true)
+        }
+        if let detonation = pack.detonationFallback {
+            registerSynthetic(.chargeDetonation, buffer: detonation, defaultGainDb: -3, loop: false, category: .damage)
         }
         isPrepared = true
 
@@ -275,6 +282,7 @@ final class SimulationAudioService {
     }
 
     func stop() {
+        soundScheduleGeneration &+= 1
         guard isRunning else { return }
         stopAllLoops()
         for index in oneShotVoices.indices {
@@ -361,9 +369,10 @@ final class SimulationAudioService {
         }
         // The voice is allocated when the sound arrives, not when it was emitted: a hit three
         // seconds out over the city must not hold a voice hostage for those three seconds.
+        let generation = soundScheduleGeneration
         DispatchQueue.main.asyncAfter(deadline: .now() + Double(delay)) { [weak self] in
             MainActor.assumeIsolated {
-                guard let self else { return }
+                guard let self, self.soundScheduleGeneration == generation else { return }
                 _ = self.fireOneShot(
                     descriptor: descriptor,
                     at: worldPosition,
@@ -656,12 +665,13 @@ final class SimulationAudioService {
         _ id: AudioAssetID,
         buffer: AVAudioPCMBuffer,
         defaultGainDb: Float,
-        loop: Bool
+        loop: Bool,
+        category: AudioAssetCategory = .aero
     ) {
         buffers[Self.bufferKey(id.rawValue, 1)] = buffer
         syntheticDescriptors[id.rawValue] = AudioAssetDescriptor(
             id: id.rawValue,
-            category: .aero,
+            category: category,
             path: "",
             variants: 1,
             loop: loop,
@@ -678,6 +688,33 @@ final class SimulationAudioService {
     /// Whether this id will actually produce a sound, from either source.
     func canPlay(_ id: AudioAssetID) -> Bool {
         resolveDescriptor(id) != nil && buffers[Self.bufferKey(id.rawValue, 1)] != nil
+    }
+
+    /// A finite, deterministic game sound: a sharp onset, low thump and a decaying noisy tail.
+    /// Generated once on the preparation worker, never on collision or on the render thread.
+    nonisolated private static func makeDetonationCue() -> AVAudioPCMBuffer? {
+        let count = Int(sampleRate * 2.1)
+        guard let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(count)),
+              let channel = buffer.floatChannelData?[0] else { return nil }
+        buffer.frameLength = AVAudioFrameCount(count)
+        var seed: UInt64 = 0xCAB0_0001
+        var low: Float = 0
+        var peak: Float = 0.001
+        for index in 0..<count {
+            let t = Float(index) / Float(sampleRate)
+            seed = seed &* 6_364_136_223_846_793_005 &+ 1_442_695_040_888_963_407
+            let noise = Float((seed >> 33) & 0xFFFFFF) / Float(0x7FFFFF) - 1
+            low += 0.025 * (noise - low)
+            let attack = min(1, t / 0.003)
+            let body = sin(2 * Float.pi * (65 * t - 11 * t * t)) * exp(-t * 7)
+            let value = attack * (noise * exp(-t * 32) * 0.45
+                + low * exp(-t * 3.2) * 2.6 + body * 0.6) * min(1, (2.1 - t) * 20)
+            channel[index] = value
+            peak = max(peak, abs(value))
+        }
+        for index in 0..<count { channel[index] *= 0.85 / peak }
+        return buffer
     }
 
     /// Builds the airflow loop.

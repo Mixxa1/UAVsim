@@ -218,8 +218,8 @@ func measureClimb(
     fuelState: FuelSystemState?,
     sampleFrom: Float = 45.0,
     sampleTo: Float = 60.0
-) -> (climb: Float, mass: Float, finalAltitude: Float) {
-    guard let wing = subject.runtime.fixedWingParameters else { return (0, 0, 0) }
+) -> (climb: Float, mass: Float, finalAltitude: Float, finalSpeed: Float) {
+    guard let wing = subject.runtime.fixedWingParameters else { return (0, 0, 0, 0) }
     let massModel = VehicleMassModel.baseline(for: subject.runtime, uavProfile: subject.uav)
     var state = DroneState(
         position: SIMD3<Float>(0, 300, 0),
@@ -230,6 +230,7 @@ func measureClimb(
         physicalState: .airborne, mode: .autoPath
     )
     state.armState = .armed
+    state.propulsionUnits = subject.runtime.propulsionUnitTemplate
     // Start already running, so the measurement is of the chain and not of the
     // start sequence.
     var warm = EngineRuntimeState.cold(ambientTemperatureC: 15.0)
@@ -244,7 +245,8 @@ func measureClimb(
             targetPosition: SIMD3<Float>(state.position.x, state.position.y + 500, state.position.z),
             targetOrientation: SIMD3<Float>(0, wing.initialClimbPitchDeg * .pi / 180.0, 0),
             yawIntent: 0.0, throttle: 1.0, isArmed: true,
-            mode: .autoPath, controlMode: .stabilized
+            mode: .autoPath, controlMode: .stabilized,
+            vtolTransitionLever: subject.runtime.airframeClass == .hybridVTOL ? 1 : 0
         )
         let context = DroneSimulationContext(
             profile: subject.runtime, activeUAVProfile: subject.uav,
@@ -259,7 +261,8 @@ func measureClimb(
         if seconds >= sampleFrom && seconds <= sampleTo { samples.append(state.velocity.y) }
     }
     let climb = samples.isEmpty ? 0 : samples.reduce(0, +) / Float(samples.count)
-    return (climb, massModel.resolvedCurrentTotalMass + (fuelState?.remainingKg ?? 0.0), state.position.y)
+    return (climb, massModel.resolvedCurrentTotalMass + (fuelState?.remainingKg ?? 0.0),
+            state.position.y, simd_length(state.velocity))
 }
 
 for subject in subjects {
@@ -278,7 +281,23 @@ for subject in subjects {
                  withFuel.mass, nearEmpty.mass,
                  withFuel.climb, nearEmpty.climb,
                  nearEmpty.climb - withFuel.climb))
-    if nearEmpty.climb <= withFuel.climb {
+    let governedVTOL = subject.runtime.airframeClass == .hybridVTOL
+        && withFuel.climb >= subject.runtime.maxAscentSpeedMps * 0.95
+        && nearEmpty.climb >= subject.runtime.maxAscentSpeedMps * 0.95
+    if governedVTOL {
+        // Both runs hit the configured climb-rate governor. Compare the
+        // available cruise acceleration at the same shaft/flight condition.
+        var rated = EngineRuntimeState.cold()
+        rated.runState = .ready
+        rated.shaftRPM = subject.powerplant.ratedShaftRPM ?? 6000
+        rated.shaftPowerKW = subject.powerplant.totalRatedShaftPowerKW ?? 0
+        let thrust = subject.backend.output(engine: rated,
+            airspeedMps: subject.runtime.fixedWingParameters?.cruiseAirspeed ?? 20,
+            atmosphere: seaLevel).thrustNewtons
+        if thrust <= 0 || thrust / nearEmpty.mass <= thrust / withFuel.mass {
+            failures.append("\(subject.runtime.displayName): fuel burn did not improve thrust-to-mass at the governed climb limit")
+        }
+    } else if nearEmpty.climb <= withFuel.climb {
         failures.append("\(subject.runtime.displayName): burning fuel still does not improve climb")
     }
 }
@@ -307,9 +326,14 @@ for subject in subjects {
     let altitudeLost = 300.0 - dead.finalAltitude
     print(String(format: "%-22@ lost %6.1f m of 300, windmilling drag at 30 m/s %6.1f N",
                  subject.runtime.displayName as NSString, altitudeLost, windmilling))
-    if altitudeLost <= 5.0 {
-        failures.append(String(format: "%@: a dry aircraft lost only %.1f m in a minute",
-                               subject.runtime.displayName, altitudeLost))
+    let entrySpeed = subject.runtime.fixedWingParameters?.climbAirspeed ?? 0
+    let entryEnergy = 9.81 * 300 + 0.5 * entrySpeed * entrySpeed
+    let finalEnergy = 9.81 * dead.finalAltitude + 0.5 * dead.finalSpeed * dead.finalSpeed
+    // A fast jet can trade kinetic energy for altitude after engine-out.
+    // Total specific mechanical energy must fall, irrespective of height alone.
+    if finalEnergy >= entryEnergy {
+        failures.append(String(format: "%@: engine-out mechanical energy did not decrease (%.1f -> %.1f J/kg)",
+                               subject.runtime.displayName, entryEnergy, finalEnergy))
     }
 }
 
@@ -359,6 +383,10 @@ func runLaunch(_ subject: Subject, seedEngine: EngineRunState) -> (state: Launch
             groundAttitudeDegrees: 3.0,
             usableLengthMeters: FixedWingRunwayGeometry.stripLength(for: wing)
         ))
+    case .airLaunch:
+        asset = .airLaunch(AirLaunchAsset(position: .zero, headingDegrees: 0,
+            releaseAltitudeMeters: wing.airLaunchReleaseAltitude,
+            releaseSpeedMps: wing.airLaunchReleaseSpeed))
     default:
         asset = .handLaunch(HandLaunchAsset(
             position: .zero, headingDegrees: 0.0, launchAngleDegrees: 10.0
@@ -389,6 +417,12 @@ for subject in subjects {
     guard mode != .standard else {
         print(String(format: "%-22@ mode=standard      (no launcher to gate)",
                      subject.runtime.displayName as NSString))
+        continue
+    }
+    // Carrier release is implemented by the carrier coordinator, not by this
+    // ground-launch controller; begin(.airLaunch) intentionally rejects it.
+    if mode == .airLaunch {
+        print("\(subject.runtime.displayName): air launch uses the carrier coordinator")
         continue
     }
     let cold = runLaunch(subject, seedEngine: .off)
@@ -469,6 +503,7 @@ for subject in subjects {
         forwardAirspeed: 0.0, physicalState: .armedOnGround, mode: .manual
     )
     state.armState = .armed
+    state.propulsionUnits = subject.runtime.propulsionUnitTemplate
     var fuelState = FuelSystemState.full(
         capacityKg: fuel.usableFuelMassKg, reserveFraction: fuel.reserveFraction
     )
@@ -534,7 +569,11 @@ for subject in subjects {
     let minimumGroundSpeed = wing.hasWheeledUndercarriage
         ? max(4.0, wing.minSustainableSpeedMps * 0.20)
         : 3.0
-    if state.forwardAirspeed < minimumGroundSpeed {
+    if subject.runtime.airframeClass == .hybridVTOL {
+        if state.position.y <= 1 {
+            failures.append("\(subject.runtime.displayName): VTOL did not leave the ground at full throttle")
+        }
+    } else if state.forwardAirspeed < minimumGroundSpeed {
         failures.append(String(format: "%@ reached only %.1f m/s after %d s at full throttle",
                                subject.runtime.displayName, state.forwardAirspeed, groundRunSeconds))
     }

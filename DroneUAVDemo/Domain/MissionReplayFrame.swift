@@ -1,4 +1,5 @@
 import Foundation
+import simd
 
 struct MissionAttitudeSnapshot: Codable, Equatable {
     let rollRadians: Double
@@ -116,6 +117,8 @@ struct MissionReplayCameraSnapshot: Codable, Equatable {
 struct MissionReplayNodeState: Codable, Equatable {
     var pose: MissionReplayPose
     var opacity: Double
+    var materialTint: SIMD4<Float>? = nil
+    var wheelRoll: Double? = nil
 }
 
 /// Assets are stored once per session; frames contain only poses and visibility changes.
@@ -142,6 +145,8 @@ struct MissionReplayEffectSnapshot: Codable, Equatable, Identifiable {
     /// Age in the authoritative simulation, independent of playback speed and wall clock.
     var age: Double
     var lifetime: Double
+    var scale: Float? = nil
+    var wind: SIMD3<Float>? = nil
 }
 
 struct MissionReplayWorldSnapshot: Codable, Equatable {
@@ -158,6 +163,21 @@ struct MissionReplayWorldSnapshot: Codable, Equatable {
             var value = node
             value.pose = interpolatePose(node.pose, next.pose, fraction)
             value.opacity += (next.opacity - node.opacity) * fraction
+            if let states = node.nodeStates, let nextStates = next.nodeStates {
+                value.nodeStates = states
+                for (path, state) in states {
+                    guard let other = nextStates[path] else { continue }
+                    var changed = state
+                    changed.pose = interpolatePose(state.pose, other.pose, fraction)
+                    changed.opacity += (other.opacity - state.opacity) * fraction
+                    if let a = state.wheelRoll, let b = other.wheelRoll {
+                        changed.wheelRoll = a + (b - a) * fraction
+                        let angle = Float(changed.wheelRoll!.truncatingRemainder(dividingBy: 2 * .pi))
+                        changed.pose.rotation = simd_quatf(angle: angle, axis: SIMD3<Float>(1, 0, 0)).vector
+                    }
+                    value.nodeStates?[path] = changed
+                }
+            }
             if let camera = node.camera, let nextCamera = next.camera {
                 value.camera = MissionReplayCameraSnapshot(
                     pose: interpolatePose(camera.pose, nextCamera.pose, fraction),

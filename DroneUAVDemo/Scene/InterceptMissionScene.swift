@@ -11,8 +11,10 @@ import simd
 final class InterceptMissionScene {
     private let root = SCNNode()
     private var visuals: [String: DroneVisualModel] = [:]
+    private var groundVisuals: [String: GroundVehicleVisual] = [:]
     private var cameras: [String: SCNNode] = [:]
-    private var effectNodes: [UUID: EffectInstance] = [:]
+    private var effectNodes: [UUID: WorldDamageEffectVisual] = [:]
+    private var scorchNodes: [String: (node: SCNNode, bornAt: TimeInterval)] = [:]
     private var detachedVisuals: Set<String> = []
     private var debris: [Debris] = []
     /// Wreckage in the air, integrated with real drag, wind and ground contact.
@@ -26,6 +28,7 @@ final class InterceptMissionScene {
         let spawnOrientation: simd_quatf
         /// Set once the piece has come to rest, so it fades from where it actually stopped.
         var settledAt: TimeInterval?
+        var lifetime: Float = 8
     }
     /// The drop zone on the ground and the load itself, on the delivery side of the mission.
     private var deliveryZoneNode: SCNNode?
@@ -53,19 +56,6 @@ final class InterceptMissionScene {
     }
     private static let flatDebrisGround = FlatGroundBallisticSurfaceProbe()
 
-    /// One world effect in the scene: its node and the emitters whose birth rate is ramped down
-    /// as it ages.
-    ///
-    /// Deliberately no `SCNLight`. Adding and removing omni lights per contact changes the scene's
-    /// light count under the renderer, and SceneKit switches to its indexed lighting path for the
-    /// affected draws — a restart mid-effect then hit
-    /// `missing Buffer binding at index 5 for u_lightIndicesBuffer[0]` and aborted the process.
-    /// The glow is carried by additive emitters instead, which cost nothing in the light budget.
-    private struct EffectInstance {
-        let node: SCNNode
-        let emitters: [(system: SCNParticleSystem, baseBirthRate: CGFloat)]
-    }
-
     // MARK: Tuning
 
     private static let debrisLifetime: Float = 8
@@ -84,9 +74,6 @@ final class InterceptMissionScene {
     /// How quickly the observer's gimbal swings onto the target, in radians per second. Snapping
     /// straight to `look(at:)` every frame reads as a jump cut whenever the target moves fast.
     private static let observerTrackingRate: Float = 1.8
-    /// Fraction of an effect's life during which it emits at full rate. After that emission
-    /// ramps down so the plume thins out instead of being cut off.
-    private static let emissionHoldFraction: Float = 0.55
     /// How far the zone disc floats above the ground sample, so it does not z-fight with terrain.
     private static let zoneGroundClearance: Float = 0.25
     /// A marker the operator can pick out from altitude while being chased.
@@ -100,6 +87,7 @@ final class InterceptMissionScene {
     init(scene: SCNScene, showsCallsigns: Bool) {
         self.showsCallsigns = showsCallsigns
         root.name = "intercept-mission-world"
+        root.addChildNode(WorldDamageEffectVisual.makePreparationNode())
         scene.rootNode.addChildNode(root)
     }
 
@@ -157,6 +145,36 @@ final class InterceptMissionScene {
     }
 
     func camera(for vehicleID: String) -> SCNNode? { cameras[vehicleID] }
+
+    func makeGroundActor(id: String, model: GroundVehicleModel, position: SIMD3<Float>,
+                         adapterProfile: DroneModelProfile, seed: UInt64) -> InterceptVehicleRuntime {
+        let road = GroundVehicleRuntime(position: position, model: model, seed: seed, vehicleID: id)
+        let visual = GroundVehicleVisual(model: model)
+        visual.rootNode.name = id
+        visual.rootNode.simdPosition = position
+        root.addChildNode(visual.rootNode); groundVisuals[id] = visual
+        let camera = SCNNode()
+        camera.name = "\(id)-camera"; camera.camera = SCNCamera()
+        camera.camera?.fieldOfView = Self.cameraFieldOfView
+        camera.camera?.zNear = Self.cameraNear; camera.camera?.zFar = Self.cameraFar
+        camera.simdPosition = SIMD3<Float>(0, 3.5, -3.85)
+        visual.rootNode.addChildNode(camera); cameras[id] = camera
+        if showsCallsigns {
+            let label = SCNText(string: id, extrusionDepth: 0)
+            label.font = .monospacedSystemFont(ofSize: 0.7, weight: .bold)
+            label.firstMaterial?.diffuse.contents = NSColor.systemOrange
+            label.firstMaterial?.lightingModel = .constant
+            let marker = SCNNode(geometry: label)
+            marker.position = SCNVector3(0, 4, 0); marker.constraints = [SCNBillboardConstraint()]
+            visual.rootNode.addChildNode(marker)
+        }
+        let mass = VehicleMassModel(baseMass: road.profile.massKg, batteryMass: 0, payloadMass: 0,
+            currentTotalMass: road.profile.massKg, effectiveMass: road.profile.massKg,
+            payloadLoadRatio: 0, massSourceQuality: .estimated, usesEstimatedValues: true)
+        return InterceptVehicleRuntime(id: id, role: .target, profile: adapterProfile, massModel: mass,
+            position: position, graph: road.componentGraph(), contacts: road.contactProfile, rotors: .empty,
+            payload: nil, seed: seed, groundVehicle: road)
+    }
 
     // MARK: - Delivery zone
 
@@ -379,17 +397,26 @@ final class InterceptMissionScene {
 
     // MARK: - Per-frame update
 
-    var hasReplayAftermath: Bool { !debrisNodes.isEmpty || !effectNodes.isEmpty }
+    var hasReplayAftermath: Bool {
+        debrisNodes.values.contains { $0.settledAt == nil } || !effectNodes.isEmpty
+    }
 
     func captureReplayVisuals(session: InterceptMissionSession, recorder: MissionReplayRecorder) -> [MissionReplayVisualSnapshot] {
+        captureReplayVisuals(actors: session.actors, recorder: recorder)
+    }
+
+    func captureReplayVisuals(actors: [InterceptVehicleRuntime], recorder: MissionReplayRecorder) -> [MissionReplayVisualSnapshot] {
         var nodes: [MissionReplayVisualSnapshot] = []
-        for actor in session.actors {
-            guard let visual = visuals[actor.id] else { continue }
-            nodes.append(MissionReplayVisualCapture.snapshot(id: actor.id, node: visual.rootNode, recorder: recorder,
-                role: actor.role.rawValue, displayName: actor.profile.displayName, camera: cameras[actor.id]))
+        for actor in actors {
+            guard let node = groundVisuals[actor.id]?.rootNode ?? visuals[actor.id]?.rootNode else { continue }
+            nodes.append(MissionReplayVisualCapture.snapshot(id: actor.id, node: node, recorder: recorder,
+                role: actor.role.rawValue, displayName: actor.displayName, camera: cameras[actor.id]))
         }
         for (id, entry) in debrisNodes {
             nodes.append(MissionReplayVisualCapture.snapshot(id: "intercept-debris:\(id)", node: entry.node, recorder: recorder))
+        }
+        for (id, entry) in scorchNodes {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: "vehicle-scorch:\(id)", node: entry.node, recorder: recorder))
         }
         if let load = deliveryLoadNode, !load.isHidden {
             nodes.append(MissionReplayVisualCapture.snapshot(id: "delivery-load", node: load, recorder: recorder))
@@ -403,11 +430,17 @@ final class InterceptMissionScene {
         ground: @escaping (SIMD3<Float>, Float) -> Float,
         wind: SIMD3<Float> = .zero
     ) {
+        // A contact publishes damage, shed panels and its flash together. The render thread
+        // must not see a charred body in between those mutations or interpolate the burst in.
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
         let now = session.worldTime
         if debrisSurfaceProbeStorage == nil {
             debrisSurfaceProbeStorage = ClosureBallisticSurfaceProbe(heightAt: ground)
         }
         for actor in session.actors {
+            if actor.isGroundVehicle { updateGroundActor(actor, now: now, ground: ground); continue }
             guard let visual = visuals[actor.id] else { continue }
             visual.rootNode.simdPosition = actor.state.position
             visual.rootNode.simdOrientation = actor.state.attitudeQuat
@@ -418,8 +451,55 @@ final class InterceptMissionScene {
             }
         }
         updateDebris(now: now, deltaTime: deltaTime, wind: wind)
-        updateEffects(session.effects.effects, now: now)
+        updateEffects(session.effects.effects + session.actors.flatMap { $0.groundVehicle?.effects ?? [] }, now: now, wind: wind)
         updateDelivery(session.delivery)
+    }
+
+    func updateGroundWorld(_ actor: InterceptVehicleRuntime, now: TimeInterval, deltaTime: Float,
+                           ground: @escaping (SIMD3<Float>, Float) -> Float, wind: SIMD3<Float>) {
+        SCNTransaction.begin()
+        SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
+        if debrisSurfaceProbeStorage == nil { debrisSurfaceProbeStorage = ClosureBallisticSurfaceProbe(heightAt: ground) }
+        updateGroundActor(actor, now: now, ground: ground)
+        updateDebris(now: now, deltaTime: deltaTime, wind: wind)
+        updateEffects(actor.groundVehicle?.effects ?? [], now: now, wind: wind)
+    }
+
+    private func updateGroundActor(_ actor: InterceptVehicleRuntime, now: TimeInterval,
+                                   ground: (SIMD3<Float>, Float) -> Float) {
+        guard let road = actor.groundVehicle, let visual = groundVisuals[actor.id] else { return }
+        for piece in visual.update(road) {
+            root.addChildNode(piece)
+            let mass = (piece.value(forKey: "userData") as? NSDictionary)?["debrisMass"] as? Double ?? 25
+            let id = debrisRuntime.launch(kind: .debris, descriptor: BallisticDescriptor(massKg: Float(mass), shape: .debris),
+                position: piece.simdWorldPosition, carrierVelocity: actor.state.velocity,
+                separationImpulse: separationVelocity(for: piece.simdWorldPosition, actor: actor, now: now)
+                    ?? SIMD3<Float>(0, 1.2, 0), surfaceProbe: debrisSurfaceProbe)
+            debrisNodes[id] = DebrisNode(node: piece, bornAt: now, spawnOrientation: piece.simdOrientation,
+                settledAt: nil, lifetime: .infinity)
+        }
+        var marks = road.damage.sites.enumerated().filter { $0.element.heat > 0.4 }
+            .map { ("impact-\($0.offset)", $0.element.point) }
+        if let firePoint = road.damage.firePoint,
+           !marks.contains(where: { simd_distance($0.1, firePoint) < 1.5 }) {
+            marks.append(("fire", firePoint))
+        }
+        for (name, localPoint) in marks {
+            let key = "\(actor.id)/\(name)"
+            if scorchNodes[key] == nil {
+                let point = road.state.position + simd_act(road.state.attitudeQuat, SIMD3<Float>(localPoint.x, 0, localPoint.z))
+                let height = ground(point, 0.1)
+                guard height.isFinite else { continue }
+                if let mark = WorldDamageEffectVisual.makeScorch(centre: SIMD3<Float>(point.x, height, point.z),
+                    yaw: road.state.orientation.z, ground: ground) {
+                    root.addChildNode(mark); scorchNodes[key] = (mark, now)
+                }
+            }
+            if let entry = scorchNodes[key] {
+                entry.node.opacity = CGFloat(min(0.88, 0.35 + Float(now - entry.bornAt) * 0.04))
+            }
+        }
     }
 
     private func spinPropellers(of visual: DroneVisualModel, throttle: Float, deltaTime: Float) {
@@ -463,7 +543,8 @@ final class InterceptMissionScene {
                     ),
                     position: copy.simdWorldPosition,
                     carrierVelocity: actor.state.velocity,
-                    separationImpulse: outward * burst + SIMD3<Float>(0, 1.4 + seed, 0),
+                    separationImpulse: separationVelocity(for: copy.simdWorldPosition, actor: actor, now: now)
+                        ?? (outward * burst + SIMD3<Float>(0, 1.4 + seed, 0)),
                     surfaceProbe: debrisSurfaceProbe
                 )
                 debrisNodes[projectileID] = DebrisNode(
@@ -474,6 +555,15 @@ final class InterceptMissionScene {
                 )
             }
         }
+    }
+
+    private func separationVelocity(for point: SIMD3<Float>, actor: InterceptVehicleRuntime,
+                                    now: TimeInterval) -> SIMD3<Float>? {
+        guard now - actor.lastDetonationTime < 0.5, let origin = actor.lastDetonationPosition else { return nil }
+        let delta = point - origin
+        let outward = simd_length_squared(delta) > 0.001 ? simd_normalize(delta) : SIMD3<Float>(0, 1, 0)
+        let strength = ChargeDetonation(position: origin).exposure(at: point)
+        return outward * (2 + 8 * strength) + SIMD3<Float>(0, 2, 0)
     }
 
     /// Slews the observer's camera onto the target instead of snapping to it. The observer is a
@@ -529,6 +619,29 @@ final class InterceptMissionScene {
         for impact in result.impacts {
             guard var entry = debrisNodes[impact.projectileID] else { continue }
             entry.node.simdWorldPosition = impact.position
+            if entry.lifetime.isInfinite {
+                // Low-energy final contact lets a panel fall onto its broad face and a tyre
+                // onto its side, rather than balancing forever on a random tumbling edge.
+                let bounds = entry.node.boundingBox
+                let size = SIMD3<Float>(bounds.max) - SIMD3<Float>(bounds.min)
+                let thin = size.x <= size.y && size.x <= size.z ? SIMD3<Float>(1, 0, 0)
+                    : size.y <= size.z ? SIMD3<Float>(0, 1, 0) : SIMD3<Float>(0, 0, 1)
+                var normal = simd_act(entry.node.simdWorldOrientation, thin)
+                if simd_dot(normal, impact.normal) < 0 { normal = -normal }
+                entry.node.simdWorldOrientation = simd_quatf(from: normal, to: impact.normal)
+                    * entry.node.simdWorldOrientation
+                // The ballistic contact is at the origin. Actual wheels and panels have volume:
+                // rest the lowest transformed corner on the road instead of burying half a tyre.
+                var lowest: Float = .greatestFiniteMagnitude
+                for x in [bounds.min.x, bounds.max.x] {
+                    for y in [bounds.min.y, bounds.max.y] {
+                        for z in [bounds.min.z, bounds.max.z] {
+                            lowest = min(lowest, entry.node.simdConvertPosition(SIMD3<Float>(Float(x), Float(y), Float(z)), to: nil).y)
+                        }
+                    }
+                }
+                if lowest.isFinite { entry.node.simdWorldPosition.y += impact.position.y - lowest + 0.012 }
+            }
             entry.settledAt = now
             debrisNodes[impact.projectileID] = entry
         }
@@ -538,8 +651,8 @@ final class InterceptMissionScene {
 
         for (id, entry) in debrisNodes {
             let age = Float(now - entry.bornAt)
-            entry.node.opacity = CGFloat(max(0, min(1, Self.debrisLifetime - age)))
-            if age >= Self.debrisLifetime {
+            entry.node.opacity = CGFloat(max(0, min(1, entry.lifetime - age)))
+            if age >= entry.lifetime {
                 entry.node.removeFromParentNode()
                 debrisNodes.removeValue(forKey: id)
             }
@@ -552,28 +665,24 @@ final class InterceptMissionScene {
     /// Emission is ramped down over the tail of each effect rather than the node being cut: a
     /// plume that stops dead reads as a bug, and tearing the emitters off a live node is what
     /// stalls the render thread.
-    private func updateEffects(_ effects: [InterceptWorldEffect], now: TimeInterval) {
+    private func updateEffects(_ effects: [InterceptWorldEffect], now: TimeInterval, wind: SIMD3<Float>) {
         let live = Set(effects.map(\.id))
         for id in effectNodes.keys where !live.contains(id) {
             effectNodes.removeValue(forKey: id)?.node.removeFromParentNode()
         }
         for effect in effects {
-            let instance: EffectInstance
+            let instance: WorldDamageEffectVisual
             if let existing = effectNodes[effect.id] {
                 instance = existing
             } else {
-                instance = makeEffect(effect)
+                instance = WorldDamageEffectVisual(kind: effect.kind, scale: effect.scale ?? 1)
+                instance.node.name = "effect-\(effect.id)"
                 instance.node.simdPosition = effect.position
                 root.addChildNode(instance.node)
                 effectNodes[effect.id] = instance
             }
-            let fraction = max(0, min(1, Float(now - effect.startedAt) / Float(effect.lifetime)))
-            let emission = fraction < Self.emissionHoldFraction
-                ? 1
-                : max(0, 1 - (fraction - Self.emissionHoldFraction) / (1 - Self.emissionHoldFraction))
-            for emitter in instance.emitters {
-                emitter.system.birthRate = emitter.baseBirthRate * CGFloat(emission)
-            }
+            instance.node.simdPosition = effect.position
+            instance.update(age: now - effect.startedAt, lifetime: effect.lifetime, normal: effect.normal, wind: wind)
         }
     }
 
@@ -586,337 +695,22 @@ final class InterceptMissionScene {
         // during one. A restart used to tear this down piecemeal while a frame was in flight.
         SCNTransaction.begin()
         SCNTransaction.animationDuration = 0
-        for instance in effectNodes.values {
-            for emitter in instance.emitters { emitter.system.birthRate = 0 }
-        }
         root.childNodes.forEach { $0.removeFromParentNode() }
         root.removeFromParentNode()
         SCNTransaction.commit()
 
         effectNodes.removeAll()
+        scorchNodes.removeAll()
         visuals.removeAll()
+        groundVisuals.removeAll()
         cameras.removeAll()
         debris.removeAll()
+        debrisNodes.removeAll()
+        debrisRuntime.removeAll()
+        debrisSurfaceProbeStorage = nil
         detachedVisuals.removeAll()
         deliveryZoneNode = nil
         deliveryLoadNode = nil
     }
 
-    // MARK: - Effect construction
-
-    private func makeEffect(_ effect: InterceptWorldEffect) -> EffectInstance {
-        let container = SCNNode()
-        container.name = "effect-\(effect.id)"
-        var emitters: [(system: SCNParticleSystem, baseBirthRate: CGFloat)] = []
-
-        func attach(_ system: SCNParticleSystem, direction: SCNVector3? = nil) {
-            let node = SCNNode()
-            if let direction { node.simdOrientation = Self.lookRotation(forward: SIMD3<Float>(direction)) }
-            node.addParticleSystem(system)
-            container.addChildNode(node)
-            emitters.append((system, system.birthRate))
-        }
-
-        // The contact normal points from the struck body back towards the striker, which is the
-        // direction sparks and debris actually leave a strike in.
-        let outward = simd_length_squared(effect.normal) > 1e-6
-            ? simd_normalize(effect.normal)
-            : SIMD3<Float>(0, 1, 0)
-
-        switch effect.kind {
-        case .contact:
-            attach(Self.makeSparkBurst(scale: 1))
-            attach(Self.makeDustPuff())
-            attach(Self.makeFlash(radius: 0.5))
-        case .smoke:
-            attach(Self.makeSmokePlume())
-        case .fire:
-            attach(Self.makeFlame())
-            attach(Self.makeEmberSpray())
-        case .secondary:
-            // The one moment in the mission that is allowed to be loud: a hot core, debris thrown
-            // along the contact normal, and a light bright enough to be seen from the observer.
-            attach(Self.makeSparkBurst(scale: 2.4))
-            attach(Self.makeDebrisBurst(), direction: SCNVector3(outward))
-            attach(Self.makeFireball())
-            attach(Self.makeFlash(radius: 1.4))
-        }
-
-        return EffectInstance(node: container, emitters: emitters)
-    }
-
-    // MARK: - Particle systems
-
-    /// White-hot metal thrown off a strike. Short-lived, additive, and gravity-bound so it arcs
-    /// instead of drifting.
-    private static func makeSparkBurst(scale: CGFloat) -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleImage = softSprite
-        system.particleColor = NSColor(calibratedRed: 1.0, green: 0.88, blue: 0.55, alpha: 1)
-        system.particleColorVariation = SCNVector4(0.05, 0.35, 0.30, 0)
-        system.particleSize = 0.05 * scale
-        system.particleSizeVariation = 0.03 * scale
-        system.birthRate = 900 * scale
-        system.emissionDuration = 0.06
-        system.loops = false
-        system.particleLifeSpan = 0.5
-        system.particleLifeSpanVariation = 0.35
-        system.emitterShape = SCNSphere(radius: 0.05)
-        system.spreadingAngle = 180
-        system.particleVelocity = 9 * scale
-        system.particleVelocityVariation = 5 * scale
-        system.acceleration = SCNVector3(0, -9.8, 0)
-        system.isAffectedByGravity = false
-        system.blendMode = .additive
-        system.isLightingEnabled = false
-        system.propertyControllers = [.size: sizeOverLife(from: 0.06 * scale, to: 0.01 * scale)]
-        return system
-    }
-
-    /// The pale, quickly-spreading puff of pulverised paint and composite that surrounds a strike.
-    private static func makeDustPuff() -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleImage = softSprite
-        system.particleColor = NSColor(calibratedWhite: 0.78, alpha: 0.5)
-        system.particleSize = 0.22
-        system.particleSizeVariation = 0.12
-        system.birthRate = 220
-        system.emissionDuration = 0.1
-        system.loops = false
-        system.particleLifeSpan = 0.9
-        system.particleLifeSpanVariation = 0.4
-        system.emitterShape = SCNSphere(radius: 0.1)
-        system.spreadingAngle = 180
-        system.particleVelocity = 2.2
-        system.particleVelocityVariation = 1.2
-        system.acceleration = SCNVector3(0, 0.4, 0)
-        system.isAffectedByGravity = false
-        system.blendMode = .alpha
-        system.isLightingEnabled = false
-        system.propertyControllers = [
-            .size: sizeOverLife(from: 0.10, to: 0.85),
-            .opacity: opacityOverLife(from: 0.55, to: 0)
-        ]
-        system.particleAngularVelocity = 40
-        system.particleAngularVelocityVariation = 30
-        return system
-    }
-
-    /// A rising column that keeps drifting and thinning for as long as the effect lives. Visible
-    /// from the observer's camera, which is the whole point of putting it in world space.
-    private static func makeSmokePlume() -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleImage = softSprite
-        system.particleColor = NSColor(calibratedWhite: 0.18, alpha: 0.42)
-        system.particleColorVariation = SCNVector4(0, 0, 0.10, 0.10)
-        system.particleSize = 0.55
-        system.particleSizeVariation = 0.3
-        system.birthRate = 42
-        system.particleLifeSpan = 5.5
-        system.particleLifeSpanVariation = 2.0
-        system.emitterShape = SCNSphere(radius: 0.22)
-        system.spreadingAngle = 22
-        system.emittingDirection = SCNVector3(0, 1, 0)
-        system.birthDirection = .constant
-        system.particleVelocity = 2.6
-        system.particleVelocityVariation = 1.1
-        system.acceleration = SCNVector3(0.6, 1.1, 0.2)
-        system.isAffectedByGravity = false
-        system.blendMode = .alpha
-        system.isLightingEnabled = false
-        system.propertyControllers = [
-            .size: sizeOverLife(from: 0.30, to: 2.60),
-            .opacity: opacityOverLife(from: 0.50, to: 0)
-        ]
-        system.particleAngularVelocity = 18
-        system.particleAngularVelocityVariation = 14
-        system.loops = true
-        return system
-    }
-
-    private static func makeFlame() -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleImage = softSprite
-        system.particleColor = NSColor(calibratedRed: 1.0, green: 0.62, blue: 0.20, alpha: 0.9)
-        system.particleColorVariation = SCNVector4(0.03, 0.28, 0.20, 0.10)
-        system.particleSize = 0.32
-        system.particleSizeVariation = 0.16
-        system.birthRate = 160
-        system.particleLifeSpan = 0.7
-        system.particleLifeSpanVariation = 0.3
-        system.emitterShape = SCNSphere(radius: 0.16)
-        system.spreadingAngle = 26
-        system.emittingDirection = SCNVector3(0, 1, 0)
-        system.birthDirection = .constant
-        system.particleVelocity = 3.4
-        system.particleVelocityVariation = 1.4
-        system.acceleration = SCNVector3(0, 2.6, 0)
-        system.isAffectedByGravity = false
-        system.blendMode = .additive
-        system.isLightingEnabled = false
-        system.propertyControllers = [
-            .size: sizeOverLife(from: 0.42, to: 0.08),
-            .opacity: opacityOverLife(from: 0.95, to: 0)
-        ]
-        system.loops = true
-        return system
-    }
-
-    private static func makeEmberSpray() -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleImage = softSprite
-        system.particleColor = NSColor(calibratedRed: 1.0, green: 0.72, blue: 0.30, alpha: 1)
-        system.particleSize = 0.035
-        system.particleSizeVariation = 0.02
-        system.birthRate = 55
-        system.particleLifeSpan = 1.8
-        system.particleLifeSpanVariation = 0.9
-        system.emitterShape = SCNSphere(radius: 0.2)
-        system.spreadingAngle = 55
-        system.emittingDirection = SCNVector3(0, 1, 0)
-        system.birthDirection = .constant
-        system.particleVelocity = 3.2
-        system.particleVelocityVariation = 1.8
-        system.acceleration = SCNVector3(0.8, 1.4, 0.3)
-        system.isAffectedByGravity = false
-        system.blendMode = .additive
-        system.isLightingEnabled = false
-        system.loops = true
-        return system
-    }
-
-    /// The bright expanding core of a secondary effect. One short burst of large, fast-growing
-    /// additive particles — no sprite sheet needed for something that lives under a second.
-    private static func makeFireball() -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleImage = softSprite
-        system.particleColor = NSColor(calibratedRed: 1.0, green: 0.72, blue: 0.34, alpha: 0.95)
-        system.particleColorVariation = SCNVector4(0.02, 0.25, 0.25, 0.05)
-        system.particleSize = 0.6
-        system.particleSizeVariation = 0.35
-        system.birthRate = 700
-        system.emissionDuration = 0.12
-        system.loops = false
-        system.particleLifeSpan = 0.75
-        system.particleLifeSpanVariation = 0.3
-        system.emitterShape = SCNSphere(radius: 0.3)
-        system.spreadingAngle = 180
-        system.particleVelocity = 7
-        system.particleVelocityVariation = 3.5
-        system.acceleration = SCNVector3(0, 3.2, 0)
-        system.isAffectedByGravity = false
-        system.blendMode = .additive
-        system.isLightingEnabled = false
-        system.propertyControllers = [
-            .size: sizeOverLife(from: 0.25, to: 2.40),
-            .opacity: opacityOverLife(from: 1.0, to: 0)
-        ]
-        return system
-    }
-
-    /// Fragments thrown along the contact normal, dark and gravity-affected so they read as
-    /// pieces of airframe rather than as more of the flash. Unlit like every other emitter here:
-    /// a lit particle system is the other half of the light-indices crash described above.
-    private static func makeDebrisBurst() -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleColor = NSColor(calibratedWhite: 0.32, alpha: 1)
-        system.particleColorVariation = SCNVector4(0, 0, 0.18, 0)
-        system.particleSize = 0.08
-        system.particleSizeVariation = 0.05
-        system.birthRate = 260
-        system.emissionDuration = 0.08
-        system.loops = false
-        system.particleLifeSpan = 2.4
-        system.particleLifeSpanVariation = 1.0
-        system.emitterShape = SCNSphere(radius: 0.15)
-        system.spreadingAngle = 62
-        system.emittingDirection = SCNVector3(0, 0, -1)
-        system.birthDirection = .constant
-        system.particleVelocity = 14
-        system.particleVelocityVariation = 7
-        system.acceleration = SCNVector3(0, -9.8, 0)
-        system.isAffectedByGravity = false
-        system.blendMode = .alpha
-        system.isLightingEnabled = false
-        system.particleAngularVelocity = 220
-        system.particleAngularVelocityVariation = 160
-        return system
-    }
-
-    /// Size and opacity over a particle's own lifetime. `SCNParticleSystem` has no scalar
-    /// "grow as you go" knob, so the curve is expressed as a property controller — which is also
-    /// what lets smoke fade out instead of vanishing at full opacity.
-    private static func sizeOverLife(from: CGFloat, to: CGFloat) -> SCNParticlePropertyController {
-        SCNParticlePropertyController(animation: lifeAnimation(from: from, to: to))
-    }
-
-    private static func opacityOverLife(from: CGFloat, to: CGFloat) -> SCNParticlePropertyController {
-        SCNParticlePropertyController(animation: lifeAnimation(from: from, to: to))
-    }
-
-    private static func lifeAnimation(from: CGFloat, to: CGFloat) -> CABasicAnimation {
-        let animation = CABasicAnimation()
-        animation.fromValue = from
-        animation.toValue = to
-        return animation
-    }
-
-    /// The bloom that stands in for a dynamic light: a single large additive puff that blows up
-    /// and dies in a fifth of a second. Reads as a flash from any camera without touching the
-    /// scene's light set.
-    private static func makeFlash(radius: CGFloat) -> SCNParticleSystem {
-        let system = SCNParticleSystem()
-        system.particleImage = softSprite
-        system.particleColor = NSColor(calibratedRed: 1.0, green: 0.93, blue: 0.78, alpha: 1)
-        system.particleSize = radius
-        system.birthRate = 60
-        system.emissionDuration = 0.04
-        system.loops = false
-        system.particleLifeSpan = 0.22
-        system.particleLifeSpanVariation = 0.06
-        system.emitterShape = SCNSphere(radius: radius * 0.2)
-        system.spreadingAngle = 180
-        system.particleVelocity = 1.5
-        system.particleVelocityVariation = 1
-        system.isAffectedByGravity = false
-        system.blendMode = .additive
-        system.isLightingEnabled = false
-        system.propertyControllers = [
-            .size: sizeOverLife(from: radius * 0.6, to: radius * 3.2),
-            .opacity: opacityOverLife(from: 1.0, to: 0)
-        ]
-        return system
-    }
-
-    /// A soft round sprite, built once. Without it every particle is a hard-edged square, which
-    /// is what made the old effects read as boxes of grey rather than as smoke.
-    private static let softSprite: NSImage = {
-        let size = 64
-        let image = NSImage(size: NSSize(width: size, height: size))
-        image.lockFocus()
-        if let context = NSGraphicsContext.current?.cgContext {
-            let colors = [
-                NSColor(calibratedWhite: 1, alpha: 1).cgColor,
-                NSColor(calibratedWhite: 1, alpha: 0.55).cgColor,
-                NSColor(calibratedWhite: 1, alpha: 0).cgColor
-            ] as CFArray
-            if let gradient = CGGradient(
-                colorsSpace: CGColorSpaceCreateDeviceRGB(),
-                colors: colors,
-                locations: [0, 0.45, 1]
-            ) {
-                let centre = CGPoint(x: CGFloat(size) / 2, y: CGFloat(size) / 2)
-                context.drawRadialGradient(
-                    gradient,
-                    startCenter: centre,
-                    startRadius: 0,
-                    endCenter: centre,
-                    endRadius: CGFloat(size) / 2,
-                    options: []
-                )
-            }
-        }
-        image.unlockFocus()
-        return image
-    }()
 }

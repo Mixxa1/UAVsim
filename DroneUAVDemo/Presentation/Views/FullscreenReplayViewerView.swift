@@ -75,6 +75,7 @@ final class ReplayInteractiveSCNView: SCNView {
 
 // MARK: - Fullscreen replay host (pure AppKit, no SwiftUI inside)
 
+@MainActor
 final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
 
     static var current: FullscreenReplayWindowHost?
@@ -84,6 +85,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     private var sceneView: ReplayInteractiveSCNView?
     private let sceneController = MissionReplaySceneController()
     private let player          = MissionReplayPlayer()
+    private let replayAudio = SimulationAudioService()
     private var session:        MissionReplaySession?
 
     // UI elements
@@ -153,6 +155,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         // Load data
         let events = report?.events ?? session.events
         player.load(session: session)
+        replayAudio.prepare()
         if initialTime > 0 { player.seek(to: initialTime) }
         sceneController.loadSession(session, events: events)
         sceneController.setCameraSubject(initialCameraSubjectID)
@@ -509,11 +512,21 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     private func startPlaybackTimer() {
         playbackTimer?.invalidate()
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            guard let self, !self.isClosing else { return }
-            self.player.update(deltaTime: 1.0 / 60.0)
-            self.sceneController.update(frame: self.player.currentFrame)
-            if self.sceneController.hasImportedWorld { self.sceneController.updateImportedWorldStreaming() }
-            self.updateUI()
+            MainActor.assumeIsolated {
+                guard let self, !self.isClosing else { return }
+                let previousTime = self.player.currentTime
+                let wasPlaying = self.player.isPlaying
+                self.player.update(deltaTime: 1.0 / 60.0)
+                self.sceneController.update(frame: self.player.currentFrame)
+                if wasPlaying {
+                    let camera = self.sceneController.cameraNode
+                    self.replayAudio.playReplayDetonations(events: self.session?.events ?? [],
+                        after: previousTime, through: self.player.currentTime,
+                        listener: camera.simdWorldPosition, rotation: camera.simdWorldOrientation)
+                }
+                if self.sceneController.hasImportedWorld { self.sceneController.updateImportedWorldStreaming() }
+                self.updateUI()
+            }
         }
         RunLoop.main.add(t, forMode: .common)
         playbackTimer = t
@@ -523,7 +536,9 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
         wasdTimer?.invalidate()
         lastWASDTime = CACurrentMediaTime()
         let t = Timer(timeInterval: 1.0 / 60.0, repeats: true) { [weak self] _ in
-            self?.applyWASDMovement()
+            MainActor.assumeIsolated {
+                self?.applyWASDMovement()
+            }
         }
         RunLoop.main.add(t, forMode: .common)
         wasdTimer = t
@@ -839,6 +854,7 @@ final class FullscreenReplayWindowHost: NSObject, NSWindowDelegate {
     private func closeNow() {
         guard !isClosing else { return }
         isClosing = true
+        replayAudio.stop()
 
         playbackTimer?.invalidate(); playbackTimer = nil
         wasdTimer?.invalidate();     wasdTimer = nil

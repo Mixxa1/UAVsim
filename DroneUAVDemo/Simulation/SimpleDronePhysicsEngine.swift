@@ -3229,16 +3229,24 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // parasite only, no induced term — which made reference throttle over-thrust, and since a
         // wing-borne VTOL's throttle floor *is* the cruise reference, the aircraft was pinned above
         // its published cruise speed for the whole leg.
-        let cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : wingborneThrustMagnitude(
-            airspeed: s.airspeed,
-            commandedThrottle: s.motorThrottle,
-            aero: s.aero,
-            wing: s.wing,
-            cruiseReferenceThrottle: s.baseline.cruiseReferenceThrottle,
-            mass: s.mass,
-            maxLevelSpeed: context.profile.maxHorizontalSpeedMps,
-            airDensity: airDensity
-        ) * s.batteryFactor
+        let cruiseSizedThrustMagnitude: Float
+        if let propulsion = context.propulsionOutput {
+            // A lift+cruise hybrid can have an electric lifting installation and
+            // a fuel-powered cruise engine. Its forward thrust comes from the
+            // same shaft/propeller chain as an ordinary fuel-powered fixed wing.
+            cruiseSizedThrustMagnitude = propulsion.thrustNewtons * s.batteryFactor
+        } else {
+            cruiseSizedThrustMagnitude = s.crashOrDisarmed ? 0.0 : wingborneThrustMagnitude(
+                airspeed: s.airspeed,
+                commandedThrottle: s.motorThrottle,
+                aero: s.aero,
+                wing: s.wing,
+                cruiseReferenceThrottle: s.baseline.cruiseReferenceThrottle,
+                mass: s.mass,
+                maxLevelSpeed: context.profile.maxHorizontalSpeedMps,
+                airDensity: airDensity
+            ) * s.batteryFactor
+        }
 
         let hoverSizedThrustMagnitude = liftCapableUnits.isEmpty ? 0.0 : rotorBorneThrustMagnitude(
             motorThrottle: s.crashOrDisarmed ? 0.0 : s.motorThrottle,
@@ -3263,7 +3271,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         for index in units.indices {
             let magnitude: Float
             switch units[index].role {
-            case .liftRotor, .tiltRotor:
+            case .liftRotor:
+                // Fixed vertical rotors shed lift as the wing takes the load.
+                // Cruise-sized forward thrust only belongs to tilting rotors.
+                magnitude = liftCapableUnits.isEmpty ? 0
+                    : hoverSizedThrustMagnitude * (1.0 - s.wingborneBlend) / Float(liftCapableUnits.count)
+            case .tiltRotor:
                 magnitude = perLiftUnitThrustMagnitude
             case .cruiseProp:
                 magnitude = perCruiseUnitThrustMagnitude
@@ -3275,9 +3288,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 centerOfMass: resolvedCenterOfMass(context: context)
             )
             thrustForceBody += units[index].thrustDirectionBody * (magnitude * damageFactor)
-            units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
-                ? 0.0
-                : (120.0 + s.motorThrottle * 640.0) * (0.4 + 0.6 * damageFactor)
+            let liftSpinFraction: Float = units[index].role == .liftRotor
+                ? sqrt(max(0, 1.0 - s.wingborneBlend)) : 1
+            if units[index].role == .cruiseProp, let propulsion = context.propulsionOutput {
+                units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
+                    ? 0 : propulsion.shaftRPM * .pi / 30
+            } else {
+                units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
+                    ? 0.0
+                    : (120.0 + s.motorThrottle * 640.0) * (0.4 + 0.6 * damageFactor) * liftSpinFraction
+            }
         }
 
         // --- 8. Attitude authority blend: aero moments alone (~zero at

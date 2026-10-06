@@ -9,6 +9,7 @@ struct MissionScenarioHUDView: View {
     private var isAgriSpraying: Bool { viewModel.activeMissionScenarioKind == .agriculturalSpraying }
     private var isRacing: Bool { viewModel.activeMissionScenarioKind == .droneRacing }
     private var isIntercepting: Bool { viewModel.activeMissionScenarioKind == .attachedPayloadIntercept }
+    private var isGroundMission: Bool { viewModel.activeMissionScenarioKind?.isGroundVehicleMission == true }
 
     var body: some View {
         if viewModel.hasMissionScenario {
@@ -16,6 +17,8 @@ struct MissionScenarioHUDView: View {
                 header
                 if isIntercepting {
                     interceptObjectiveRow
+                } else if isGroundMission {
+                    groundObjectiveRow
                 } else if isRacing {
                     raceObjectiveRow
                 } else if isAgriSpraying {
@@ -64,11 +67,45 @@ struct MissionScenarioHUDView: View {
 
     private var remainingSeconds: Double {
         if isIntercepting { return viewModel.interceptHUD.remaining }
+        if isGroundMission { return viewModel.groundVehicleHUD.remaining }
         // Racing counts up, not down: the header shows the running lap instead of a budget.
         if isRacing { return viewModel.raceCurrentLapSeconds }
         if isAgriSpraying { return viewModel.agriSprayRemainingSeconds }
         if isFireResponse { return viewModel.fireResponseRemainingSeconds }
         return viewModel.missionScenarioRemainingSeconds
+    }
+
+    private var groundObjectiveRow: some View {
+        let state = viewModel.groundVehicleHUD
+        let escort = viewModel.activeMissionScenarioKind == .vehicleEscort
+        return VStack(alignment: .leading, spacing: 7) {
+            if let result = state.result {
+                Label(L10n.s(result.titleKey), systemImage: result.isSuccess ? "checkmark.seal.fill" : "xmark.octagon.fill")
+                    .foregroundStyle(result.isSuccess ? GroundControlPalette.success : GroundControlPalette.danger)
+                    .font(.caption.weight(.semibold))
+            } else {
+                Text(LocalizedStringKey(escort ? "ground.escort.objective" : "ground.pursuit.objective"))
+                    .font(.caption).foregroundStyle(.white)
+                ProgressView(value: state.progress).tint(GroundControlPalette.accent)
+                if state.lostSeconds > 0.3 {
+                    Text(L10n.f("ground.hud.lost", max(0, Int(ceil(state.lossLimit - state.lostSeconds)))))
+                        .foregroundStyle(GroundControlPalette.warning).font(.caption2.monospacedDigit())
+                } else if !escort {
+                    Text(LocalizedStringKey(state.inCamera ? "ground.hud.visible" : "ground.hud.camera"))
+                        .font(.caption2).foregroundStyle(.white.opacity(0.75))
+                }
+            }
+            HStack {
+                Text(L10n.f("ground.hud.distance", Int(state.distance)))
+                Spacer()
+                Text(L10n.f("ground.hud.speed", Int(state.speed)))
+            }
+            .font(.caption2.monospacedDigit()).foregroundStyle(.white.opacity(0.75))
+            Text(LocalizedStringKey(state.conditionTitleKey))
+                .font(.caption2).foregroundStyle(state.condition == .nominal ? .white.opacity(0.6) : GroundControlPalette.warning)
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     // MARK: - Attached payload interception
@@ -124,7 +161,7 @@ struct MissionScenarioHUDView: View {
                     .foregroundStyle(interceptPayloadTint(state.payloadState))
             }
 
-            Text(LocalizedStringKey(state.targetState.targetTitleKey))
+            Text(LocalizedStringKey(state.targetConditionTitleKey))
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(interceptTargetTint(state.targetState))
         }
@@ -565,6 +602,9 @@ struct MissionScenarioHUDView: View {
     }
 
     private var timerColor: Color {
+        if isGroundMission {
+            return viewModel.groundVehicleHUD.remaining <= 30 ? GroundControlPalette.danger : .white
+        }
         if isIntercepting {
             if viewModel.interceptHUD.result != nil { return .white.opacity(0.7) }
             return viewModel.interceptHUD.remaining <= 60 ? GroundControlPalette.danger : .white

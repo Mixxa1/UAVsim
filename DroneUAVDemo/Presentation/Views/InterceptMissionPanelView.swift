@@ -346,7 +346,7 @@ struct InterceptFeedOverlayView: View {
                         readout(String(format: L10n.s("intercept.feed.range"), Double(state.sourceToTargetRange)))
                     }
                     Spacer()
-                    readout(String(format: "%@ %@", InterceptCallsign.target, NSLocalizedString(state.targetState.targetTitleKey, comment: "")))
+                    readout(String(format: "%@ %@", InterceptCallsign.target, L10n.s(state.targetConditionTitleKey)))
                 }
                 .padding(.horizontal, 34)
                 .padding(.bottom, 34)

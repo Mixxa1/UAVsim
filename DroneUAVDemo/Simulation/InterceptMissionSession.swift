@@ -38,7 +38,6 @@ final class InterceptMissionSession {
     private static let contactEffectLifetime: TimeInterval = 1.5
     private static let smokeLifetime: TimeInterval = 12
     private static let secondaryFlashLifetime: TimeInterval = 1
-    private static let secondaryFireLifetime: TimeInterval = 6
     private static let secondarySmokeLifetime: TimeInterval = 18
 
     /// What the module leaves of its own aircraft's optics and radio. Above the threshold at which
@@ -78,7 +77,8 @@ final class InterceptMissionSession {
             // A delivery is cargo. It is not armed, and running into the hunter must not "activate"
             // it — that is the other side's mission.
             profile: settings.payloadProfile,
-            triggerPolicy: settings.side == .delivery ? .never : .targetContact
+            triggerPolicy: settings.side == .delivery ? .never
+                : settings.payloadProfile == .structuralDestruction ? .collision : .targetContact
         )
         if settings.side == .delivery {
             delivery = InterceptDeliveryRuntime(
@@ -120,7 +120,8 @@ final class InterceptMissionSession {
         weather: WeatherModel,
         wind: SIMD3<Float>,
         ground: (SIMD3<Float>, Float) -> Float,
-        obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle]
+        obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle],
+        groundVehicleSurface: ((SIMD3<Float>, Float) -> Float)? = nil
     ) -> [ImpactReport] {
         worldTime += Double(deltaTime)
         stepActors(
@@ -130,6 +131,7 @@ final class InterceptMissionSession {
             weather: weather,
             wind: wind,
             ground: ground,
+            groundVehicleSurface: groundVehicleSurface,
             obstacles: obstacles
         )
         let playerReports = resolvePlayerContacts(
@@ -138,10 +140,11 @@ final class InterceptMissionSession {
             player: &player,
             playerGraph: &playerGraph,
             playerContacts: playerContacts,
-            playerClass: playerClass
+            playerClass: playerClass,
+            obstacles: obstacles
         )
         resolveActorPairContact(deltaTime: deltaTime)
-        triggerSecondaryIfNeeded()
+        triggerSecondaryIfNeeded(player: &player, playerGraph: &playerGraph, obstacles: obstacles)
         stepDelivery(deltaTime: deltaTime, player: player, playerGraph: playerGraph, ground: ground)
         return playerReports
     }
@@ -199,12 +202,12 @@ final class InterceptMissionSession {
         let profile = director.configuration.moduleShape.effectProfile
         let impactID = UUID()
         switch profile {
-        case .structuralDestruction, .kineticPenetration:
+        case .structuralDestruction:
+            addEffect(at: point, impactID: impactID, kind: .explosion, lifetime: ChargeDetonation.effectLifetime)
+            addEffect(at: point, impactID: impactID, kind: .smoke, lifetime: Self.secondarySmokeLifetime)
+        case .kineticPenetration:
             addEffect(at: point, impactID: impactID, kind: .secondary, lifetime: Self.secondaryFlashLifetime)
             addEffect(at: point, impactID: impactID, kind: .smoke, lifetime: Self.secondarySmokeLifetime)
-            if profile == .structuralDestruction {
-                addEffect(at: point, impactID: impactID, kind: .fire, lifetime: Self.secondaryFireLifetime)
-            }
         case .equipmentDisruption, .contactOnly:
             addEffect(at: point, impactID: impactID, kind: .contact, lifetime: Self.contactEffectLifetime)
         }
@@ -217,13 +220,14 @@ final class InterceptMissionSession {
         weather: WeatherModel,
         wind: SIMD3<Float>,
         ground: (SIMD3<Float>, Float) -> Float,
+        groundVehicleSurface: ((SIMD3<Float>, Float) -> Float)?,
         obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle]
     ) {
         // What the target can see around itself, in the same query the actors already use for
         // their own collision sweeps. Radius rather than a corridor: the guidance turns, so the
         // corridor it will need in a second is not the one it is flying now.
         let targetLookahead = max(60, simd_length(target.state.velocity) * 4)
-        let aimPoint = desiredTargetPosition(
+        let aimPoint = target.isGroundVehicle ? target.state.position : desiredTargetPosition(
             attacker: attacker,
             attackerVelocity: attackerVelocity,
             deltaTime: deltaTime,
@@ -234,6 +238,16 @@ final class InterceptMissionSession {
             )
         )
         for actor in actors {
+            if actor.isGroundVehicle {
+                let contacts = actor.stepGroundVehicle(deltaTime: deltaTime, destination: nil, threat: attacker,
+                    evasive: true, origin: SIMD2<Float>(origin.x, origin.z),
+                    areaRadius: director.configuration.areaRadius,
+                    grip: GroundVehicleRuntime.surfaceGrip(weather),
+                    obstacles: obstacles(actor.state.position, actor.state.position, 125),
+                    ground: { groundVehicleSurface?($0, $1) ?? ground($0, $1) })
+                for contact in contacts { recordEnvironment(contact, vehicleID: actor.id) }
+                continue
+            }
             // The observer holds its station. It was airborne before the run started and its
             // position is never adjusted to produce a better camera angle.
             let desired = actor.role == .observer ? actor.spawnPosition : aimPoint
@@ -257,7 +271,8 @@ final class InterceptMissionSession {
         player: inout DroneState,
         playerGraph: inout VehicleComponentGraph,
         playerContacts: VehicleContactProfile,
-        playerClass: AirframeClass
+        playerClass: AirframeClass,
+        obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle]
     ) -> [ImpactReport] {
         var reports: [ImpactReport] = []
         for actor in actors {
@@ -289,11 +304,12 @@ final class InterceptMissionSession {
                 firstClass: playerClass,
                 second: &actor.state,
                 secondGraph: &actor.graph,
-                secondClass: actor.profile.airframeClass,
+                secondClass: actor.isGroundVehicle ? .multirotor : actor.profile.airframeClass,
                 deltaTime: deltaTime,
-                applyDamage: freshContact
+                applyDamage: freshContact,
+                secondReceivesComponentDamage: !actor.isGroundVehicle
             )
-            actor.receive(resolved.second)
+            if freshContact || !actor.isGroundVehicle { actor.receive(resolved.second) }
             guard freshContact else { continue }
             reports.append(resolved.first)
 
@@ -304,7 +320,10 @@ final class InterceptMissionSession {
                 kind: .vehicle,
                 secondComponent: contact.secondSphere.componentID
             )
-            if actor.role == .target {
+            if playerPayload.effectProfileID == .structuralDestruction {
+                triggerPlayerCharge(impact: &event, directVehicleID: actor.id,
+                    player: &player, playerGraph: &playerGraph, obstacles: obstacles)
+            } else if actor.role == .target {
                 triggerPlayerPayload(on: actor, impact: &event, playerGraph: &playerGraph)
             }
             pendingImpacts.append(event)
@@ -328,11 +347,8 @@ final class InterceptMissionSession {
         let vehicles = [InterceptCallsign.attacker, target]
         switch playerPayload.effectProfileID {
         case .structuralDestruction:
-            for vehicleID in vehicles {
-                addEffect(impact: impact, vehicleID: vehicleID, kind: .secondary, lifetime: Self.secondaryFlashLifetime)
-                addEffect(impact: impact, vehicleID: vehicleID, kind: .fire, lifetime: Self.secondaryFireLifetime)
-                addEffect(impact: impact, vehicleID: vehicleID, kind: .smoke, lifetime: Self.secondarySmokeLifetime)
-            }
+            // Detonation owns its effects. The contact must not produce a second fireball.
+            return
         case .kineticPenetration:
             // All of the closing energy through one point of structure: the flash and the debris
             // of a hard strike, and no sustained flame, because there is nothing in a slug to burn.
@@ -352,8 +368,7 @@ final class InterceptMissionSession {
         }
     }
 
-    /// A resolved, non-trivial target contact is the only thing that spends the module. A grazing
-    /// touch leaves it available for the next approach, and a miss never reaches this path at all.
+    /// Non-explosive modules are spent against the target; charges use their own collision path.
     private func triggerPlayerPayload(
         on actor: InterceptVehicleRuntime,
         impact: inout InterceptImpactEvent,
@@ -362,7 +377,11 @@ final class InterceptMissionSession {
         guard impact.impactClass != .touch,
               playerPayload.trigger(impactID: impact.id, policy: .targetContact) else { return }
         impact.payloadIDs.append(playerPayload.id)
-        applyEquipmentEffect(profile: playerPayload.effectProfileID, graph: &actor.graph)
+        if actor.isGroundVehicle {
+            actor.applyGroundModule(playerPayload.effectProfileID, worldPoint: impact.position)
+        } else {
+            applyEquipmentEffect(profile: playerPayload.effectProfileID, graph: &actor.graph)
+        }
         // Whatever the module does to the target at contact range, it does to the aircraft carrying
         // it. There is no standing off from something bolted to your own airframe.
         applyCarrierEffect(profile: playerPayload.effectProfileID, graph: &playerGraph)
@@ -402,14 +421,15 @@ final class InterceptMissionSession {
             secondPrevious: observer.previousState,
             first: &target.state,
             firstGraph: &target.graph,
-            firstClass: target.profile.airframeClass,
+            firstClass: target.isGroundVehicle ? .multirotor : target.profile.airframeClass,
             second: &observer.state,
             secondGraph: &observer.graph,
             secondClass: observer.profile.airframeClass,
             deltaTime: deltaTime,
-            applyDamage: fresh
+            applyDamage: fresh,
+            firstReceivesComponentDamage: !target.isGroundVehicle
         )
-        target.receive(resolved.first)
+        if fresh || !target.isGroundVehicle { target.receive(resolved.first) }
         observer.receive(resolved.second)
         guard fresh else { return }
         let impact = makeImpact(
@@ -427,24 +447,49 @@ final class InterceptMissionSession {
     /// from `stepActors`, and by the view model for the player's own impacts, which the app's
     /// collision pipeline resolves rather than this session.
     func recordEnvironment(_ report: ImpactReport, vehicleID: String = InterceptCallsign.attacker) {
-        guard report.tier != .lightTouch else { return }
-        let key = "\(vehicleID)/\(report.obstacleID)"
-        guard director.elapsed - (lastEnvironmentImpact[key] ?? -.infinity) > Self.environmentImpactCooldown else { return }
-        lastEnvironmentImpact[key] = director.elapsed
-
-        let source = report.obstacleSource ?? ""
-        let isTerrain = source.contains("ground") || source.contains("terrain")
-        let impact = makeImpact(
-            report,
-            vehicleID: vehicleID,
-            other: report.obstacleID.uuidString,
-            kind: isTerrain ? .terrain : .environment
-        )
+        guard let impact = environmentImpact(report, vehicleID: vehicleID) else { return }
         pendingImpacts.append(impact)
         addEffect(impact: impact, vehicleID: vehicleID, kind: .contact, lifetime: Self.contactEffectLifetime)
         if report.tier == .criticalImpact {
             addEffect(impact: impact, vehicleID: vehicleID, kind: .smoke, lifetime: Self.smokeLifetime)
         }
+    }
+
+    /// A hard collision with scenery also spends a charge. Landing touches and scraping the
+    /// ground do not. The caller still owns the aircraft's ordinary collision consequences.
+    func resolvePlayerEnvironment(_ report: ImpactReport, player: inout DroneState,
+                                  playerGraph: inout VehicleComponentGraph,
+                                  obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle]) {
+        guard var impact = environmentImpact(report, vehicleID: InterceptCallsign.attacker) else { return }
+        if report.tier == .heavyImpact || report.tier == .criticalImpact {
+            triggerPlayerCharge(impact: &impact, directVehicleID: nil,
+                player: &player, playerGraph: &playerGraph, obstacles: obstacles)
+        }
+        pendingImpacts.append(impact)
+        if !impact.payloadIDs.contains(playerPayload.id) {
+            addEffect(impact: impact, vehicleID: InterceptCallsign.attacker,
+                kind: .contact, lifetime: Self.contactEffectLifetime)
+            if report.tier == .criticalImpact {
+                addEffect(impact: impact, vehicleID: InterceptCallsign.attacker,
+                    kind: .smoke, lifetime: Self.smokeLifetime)
+            }
+        }
+    }
+
+    private func environmentImpact(_ report: ImpactReport, vehicleID: String) -> InterceptImpactEvent? {
+        guard report.tier != .lightTouch else { return nil }
+        let key = "\(vehicleID)/\(report.obstacleID)"
+        guard director.elapsed - (lastEnvironmentImpact[key] ?? -.infinity) > Self.environmentImpactCooldown else { return nil }
+        lastEnvironmentImpact[key] = director.elapsed
+
+        let source = report.obstacleSource ?? ""
+        let isTerrain = source.contains("ground") || source.contains("terrain")
+        return makeImpact(
+            report,
+            vehicleID: vehicleID,
+            other: report.obstacleID.uuidString,
+            kind: isTerrain ? .terrain : .environment
+        )
     }
 
     // MARK: - Scenario step
@@ -531,9 +576,61 @@ final class InterceptMissionSession {
 
     // MARK: - Payload effects
 
+    @discardableResult
+    private func triggerPlayerCharge(impact: inout InterceptImpactEvent, directVehicleID: String?,
+                                     player: inout DroneState, playerGraph: inout VehicleComponentGraph,
+                                     obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle]) -> Bool {
+        guard playerPayload.effectProfileID == .structuralDestruction,
+              impact.impactClass != .touch,
+              playerPayload.trigger(impactID: impact.id, policy: .collision) else { return false }
+        impact.payloadIDs.append(playerPayload.id)
+        playerPayload.consume()
+        director.record(.payload(InterceptCallsign.attacker, .consumed))
+        detonate(impact: impact, sourceID: InterceptCallsign.attacker, directVehicleID: directVehicleID,
+            player: &player, playerGraph: &playerGraph, obstacles: obstacles)
+        return true
+    }
+
+    /// One spatial event per charge. Direct contact and exposure are independent of contact
+    /// energy; nearby actors behind solid scenery are protected. The world itself is not rebuilt.
+    private func detonate(impact: InterceptImpactEvent, sourceID: String, directVehicleID: String?,
+                          player: inout DroneState, playerGraph: inout VehicleComponentGraph,
+                          obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle]) {
+        let detonation = ChargeDetonation(position: impact.position, normal: impact.normal)
+        let start = impact.position + impact.normal * 0.08
+        let collision = CollisionAnalysisService()
+        func shielded(_ point: SIMD3<Float>) -> Bool {
+            collision.firstSweptCenterCollision(from: start, to: point, radius: 0.02,
+                obstacles: obstacles(start, point, 0.1)) != nil
+        }
+        let carrier = sourceID == InterceptCallsign.attacker
+        if carrier || (detonation.exposure(at: player.position) > 0 && !shielded(player.position)) {
+            detonation.apply(to: &playerGraph, state: player, directHit: carrier, detach: false)
+            if carrier || playerGraph.integrity(id: "frame") <= 0.001 {
+                observation.disrupt(vehicleID: InterceptCallsign.attacker,
+                    until: worldTime + Self.contactBlackoutSeconds, permanently: true)
+            }
+        }
+        for actor in actors {
+            let direct = actor.id == sourceID || actor.id == directVehicleID
+            let nearest = actor.contactProfile.spheres.map { sphere in
+                max(0, simd_distance(impact.position,
+                    actor.state.position + simd_act(actor.state.attitudeQuat, sphere.offset)) - sphere.radius)
+            }.min() ?? .infinity
+            guard direct || nearest < ChargeDetonation.effectReach else { continue }
+            let centre = actor.state.position + simd_act(actor.state.attitudeQuat,
+                actor.contactProfile.spheres.first?.offset ?? .zero)
+            guard direct || !shielded(centre) else { continue }
+            actor.receiveDetonation(detonation, directHit: direct, now: worldTime)
+        }
+        addEffect(impact: impact, vehicleID: sourceID, kind: .explosion, lifetime: ChargeDetonation.effectLifetime)
+        addEffect(impact: impact, vehicleID: sourceID, kind: .smoke, lifetime: Self.secondarySmokeLifetime)
+    }
+
     /// The target's own module, if it has one and the policy allows it. Once, ever — a module that
     /// has already gone, or that was inert to begin with, produces nothing on the way down.
-    private func triggerSecondaryIfNeeded() {
+    private func triggerSecondaryIfNeeded(player: inout DroneState, playerGraph: inout VehicleComponentGraph,
+                                         obstacles: (SIMD3<Float>, SIMD3<Float>, Float) -> [CollisionObstacle]) {
         guard !target.snapshot.functionalState.canAttempt,
               target.payload?.canProduceSecondaryEffect == true,
               let cause = pendingImpacts.last(where: {
@@ -541,14 +638,18 @@ final class InterceptMissionSession {
               }),
               target.payload?.trigger(impactID: cause.id, policy: .ownerCritical) == true else { return }
 
-        if let profile = target.payload?.effectProfileID {
+        if target.payload?.effectProfileID == .structuralDestruction {
+            detonate(impact: cause, sourceID: target.id, directVehicleID: nil,
+                player: &player, playerGraph: &playerGraph, obstacles: obstacles)
+        } else if let profile = target.payload?.effectProfileID {
             applyEquipmentEffect(profile: profile, graph: &target.graph)
         }
         target.payload?.consume()
         director.record(.payload(target.id, target.payload?.state ?? .consumed))
-        addEffect(impact: cause, vehicleID: target.id, kind: .secondary, lifetime: Self.secondaryFlashLifetime)
-        addEffect(impact: cause, vehicleID: target.id, kind: .fire, lifetime: Self.secondaryFireLifetime)
-        addEffect(impact: cause, vehicleID: target.id, kind: .smoke, lifetime: Self.secondarySmokeLifetime)
+        if target.payload?.effectProfileID != .structuralDestruction {
+            addEffect(impact: cause, vehicleID: target.id, kind: .secondary, lifetime: Self.secondaryFlashLifetime)
+            addEffect(impact: cause, vehicleID: target.id, kind: .smoke, lifetime: Self.secondarySmokeLifetime)
+        }
         target.refreshDamage()
     }
 

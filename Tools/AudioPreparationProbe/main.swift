@@ -46,6 +46,7 @@ struct AudioPreparationProbe {
             }
             if !service.isPrepared { failures.append("\(scenario): preparation timed out") }
             if !service.canPlay(.airflowLoop) { failures.append("\(scenario): airflow missing") }
+            if !service.canPlay(.chargeDetonation) { failures.append("\(scenario): detonation cue missing") }
             if scenario == "missing-pack" {
                 if !service.catalog.isEmpty { failures.append("Missing pack should keep an empty catalog") }
             } else {
@@ -65,6 +66,6 @@ struct AudioPreparationProbe {
             failures.forEach { print("FAIL: \($0)") }
             exit(1)
         }
-        print("PASS: background decoding, complete pack, missing-pack/clip fallback, repeated prepare, stop during load")
+        print("PASS: background decoding, complete pack, airflow/detonation fallback, repeated prepare, stop during load")
     }
 }

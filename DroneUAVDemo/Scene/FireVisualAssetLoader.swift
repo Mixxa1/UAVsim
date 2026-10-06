@@ -133,6 +133,20 @@ final class FireVisualAssetLoader {
         }
     }
 
+    /// Mission effects and replays use simulation age rather than a wall-clock action.
+    func setFlameAge(_ flameNode: SCNNode, age: TimeInterval) {
+        guard let material = flameNode.childNodes.first?.geometry?.firstMaterial else { return }
+        let column = Int(max(0, age) * FireFlipbookLayout.frameRate) % FireFlipbookLayout.totalFrames
+        let sx = 1.0 / CGFloat(FireFlipbookLayout.totalColumns)
+        let sy = 1.0 / CGFloat(FireFlipbookLayout.totalRows)
+        var transform = SCNMatrix4Identity
+        transform.m11 = sx; transform.m22 = sy
+        transform.m41 = CGFloat(column) * sx
+        transform.m42 = 1 - sy - CGFloat(FireFlipbookLayout.sourceRow) * sy
+        material.diffuse.contentsTransform = transform
+        material.emission.contentsTransform = transform
+    }
+
     /// Soft rising smoke above a burning tree — a procedural particle system (no image), mirroring
     /// the rain/snow convention already proven in `DroneSceneController.makeRainSystem`/`makeSnowSystem`.
     /// Deliberately created WITHOUT a particle system attached (see `setSmokeActive`) — same
@@ -301,7 +315,10 @@ final class FireVisualAssetLoader {
         guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
             return nil
         }
-        return CGImageSourceCreateImageAtIndex(source, 0, nil)
+        // Decode once when the mission prepares its fire materials instead of deferring image
+        // decompression to the first visible flame on the render thread.
+        return CGImageSourceCreateImageAtIndex(source, 0,
+            [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
     }
 
     private func warnOnce() {

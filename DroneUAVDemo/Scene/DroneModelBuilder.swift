@@ -17,6 +17,7 @@ struct DroneVisualModel {
     /// Per-propulsion-unit tilt pivots (nacelle = motor+propeller), one per
     /// visual rotor pod. Empty for rigs without a tilt-rotor mechanism.
     let tiltPivotNodes: [SCNNode]
+    let articulatedNodes: [UAVArticulatedNode]
 
     init(
         rootNode: SCNNode,
@@ -31,7 +32,8 @@ struct DroneVisualModel {
         visualBoundsCenter: SIMD3<Float> = .zero,
         visualBoundsSize: SIMD3<Float> = SIMD3<Float>(repeating: 0.36),
         subjectScale: Float = 0.36,
-        tiltPivotNodes: [SCNNode] = []
+        tiltPivotNodes: [SCNNode] = [],
+        articulatedNodes: [UAVArticulatedNode] = []
     ) {
         self.rootNode = rootNode
         self.visualRootNode = visualRootNode
@@ -46,6 +48,7 @@ struct DroneVisualModel {
         self.visualBoundsSize = visualBoundsSize
         self.subjectScale = subjectScale
         self.tiltPivotNodes = tiltPivotNodes
+        self.articulatedNodes = articulatedNodes
     }
 }
 
@@ -1256,7 +1259,8 @@ enum DroneModelBuilder {
             visualBoundsCenter: adjustedCenter,
             visualBoundsSize: adjustedSize,
             subjectScale: subjectScale,
-            tiltPivotNodes: rawModel.tiltPivotNodes
+            tiltPivotNodes: rawModel.tiltPivotNodes,
+            articulatedNodes: rawModel.articulatedNodes
         )
     }
 

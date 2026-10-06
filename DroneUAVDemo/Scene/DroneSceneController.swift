@@ -377,6 +377,7 @@ final class DroneSceneController {
     private var spinDirections: [Float]
     private var spinAngles: [Float]
     private var tiltPivotNodes: [SCNNode]
+    private var articulatedNodes: [UAVArticulatedNode]
     private var componentNodes: [DamageComponent: [SCNNode]]
     /// SceneKit owns the post-detachment rigid-body motion. The simulation
     /// graph remains authoritative for which components are still attached;
@@ -669,6 +670,7 @@ final class DroneSceneController {
         self.spinDirections = droneVisual.propellerSpinDirections
         self.spinAngles = Array(repeating: 0.0, count: droneVisual.propellerNodes.count)
         self.tiltPivotNodes = droneVisual.tiltPivotNodes
+        self.articulatedNodes = droneVisual.articulatedNodes
         self.componentNodes = droneVisual.componentNodes
         self.visualBoundsCenter = droneVisual.visualBoundsCenter
         self.visualBoundsSize = droneVisual.visualBoundsSize
@@ -5160,6 +5162,7 @@ final class DroneSceneController {
         componentVisualBinding = nil
         spinAngles = Array(repeating: 0.0, count: propellerNodes.count)
         tiltPivotNodes = droneVisual.tiltPivotNodes
+        articulatedNodes = droneVisual.articulatedNodes
         visualBoundsCenter = droneVisual.visualBoundsCenter
         visualBoundsSize = droneVisual.visualBoundsSize
         cachedSubjectScale = droneVisual.subjectScale
@@ -6652,6 +6655,27 @@ final class DroneSceneController {
         )?.height
     }
 
+    /// Road vehicles need the procedural ground as well as object tops. The generic support
+    /// query only searches registered objects and imported meshes; an empty result on a flat
+    /// preset therefore means bare ground, whereas on an imported map it can mean a real hole.
+    func groundVehicleSurfaceHeight(
+        at planarPosition: SIMD2<Float>,
+        clearanceRadius: Float,
+        maximumHeight: Float
+    ) -> Float? {
+        let support = supportSurfaceHeight(at: planarPosition, clearanceRadius: clearanceRadius,
+            maximumHeight: maximumHeight)
+        guard installedWorld == nil, meshCollision == nil, !groundNode.isHidden,
+              let plane = groundNode.geometry as? SCNPlane else { return support }
+        let groundY = groundNode.simdWorldPosition.y
+        guard groundY <= maximumHeight + 0.08 else { return support }
+        let local = groundNode.simdConvertPosition(
+            SIMD3<Float>(planarPosition.x, groundY, planarPosition.y), from: nil)
+        guard abs(local.x) + clearanceRadius <= Float(plane.width) * 0.5,
+              abs(local.y) + clearanceRadius <= Float(plane.height) * 0.5 else { return support }
+        return max(support ?? groundY, groundY)
+    }
+
     /// Highest support surface under `planarPosition` together with its world-space
     /// up-normal (y > 0). Flat tops (container/crate/building bounds) return (0, 1, 0);
     /// pitched building-roof triangles return the actual slope normal so a resting drone
@@ -6899,6 +6923,9 @@ final class DroneSceneController {
         )
         payloadCameraYawNode.eulerAngles.y = CGFloat(Float(state.gimbalYawDegrees).degreesToRadians)
         payloadCameraPitchNode.eulerAngles.x = CGFloat(Float(state.gimbalPitchDegrees).degreesToRadians)
+        for rig in articulatedNodes {
+            rig.applyCamera(yawDegrees: state.gimbalYawDegrees, pitchDegrees: state.gimbalPitchDegrees)
+        }
         payloadCamera?.fieldOfView = CGFloat(state.currentFieldOfViewDegrees)
         payloadCamera?.zNear = 0.015
         payloadCamera?.zFar = CameraClipping.payloadOpticsFar
@@ -8999,9 +9026,14 @@ final class DroneSceneController {
         let propulsionUnitOmega = state.propulsionUnits.first(where: { $0.role == .tiltRotor })?.rotationalSpeedRadPerSec
 
         for index in propellerNodes.indices {
-            let omega = propulsionUnitOmega ?? (index < base.count ? base[index] : rotorOmega.x)
+            let unitOmega = state.propulsionUnits.count == propellerNodes.count
+                ? state.propulsionUnits[index].rotationalSpeedRadPerSec : propulsionUnitOmega
+            let omega = unitOmega ?? (index < base.count ? base[index] : rotorOmega.x)
             let fallback = 18.0 + 160.0 * state.throttle * profileFactor
-            let spinSpeed = max(0.0, omega) > 0.1 ? omega : fallback
+            // An authoritative stopped lift rotor stays stopped in cruise;
+            // the legacy decorative fallback must not restart it.
+            let authoritative = unitOmega != nil || UAVExpansionCatalog.ids.contains(activeProfile.id)
+            let spinSpeed = authoritative ? max(0, omega) : max(0.0, omega) > 0.1 ? omega : fallback
             spinAngles[index] += spinDirections[index] * spinSpeed * deltaTime
             propellerNodes[index].eulerAngles.y = CGFloat(spinAngles[index])
         }
@@ -9015,6 +9047,7 @@ final class DroneSceneController {
     /// even where the physics template has more units (Wingcopter: 8) than
     /// the visual rig has pods (4).
     private func updatePropulsionUnitVisuals(state: DroneState) {
+        for rig in articulatedNodes { rig.applyControl(elevatorDeflection: state.elevatorDeflection) }
         guard !tiltPivotNodes.isEmpty else { return }
         guard let representative = state.propulsionUnits.first(where: { $0.role == .tiltRotor }) else { return }
         let angle = CGFloat(representative.tiltAngleRad)
@@ -10634,7 +10667,7 @@ final class DroneSceneController {
         maxRangeMeters: Float,
         coneHalfAngleDegrees: Float
     ) -> MissionTargetDetectionSample? {
-        guard let cameraNode = payloadCameraNode, missionTargetNode != nil else {
+        guard let cameraNode = payloadCameraNode else {
             return nil
         }
         // Model transform, not `.presentation` — see `payloadCameraTargetDistance` for why

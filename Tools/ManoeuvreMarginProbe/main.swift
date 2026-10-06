@@ -6,16 +6,18 @@ struct DroneVisualModel {
     let rootNode: SCNNode; let propellerNodes: [SCNNode]; let propellerSpinDirections: [Float]
     let componentNodes: [DamageComponent: [SCNNode]]; let fpvAnchorNode: SCNNode
     let payloadMountNode: SCNNode; let tiltPivotNodes: [SCNNode]
+    let articulatedNodes: [UAVArticulatedNode]
     let visualBoundsCenter: SIMD3<Float>; let visualBoundsSize: SIMD3<Float>
     init(rootNode: SCNNode, propellerNodes: [SCNNode], propellerSpinDirections: [Float],
          componentNodes: [DamageComponent: [SCNNode]], fpvAnchorNode: SCNNode, payloadMountNode: SCNNode,
          tiltPivotNodes: [SCNNode] = [], visualBoundsCenter: SIMD3<Float> = .zero,
-         visualBoundsSize: SIMD3<Float> = SIMD3<Float>(repeating: 0.36)) {
+         visualBoundsSize: SIMD3<Float> = SIMD3<Float>(repeating: 0.36),
+         articulatedNodes: [UAVArticulatedNode] = []) {
         self.rootNode = rootNode; self.propellerNodes = propellerNodes
         self.propellerSpinDirections = propellerSpinDirections; self.componentNodes = componentNodes
         self.fpvAnchorNode = fpvAnchorNode; self.payloadMountNode = payloadMountNode
         self.tiltPivotNodes = tiltPivotNodes; self.visualBoundsCenter = visualBoundsCenter
-        self.visualBoundsSize = visualBoundsSize }
+        self.visualBoundsSize = visualBoundsSize; self.articulatedNodes = articulatedNodes }
 }
 func bnds(_ node: SCNNode, _ ref: SCNNode) -> (min: SIMD3<Float>, max: SIMD3<Float>)? {
     var low = SIMD3<Float>(repeating: .greatestFiniteMagnitude)

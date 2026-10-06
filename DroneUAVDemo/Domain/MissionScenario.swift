@@ -10,6 +10,10 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
     case agriculturalSpraying
     case droneRacing
     case attachedPayloadIntercept
+    case vehiclePursuit
+    case vehicleEscort
+
+    var isGroundVehicleMission: Bool { self == .vehiclePursuit || self == .vehicleEscort }
 
     var id: String { rawValue }
 
@@ -25,6 +29,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "mission.scenario.drone_racing.title"
         case .attachedPayloadIntercept:
             return "intercept.title"
+        case .vehiclePursuit: return "ground.pursuit.title"
+        case .vehicleEscort: return "ground.escort.title"
         }
     }
 
@@ -40,6 +46,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "mission.scenario.drone_racing.subtitle"
         case .attachedPayloadIntercept:
             return "intercept.subtitle"
+        case .vehiclePursuit: return "ground.pursuit.subtitle"
+        case .vehicleEscort: return "ground.escort.subtitle"
         }
     }
 
@@ -55,6 +63,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return "flag.checkered.2.crossed"
         case .attachedPayloadIntercept:
             return "scope"
+        case .vehiclePursuit: return "viewfinder"
+        case .vehicleEscort: return "car.side"
         }
     }
 
@@ -69,6 +79,8 @@ enum MissionScenarioKind: String, CaseIterable, Identifiable, Hashable {
             return []
         case .searchAndRescue:
             return [.thermalCamera, .cameraGimbal]
+        case .vehiclePursuit, .vehicleEscort:
+            return [.cameraGimbal, .thermalCamera]
         case .fireResponse:
             return [.fireHose, .fireCapsuleLauncher]
         case .agriculturalSpraying:
@@ -384,6 +396,7 @@ struct MissionScenarioConfiguration: Equatable {
     var raceTrack: RaceTrack?
     var raceMode: RaceMode = .timed
     var interception: InterceptMissionConfiguration? = nil
+    var groundVehicleModel: GroundVehicleModel = .cabover
 }
 
 // MARK: - Derived placement (computed at launch from parameters + world)

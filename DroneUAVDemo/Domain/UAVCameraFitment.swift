@@ -130,6 +130,15 @@ enum UAVCameraFitmentCatalog {
         profileID: String,
         capabilityMode: UAVPayloadCapabilityMode
     ) -> UAVCameraFitment {
+        if let definition = UAVExpansionCatalog.definition(for: profileID) {
+            if let moduleID = definition.flight.cameraModuleId {
+                return UAVCameraFitment(navigationCamera: .gimbalDoublesAsPilotView,
+                                        imagingCamera: .integrated(moduleID: moduleID))
+            }
+            let surveying = ["ray", "ebee", "ux11", "dt26", "cw20", "deltaquad"].contains(definition.layout)
+            return UAVCameraFitment(navigationCamera: surveying ? nil : .nightVisionFPV,
+                                    imagingCamera: .operatorFitted)
+        }
         if noCamera.contains(profileID) {
             return UAVCameraFitment(navigationCamera: nil, imagingCamera: .none)
         }

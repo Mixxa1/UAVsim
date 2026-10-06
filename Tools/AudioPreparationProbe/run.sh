@@ -10,6 +10,8 @@ swiftc -Onone -D DEBUG -parse-as-library -module-cache-path "$BUILD/module-cache
   DroneUAVDemo/Domain/SonicBoomModel.swift \
   DroneUAVDemo/Domain/AtmosphereModel.swift \
   DroneUAVDemo/Domain/WeatherModel.swift \
+  DroneUAVDemo/Domain/AppLanguage.swift \
+  DroneUAVDemo/Domain/L10n.swift \
   DroneUAVDemo/Domain/AudioAssetCatalog.swift \
   DroneUAVDemo/Domain/AppAudioSettings.swift
 "$BUILD/probe"

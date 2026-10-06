@@ -42,6 +42,7 @@ struct MissionSetupView: View {
     @State private var raceLibrary: [RaceTrackStore.Summary] = []
     @State private var selectedRaceTrackID: UUID?
     @State private var interception = InterceptMissionConfiguration()
+    @State private var groundVehicleModel: GroundVehicleModel = .cabover
     @State private var activeAircraftSlot: AircraftSlot = .player
 
     /// One of the three aircraft an interception run puts in the air.
@@ -157,6 +158,8 @@ struct MissionSetupView: View {
             return "intercept.payload.hint"
         case .searchAndRescue:
             return "mission.setup.payload.hint"
+        case .vehiclePursuit, .vehicleEscort:
+            return "ground.camera.hint"
         case .fireResponse:
             return "mission.setup.payload.hint.fire_response"
         case .agriculturalSpraying:
@@ -276,6 +279,11 @@ struct MissionSetupView: View {
                 terrainDensity = .sparse
                 resolveInterceptProfiles()
             }
+            if newValue.isGroundVehicleMission {
+                terrain = .field
+                terrainDensity = .sparse
+                activeAircraftSlot = .player
+            }
             timeLimitMinutes = defaultTimeLimit(for: newValue, difficulty: difficulty)
         }
         // Switching sides changes what the aircraft would sensibly be carrying, and the two lists
@@ -338,6 +346,8 @@ struct MissionSetupView: View {
         case .agriculturalSpraying: return "mission.brief.agriculture"
         case .droneRacing: return "mission.brief.race"
         case .attachedPayloadIntercept: return "mission.brief.intercept"
+        case .vehiclePursuit: return "ground.pursuit.brief"
+        case .vehicleEscort: return "ground.escort.brief"
         }
     }
 
@@ -415,7 +425,22 @@ struct MissionSetupView: View {
     }
 
     private var displayedAircraftSlot: AircraftSlot {
-        kind == .attachedPayloadIntercept ? activeAircraftSlot : .player
+        kind == .attachedPayloadIntercept || kind.isGroundVehicleMission ? activeAircraftSlot : .player
+    }
+
+    private var displayingGroundTarget: Bool {
+        displayedAircraftSlot == .target && (kind.isGroundVehicleMission || interception.targetsGroundVehicle)
+    }
+
+    private var selectedGroundModel: GroundVehicleModel {
+        kind == .attachedPayloadIntercept ? interception.groundVehicleModel ?? .cabover : groundVehicleModel
+    }
+
+    private var groundModelBinding: Binding<GroundVehicleModel> {
+        Binding(get: { selectedGroundModel }, set: {
+            if kind == .attachedPayloadIntercept { interception.groundVehicleModel = $0 }
+            else { groundVehicleModel = $0 }
+        })
     }
 
     private var displayedAircraft: DroneModelProfile? {
@@ -426,10 +451,11 @@ struct MissionSetupView: View {
     private var aircraftWorkspace: some View {
         GeometryReader { geometry in
             VStack(alignment: .leading, spacing: 12) {
-                if kind == .attachedPayloadIntercept {
+                if kind == .attachedPayloadIntercept || kind.isGroundVehicleMission {
                     Picker("", selection: $activeAircraftSlot) {
-                        ForEach([AircraftSlot.player, .target, .observer]) { slot in
-                            Text(LocalizedStringKey(slot.titleKey)).tag(slot)
+                        ForEach(kind.isGroundVehicleMission ? [AircraftSlot.player, .target] : [.player, .target, .observer]) { slot in
+                            Text(LocalizedStringKey(slot == .target && (kind.isGroundVehicleMission || interception.targetsGroundVehicle)
+                                ? "ground.vehicle" : slot.titleKey)).tag(slot)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -437,7 +463,9 @@ struct MissionSetupView: View {
                     .frame(height: 28)
                 }
 
-                if let profile = displayedAircraft {
+                if displayingGroundTarget {
+                    Text(LocalizedStringKey(selectedGroundModel.titleKey)).font(.system(size: 19, weight: .semibold))
+                } else if let profile = displayedAircraft {
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         VStack(alignment: .leading, spacing: 3) {
                             Text(profile.uiDisplayName)
@@ -456,7 +484,9 @@ struct MissionSetupView: View {
 
                 HStack(alignment: .top, spacing: 16) {
                     Group {
-                        if let profile = displayedAircraft {
+                        if displayingGroundTarget {
+                            GroundVehiclePreviewView(model: selectedGroundModel)
+                        } else if let profile = displayedAircraft {
                             UAVLivePreviewView(profile: previewProfile(for: profile), runtimeProfile: profile)
                                 .accessibilityLabel(profile.uiDisplayName)
                         } else {
@@ -478,7 +508,7 @@ struct MissionSetupView: View {
                 }
                 .frame(height: min(320, max(170, geometry.size.height * 0.44)))
 
-                aircraftList
+                if displayingGroundTarget { groundVehicleList } else { aircraftList }
             }
             .foregroundStyle(GroundControlPalette.textPrimary)
         }
@@ -513,6 +543,25 @@ struct MissionSetupView: View {
         .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 10))
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(GroundControlPalette.border))
+    }
+
+    private var groundVehicleList: some View {
+        VStack(spacing: 6) {
+            ForEach(GroundVehicleModel.allCases) { model in
+                Button { groundModelBinding.wrappedValue = model } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: model == selectedGroundModel ? "checkmark.circle.fill" : "circle")
+                            .foregroundStyle(model == selectedGroundModel ? GroundControlPalette.accent : GroundControlPalette.textSecondary)
+                        Text(LocalizedStringKey(model.titleKey)).frame(maxWidth: .infinity, alignment: .leading)
+                        Text("ground.vehicle.specs").font(.caption).foregroundStyle(GroundControlPalette.textSecondary)
+                    }
+                    .padding(12)
+                    .background(model == selectedGroundModel ? GroundControlPalette.accent.opacity(0.1) : GroundControlPalette.inset,
+                        in: RoundedRectangle(cornerRadius: 9))
+                }
+                .buttonStyle(.plain)
+            }
+        }
     }
 
     private func aircraftListRow(_ profile: DroneModelProfile) -> some View {
@@ -823,7 +872,7 @@ struct MissionSetupView: View {
                 .foregroundStyle(.white.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
 
-            if isFixedWingTargetSelected, interception.side == .interceptor {
+            if isFixedWingTargetSelected, interception.side == .interceptor, !interception.targetsGroundVehicle {
                 Text("intercept.setup.fixed_wing.hint")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
@@ -833,16 +882,34 @@ struct MissionSetupView: View {
             // The other aircraft's profile is the operator's choice only when they are the one
             // hunting it. On the delivery side there is exactly one thing it can be doing.
             if interception.side == .interceptor {
-                labeledRow("intercept.target.behavior") {
-                    Picker("", selection: $interception.targetBehavior) {
-                        ForEach(InterceptTargetBehavior.selectable) { value in
+                labeledRow("intercept.target_kind") {
+                    Picker("", selection: Binding(get: { interception.targetKind ?? .aircraft }, set: { value in
+                        interception.targetKind = value
+                        activeAircraftSlot = .target
+                    })) {
+                        ForEach(InterceptTargetKind.allCases) { value in
                             Text(LocalizedStringKey(value.titleKey)).tag(value)
                         }
                     }
-                    .pickerStyle(.menu)
-                .fixedSize(horizontal: false, vertical: true)
-                    .labelsHidden()
-                    .tint(.white)
+                    .pickerStyle(.segmented).labelsHidden()
+                }
+                if interception.targetsGroundVehicle {
+                    groundModelPicker
+                    Text("ground.intercept.brief").font(.caption2)
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    labeledRow("intercept.target.behavior") {
+                        Picker("", selection: $interception.targetBehavior) {
+                            ForEach(InterceptTargetBehavior.selectable) { value in
+                                Text(LocalizedStringKey(value.titleKey)).tag(value)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .labelsHidden()
+                        .tint(.white)
+                    }
                 }
             }
 
@@ -884,17 +951,19 @@ struct MissionSetupView: View {
                     .foregroundStyle(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
 
-                Toggle("intercept.target.payload", isOn: $interception.targetCarriesPayload)
-                    .font(.caption)
-                    .foregroundStyle(.white.opacity(0.8))
-                if interception.targetCarriesPayload {
-                    Toggle("intercept.target.inert", isOn: $interception.targetPayloadInert)
+                if !interception.targetsGroundVehicle {
+                    Toggle("intercept.target.payload", isOn: $interception.targetCarriesPayload)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.8))
-                    Text("intercept.target.inert.hint")
-                        .font(.caption2)
-                        .foregroundStyle(.white.opacity(0.55))
-                        .fixedSize(horizontal: false, vertical: true)
+                    if interception.targetCarriesPayload {
+                        Toggle("intercept.target.inert", isOn: $interception.targetPayloadInert)
+                            .font(.caption)
+                            .foregroundStyle(.white.opacity(0.8))
+                        Text("intercept.target.inert.hint")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.55))
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             } else {
                 labeledRow("intercept.setup.zone_radius") {
@@ -1132,6 +1201,7 @@ struct MissionSetupView: View {
 
     private var platformFields: some View {
         VStack(alignment: .leading, spacing: 14) {
+            if kind.isGroundVehicleMission { groundModelPicker }
             // Interception selects its carried module in its own controls.
             if kind.requiresPayload, kind != .attachedPayloadIntercept {
                 labeledRow("mission.setup.payload") {
@@ -1154,6 +1224,17 @@ struct MissionSetupView: View {
 
             if payload == .fireHose { hoseRiggingFields }
             if payload == .fireCapsuleLauncher { capsuleRiggingFields }
+        }
+    }
+
+    private var groundModelPicker: some View {
+        labeledRow("ground.vehicle") {
+            Picker("", selection: groundModelBinding) {
+                ForEach(GroundVehicleModel.allCases) { model in
+                    Text(LocalizedStringKey(model.titleKey)).tag(model)
+                }
+            }
+            .pickerStyle(.menu).labelsHidden()
         }
     }
 
@@ -1289,7 +1370,8 @@ struct MissionSetupView: View {
             fireCapsuleCount: capsuleCount,
             raceTrack: resolvedRaceTrack(parameters: parameters),
             raceMode: raceMode,
-            interception: kind == .attachedPayloadIntercept ? interception : nil
+            interception: kind == .attachedPayloadIntercept ? interception : nil,
+            groundVehicleModel: groundVehicleModel
         )
         onStart(config)
     }

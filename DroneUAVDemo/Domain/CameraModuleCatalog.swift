@@ -605,7 +605,7 @@ enum CameraModuleCatalog {
             ),
             massKg: 2.100
         ),
-    ]
+    ] + UAVExpansionCatalog.cameraModules
 
     /// Cameras the pilot flies from, as opposed to the ones the mission is flown for.
     ///

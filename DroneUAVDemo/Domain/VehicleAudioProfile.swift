@@ -24,12 +24,18 @@ enum VehicleAudioClass: String, CaseIterable, Hashable {
     case pistonFixedWing
     case turbopropFixedWing
     case turbojetFixedWing
+    case groundVehicle
 
     var localizationKey: String { "audio.vehicle.class.\(rawValue)" }
 }
 
 /// The assets and coupling constants one acoustic class flies with.
 struct VehicleAudioProfile: Hashable {
+    static let groundVehicle = VehicleAudioProfile(audioClass: .groundVehicle,
+        propulsionLoop: .pistonEngineLoop, spinUpCue: nil, engineStartCue: .pistonEngineStart,
+        electronicsBootCue: nil, usesFuelEngine: true, referenceShaftSpeedRadPerSec: 170,
+        bladeCount: 1, referenceAirspeedMps: 20, propulsionTrimDb: -2, airflowTrimDb: -40)
+
     let audioClass: VehicleAudioClass
 
     /// The continuous propulsion sound. `nil` when the pack has nothing for this class —

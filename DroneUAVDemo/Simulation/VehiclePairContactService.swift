@@ -77,7 +77,9 @@ enum VehiclePairContactService {
     static func resolve(contact: VehiclePairContact, firstPrevious: DroneState, secondPrevious: DroneState,
                         first: inout DroneState, firstGraph: inout VehicleComponentGraph, firstClass: AirframeClass,
                         second: inout DroneState, secondGraph: inout VehicleComponentGraph, secondClass: AirframeClass,
-                        deltaTime: Float, applyDamage: Bool = true) -> (first: ImpactReport, second: ImpactReport) {
+                        deltaTime: Float, applyDamage: Bool = true,
+                        firstReceivesComponentDamage: Bool = true,
+                        secondReceivesComponentDamage: Bool = true) -> (first: ImpactReport, second: ImpactReport) {
         let aMass = firstGraph.massProperties
         let bMass = secondGraph.massProperties
         let aPose = mix(firstPrevious.position, first.position, contact.fraction)
@@ -134,11 +136,11 @@ enum VehiclePairContactService {
         let aReport = report(graph: &firstGraph, componentID: contact.firstSphere.componentID,
             orientation: aq, position: aPose, point: contact.point, normal: n, impulse: impulse,
             energy: energy * aShare, closing: closing, tangent: tangentSpeed, id: impactID,
-            deltaTime: deltaTime, applyDamage: applyDamage)
+            deltaTime: deltaTime, applyDamage: applyDamage && firstReceivesComponentDamage)
         let bReport = report(graph: &secondGraph, componentID: contact.secondSphere.componentID,
             orientation: bq, position: bPose, point: contact.point, normal: -n, impulse: -impulse,
             energy: energy * (1 - aShare), closing: closing, tangent: tangentSpeed, id: impactID,
-            deltaTime: deltaTime, applyDamage: applyDamage)
+            deltaTime: deltaTime, applyDamage: applyDamage && secondReceivesComponentDamage)
         return (aReport, bReport)
     }
 

@@ -299,6 +299,7 @@ enum AttachedModuleShape: String, Codable, CaseIterable, Identifiable {
 /// The one situation in which a module's effect is allowed to occur.
 enum AttachedPayloadTriggerPolicy: String, Codable {
     case targetContact
+    case collision
     case ownerCritical
     case never
 }
@@ -387,10 +388,20 @@ struct AttachedPayloadComponent: Codable, Equatable, Identifiable {
 
 /// Everything the scenario needs that is not a live world value. Built by the setup screen,
 /// clamped by `validated`, and then constant for the whole run.
+enum InterceptTargetKind: String, CaseIterable, Codable, Identifiable {
+    case aircraft, groundVehicle
+    var id: String { rawValue }
+    var titleKey: String { "intercept.target_kind.\(rawValue)" }
+}
+
 struct InterceptMissionConfiguration: Codable, Equatable {
     var missionID = "attached-payload-v2"
     /// Which end of the interception the operator flies.
     var side: InterceptMissionSide = .interceptor
+    /// Optional for backwards-compatible decoding of existing saved mission configurations.
+    var targetKind: InterceptTargetKind? = nil
+    var groundVehicleModel: GroundVehicleModel? = nil
+    var targetsGroundVehicle: Bool { side == .interceptor && targetKind == .groundVehicle }
     var targetBehavior: InterceptTargetBehavior = .routeFollower
     var targetCarriesPayload = true
     var targetPayloadInert = false
@@ -513,6 +524,7 @@ struct InterceptMissionConfiguration: Codable, Equatable {
         copy.timeLimit = timeLimit.isFinite ? max(10, min(timeLimit, 7200)) : 600
         copy.targetAgility = targetAgility.isFinite ? max(0, min(targetAgility, 4)) : 1
         copy.maximumAttempts = max(0, maximumAttempts)
+        if copy.targetsGroundVehicle { copy.targetCarriesPayload = false }
         // A load that belongs to the other side of the mission — a net on a delivery run, a
         // medical pack on an interception — is a configuration that could only have come from
         // switching sides with one already chosen.
@@ -690,7 +702,7 @@ struct InterceptMissionEvent: Codable, Equatable, Identifiable {
 
 // MARK: - World effects
 
-enum InterceptEffectKind: String, Codable { case contact, smoke, fire, secondary }
+enum InterceptEffectKind: String, Codable { case contact, smoke, fire, secondary, explosion }
 
 /// A world-space effect. It lives at the contact point, not in front of a camera, so it is still
 /// there — and still in the right place — after the feed switches to the observer.
@@ -706,6 +718,8 @@ struct InterceptWorldEffect: Codable, Equatable, Identifiable {
     var normal = SIMD3<Float>(0, 1, 0)
     let startedAt: TimeInterval
     let lifetime: TimeInterval
+    /// Optional so recordings made before scaled vehicle effects remain readable.
+    var scale: Float? = nil
 }
 
 // MARK: - HUD projection
@@ -745,6 +759,10 @@ struct InterceptMissionHUDState: Equatable {
     var deliveryZoneRange: Float = 0
     var isOverDeliveryZone = false
     var canRelease = false
+    var targetIsGroundVehicle = false
+    var targetConditionTitleKey: String {
+        targetIsGroundVehicle ? "ground.condition.\(targetState.rawValue)" : targetState.targetTitleKey
+    }
 
     var isObservingObserver: Bool { sourceID == InterceptCallsign.observer }
 }

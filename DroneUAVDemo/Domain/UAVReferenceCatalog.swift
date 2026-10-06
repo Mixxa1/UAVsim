@@ -1784,7 +1784,7 @@ enum UAVReferenceCatalog {
                 inletDesignMach: 2.0
             )
         )
-    ]
+    ] + UAVExpansionCatalog.profiles
 
     static let defaultProfileID = "dji-matrice-350-rtk"
     static let abstractProfileID = "abstract-uav"
@@ -1858,6 +1858,7 @@ enum UAVReferenceCatalog {
     private static let auditedVideoProfileIDs = analogVideoProfileIDs
         .union(tetheredVideoProfileIDs)
         .union(digitalVideoProfileIDs)
+        .union(UAVExpansionCatalog.ids)
 
     static let allProfiles: [UAVProfile] = {
         #if DEBUG
@@ -1888,7 +1889,7 @@ enum UAVReferenceCatalog {
         if tetheredVideoProfileIDs.contains(profileID) {
             return .fiber
         }
-        if digitalVideoProfileIDs.contains(profileID) || profileID == abstractProfileID {
+        if digitalVideoProfileIDs.contains(profileID) || UAVExpansionCatalog.ids.contains(profileID) || profileID == abstractProfileID {
             return .digital
         }
         assertionFailure("Unaudited video-link equipment for UAV profile: \(profileID)")
@@ -1899,6 +1900,9 @@ enum UAVReferenceCatalog {
     /// this switch: adding an aircraft without deciding how its real video delivery behaves is a
     /// debug-time failure instead of silently inheriting the look of another UAV.
     static func defaultVideoLinkPreset(for profileID: String) -> RFVideoLinkPreset {
+        if let definition = UAVExpansionCatalog.definition(for: profileID) {
+            return definition.flight.videoPreset
+        }
         switch profileID {
         case "fpv-tiny-whoop-65", "fpv-micro-racer-25", "fpv-racer-5",
              "fpv-spec-5", "fpv-long-range-7", "fpv-open-class", "fpv-cinewhoop-3":
@@ -1998,6 +2002,7 @@ enum UAVReferenceCatalog {
     }
 
     static func sourceURL(for id: String) -> URL? {
+        if let definition = UAVExpansionCatalog.definition(for: id) { return definition.sourceURL }
         switch id {
         case "dji-matrice-350-rtk":
             return URL(string: "https://enterprise.dji.com/matrice-350-rtk/specs")

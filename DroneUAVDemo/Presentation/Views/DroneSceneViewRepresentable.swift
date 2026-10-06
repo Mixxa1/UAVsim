@@ -30,6 +30,7 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
     }
 
     private weak var sceneView: FocusableSCNView?
+    private weak var preparedDamageEffects: SCNNode?
     private var processedFrameOwner: ProcessedFrameOwner = .none
     private var fpvPipelineActive = false
     private var postProcessingRequired = false
@@ -101,6 +102,13 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
     @MainActor
     fileprivate func attach(to view: FocusableSCNView) {
         sceneView = view
+        // Inspect only the known world roots. Recursing through imported cities every frame
+        // would be much more expensive than the first-frame work this preparation removes.
+        let preparation = view.scene?.rootNode.childNodes.lazy
+            .compactMap { $0.childNode(withName: WorldDamageEffectVisual.preparationNodeName, recursively: false) }.first
+        guard let preparation, preparation !== preparedDamageEffects else { return }
+        preparedDamageEffects = preparation
+        view.prepare([preparation], completionHandler: nil)
     }
 
     /// Clears the shared frame only when the pass asking for it is the one showing it.

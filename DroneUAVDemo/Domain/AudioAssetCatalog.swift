@@ -64,6 +64,8 @@ enum AudioAssetID: String, CaseIterable, Hashable {
     case buildingDebris = "building_debris"
     case damageStoneCrash = "damage_stone_crash"
     case damageCompositeBreak = "damage_composite_break"
+    /// Separate from an impact. A synthesised game cue is supplied when the sound pack has none.
+    case chargeDetonation = "charge_detonation"
 }
 
 enum AudioAssetCategory: String, Codable, Hashable {

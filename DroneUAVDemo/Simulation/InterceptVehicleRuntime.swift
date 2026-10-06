@@ -12,6 +12,9 @@ final class InterceptVehicleRuntime {
     let role: InterceptVehicleRole
     let profile: DroneModelProfile
     let massModel: VehicleMassModel
+    let groundVehicle: GroundVehicleRuntime?
+    var isGroundVehicle: Bool { groundVehicle != nil }
+    var displayName: String { groundVehicle.map { L10n.s($0.model.titleKey) } ?? profile.displayName }
     let spawnPosition: SIMD3<Float>
     var state: DroneState
     private(set) var previousState: DroneState
@@ -49,7 +52,7 @@ final class InterceptVehicleRuntime {
     /// is how fast it crosses the area, since it cannot manoeuvre the way a rotorcraft can.
     var cruiseSpeedScale: Float = 1
 
-    var isFixedWing: Bool { profile.airframeClass == .fixedWing }
+    var isFixedWing: Bool { !isGroundVehicle && profile.airframeClass == .fixedWing }
 
     /// What this aircraft sounds like to somebody standing off from it, and a stable identity for
     /// the mixer to key its loop on. Every machine in the air is audible: a target crossing at a
@@ -62,6 +65,9 @@ final class InterceptVehicleRuntime {
     /// audio layer infer its note from airspeed, which is the honest source for a propeller
     /// turning at a governed rate behind a fixed pitch.
     var audioShaftSpeedRadPerSec: Float? {
+        if let groundVehicle {
+            return groundVehicle.damage.functionalState.isTerminal ? 0 : (700 + state.motorThrottle * 1600) * (2 * .pi / 60)
+        }
         guard !isFixedWing else { return nil }
         let speeds = state.rotorAngularSpeed
         let live = [speeds.x, speeds.y, speeds.z, speeds.w].filter { $0 > 0 }
@@ -113,12 +119,14 @@ final class InterceptVehicleRuntime {
         rotors: VehicleRotorModel,
         payload: AttachedPayloadComponent?,
         seed: UInt64,
-        initialCourse: SIMD3<Float> = SIMD3<Float>(0, 0, -1)
+        initialCourse: SIMD3<Float> = SIMD3<Float>(0, 0, -1),
+        groundVehicle: GroundVehicleRuntime? = nil
     ) {
         self.id = id
         self.role = role
         self.profile = profile
         self.massModel = massModel
+        self.groundVehicle = groundVehicle
         self.graph = graph
         self.payload = payload
         spawnPosition = position
@@ -128,7 +136,7 @@ final class InterceptVehicleRuntime {
         rotorModel = rotors
         failures = ComponentFailureRuntime(seed: seed)
         let powerplant = profile.resolvedUAVProfile?.powerplant
-        audioProfile = VehicleAudioProfile.resolve(
+        audioProfile = groundVehicle != nil ? .groundVehicle : VehicleAudioProfile.resolve(
             airframeClass: profile.airframeClass,
             engineType: powerplant?.engineType,
             rotorCount: max(1, rotors.rotors.count),
@@ -173,6 +181,7 @@ final class InterceptVehicleRuntime {
         }
         state = initial
         previousState = initial
+        if let groundVehicle { state = groundVehicle.state; previousState = state }
         baseRF = RFCompatibilityPreset.make(for: profile)
     }
 
@@ -192,7 +201,11 @@ final class InterceptVehicleRuntime {
     // MARK: - Snapshot
 
     var snapshot: InterceptVehicleSnapshot {
-        Self.snapshot(id: id, role: role, state: state, payload: payload)
+        if let groundVehicle {
+            return InterceptVehicleSnapshot(id: id, role: role, position: state.position,
+                velocity: state.velocity, functionalState: groundVehicle.damage.functionalState, payloadState: nil)
+        }
+        return Self.snapshot(id: id, role: role, state: state, payload: payload)
     }
 
     /// Condenses a full flight state into the handful of facts the scenario rules are allowed to
@@ -487,7 +500,47 @@ final class InterceptVehicleRuntime {
 
     // MARK: - Damage
 
+    func stepGroundVehicle(deltaTime: Float, destination: SIMD2<Float>?, threat: SIMD3<Float>?,
+                           evasive: Bool, origin: SIMD2<Float>, areaRadius: Float, grip: Float,
+                           obstacles: [CollisionObstacle], ground: (SIMD3<Float>, Float) -> Float) -> [ImpactReport] {
+        guard let groundVehicle else { return [] }
+        previousState = state
+        groundVehicle.state = state
+        let impacts = groundVehicle.step(deltaTime: deltaTime, destination: destination, threat: threat,
+            evasive: evasive, origin: origin, areaRadius: areaRadius, grip: grip, obstacles: obstacles, ground: ground)
+        refreshDamage()
+        return impacts
+    }
+
+    func applyGroundModule(_ effect: AttachedPayloadProfile, worldPoint: SIMD3<Float>) {
+        guard let groundVehicle else { return }
+        groundVehicle.state = state
+        groundVehicle.applyModule(effect, worldPoint: worldPoint)
+        refreshDamage()
+    }
+
+    private(set) var lastDetonationPosition: SIMD3<Float>?
+    private(set) var lastDetonationTime: TimeInterval = -.infinity
+
+    func receiveDetonation(_ detonation: ChargeDetonation, directHit: Bool, now: TimeInterval) {
+        if let groundVehicle {
+            groundVehicle.state = state
+            groundVehicle.receiveDetonation(detonation, directHit: directHit)
+        } else {
+            detonation.apply(to: &graph, state: state, directHit: directHit, detach: true)
+        }
+        lastDetonationPosition = detonation.position
+        lastDetonationTime = now
+        refreshDamage()
+    }
+
     func receive(_ report: ImpactReport) {
+        if let groundVehicle {
+            groundVehicle.state = state
+            groundVehicle.receive(report)
+            refreshDamage()
+            return
+        }
         failures.noteDamage(entries: report.damage, graph: graph, currentAileron: 0, currentElevator: 0, currentRudder: 0)
         for root in graph.failedConnectionRootIDs { _ = graph.detachSubtree(rootComponentID: root) }
         refreshDamage()
@@ -497,6 +550,12 @@ final class InterceptVehicleRuntime {
     /// spheres still exist, what each rotor can still pull, and the two condition enums the
     /// scenario snapshot is built from.
     func refreshDamage() {
+        if let groundVehicle {
+            state = groundVehicle.state
+            graph = groundVehicle.componentGraph()
+            contactProfile = groundVehicle.contactProfile
+            return
+        }
         let detached = Set(graph.components.filter { !$0.isAttached }.map(\.id))
         contactProfile = pristineContacts.applyingDeformations(from: graph).removing(componentIDs: detached)
         rotorModel = pristineRotors

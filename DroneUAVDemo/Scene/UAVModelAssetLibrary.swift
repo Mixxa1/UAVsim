@@ -44,6 +44,12 @@ enum UAVModelAssetConstants {
 /// `Tools/UAVModelAssets/` and is intentionally ignored here rather than duplicated
 /// into a second format that could drift from it.
 struct UAVModelManifest: Decodable {
+    struct Rig: Decodable {
+        let name: String
+        let axis: String
+        let role: String
+        let amplitudeDegrees: Float
+    }
     struct Rotor: Decodable {
         let name: String
         /// Rotor centre in model space, metres. On the motor axis by construction.
@@ -60,6 +66,8 @@ struct UAVModelManifest: Decodable {
         let file: String
         let rotors: [Rotor]?
         let transition: Transition?
+        let rigs: [Rig]?
+        let jetExhaustCenter: [Float]?
     }
 
     struct Transition: Decodable {
@@ -74,6 +82,31 @@ struct UAVModelManifest: Decodable {
     }
 
     let models: [Entry]
+}
+
+/// A rigid optical or control assembly, with a local pivot authored in the USDZ.
+/// The simulator drives it directly; the packaged inspection loop stays disabled.
+struct UAVArticulatedNode {
+    let node: SCNNode
+    let axis: String
+    let role: String
+    let maximumDeflectionRadians: Float
+
+    func applyCamera(yawDegrees: Double, pitchDegrees: Double) {
+        guard role == "camera" else { return }
+        if axis == "y" {
+            node.eulerAngles.y = CGFloat(Float(yawDegrees) * .pi / 180)
+        } else if axis == "x" {
+            // USDZ nose is +Z; the visual's 180-degree yaw reverses its X axis.
+            node.eulerAngles.x = CGFloat(-Float(pitchDegrees) * .pi / 180)
+        }
+    }
+
+    func applyControl(elevatorDeflection: Float) {
+        guard role == "control_surface", axis == "x" else { return }
+        // DroneState publishes a servo fraction, not an angle in radians.
+        node.eulerAngles.x = CGFloat(-min(1, max(-1, elevatorDeflection)) * maximumDeflectionRadians)
+    }
 }
 
 // MARK: - Library
@@ -140,6 +173,10 @@ final class UAVModelAssetLibrary {
         entriesByID[profileID]?.rotors?.count ?? 0
     }
 
+    func articulationCount(for profileID: String) -> Int {
+        entriesByID[profileID]?.rigs?.count ?? 0
+    }
+
     /// Builds the flight-ready visual for one catalogue aircraft, or `nil` when the
     /// library does not cover it — in which case `UAVVisualFactory` falls back to its
     /// procedural builder rather than leaving the operator with no aircraft at all.
@@ -167,6 +204,18 @@ final class UAVModelAssetLibrary {
 
         let modelNode = template.clone()
         UAVModelAssetLibrary.giveInstanceItsOwnMaterials(modelNode)
+        let rigDefinitions: [UAVModelManifest.Rig] = entry.rigs ?? []
+        let articulatedNodes: [UAVArticulatedNode] = rigDefinitions.compactMap { rig -> UAVArticulatedNode? in
+            guard let node = modelNode.childNode(withName: rig.name, recursively: true) else { return nil }
+            node.name = "uavRig.\(rig.role).\(rig.name)"
+            return UAVArticulatedNode(node: node, axis: rig.axis, role: rig.role,
+                                      maximumDeflectionRadians: rig.amplitudeDegrees * .pi / 180)
+        }
+        if let center = entry.jetExhaustCenter, center.count == 3 {
+            let exhaust = SCNNode();exhaust.name = "jetExhaustAnchor"
+            exhaust.simdPosition = SIMD3<Float>(center[0], center[1], center[2])
+            modelNode.addChildNode(exhaust)
+        }
 
         // The scale lives on an inner node rather than on `root`: `DroneModelBuilder`
         // measures the visual bounds in root space, and a scale sitting *on* root is
@@ -242,7 +291,8 @@ final class UAVModelAssetLibrary {
             componentNodes: componentNodes,
             fpvAnchorNode: fpvAnchor,
             payloadMountNode: payloadMountNode,
-            tiltPivotNodes: tiltPivots
+            tiltPivotNodes: tiltPivots,
+            articulatedNodes: articulatedNodes
         )
     }
 
@@ -317,6 +367,9 @@ final class UAVModelAssetLibrary {
         }
         if let body = entry.transition?.bodyNode {
             template.childNode(withName: body, recursively: true)?.eulerAngles = SCNVector3Zero
+        }
+        for rig in entry.rigs ?? [] {
+            template.childNode(withName: rig.name, recursively: true)?.eulerAngles = SCNVector3Zero
         }
 
         templates[entry.id] = template
@@ -581,6 +634,15 @@ final class UAVModelAssetLibrary {
             needles.contains { name.contains($0) }
         }
 
+        // Hardware inside an articulated camera/control assembly inherits its
+        // assembly's component, including generically named bolts and recesses.
+        var ancestor = node.parent
+        while let parent = ancestor {
+            if parent.name?.hasPrefix("uavRig.camera.") == true { return .frontCameraGimbal }
+            if parent.name?.hasPrefix("uavRig.control_surface.") == true { return left ? .armRL : .armRR }
+            ancestor = parent.parent
+        }
+
         // Order is load-bearing, because these are substring tests on names that
         // overlap. `WingtipFin` is a wing, not a fin; `CameraCoolingFin` is optics, not
         // an empennage; `WheelHub` is landing gear, not a propeller hub. Each of those
@@ -592,6 +654,9 @@ final class UAVModelAssetLibrary {
         // from the canard's leading edge to the wing's trailing edge: on the X-10 it
         // turned a 10.8 m chord into 14.3 m. Canards go with the other control surfaces
         // below, whose boxes the graph does not read.
+        if contains(["forwardwing", "winglet", "wingfoldhinge", "liftboomwingclamp"]) {
+            return left ? .armRL : .armRR
+        }
         if contains(["wing"]) {
             return left ? .armFL : .armFR
         }

@@ -942,7 +942,8 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 z: $0.z * 0.88
             )
         } ?? uavProfile.dimensions.resolvedFoldedMillimeters(fallback: defaultFoldedFallback)
-        let runtimeMass = uavProfile.maxTakeoffMass ?? uavProfile.baseMass ?? tuning.fallbackTakeoffMass
+        let runtimeMass = UAVExpansionCatalog.definition(for: uavProfile.id)?.flight.massKg
+            ?? uavProfile.maxTakeoffMass ?? uavProfile.baseMass ?? tuning.fallbackTakeoffMass
 
         var profile = DroneModelProfile(
             id: uavProfile.id,
@@ -987,6 +988,10 @@ struct LIPODroneModelRepository: DroneModelRepository {
     private static func runtimeTuning(for uavProfile: UAVProfile) -> RuntimeTuning {
         if let override = runtimeTuningOverride(for: uavProfile) {
             return override
+        }
+
+        if let definition = UAVExpansionCatalog.definition(for: uavProfile.id) {
+            return expansionRuntimeTuning(definition)
         }
 
         switch uavProfile.visualPreset {
@@ -2924,6 +2929,51 @@ struct LIPODroneModelRepository: DroneModelRepository {
         default:
             return nil
         }
+    }
+
+    private static func expansionRuntimeTuning(_ definition: UAVExpansionCatalog.Definition) -> RuntimeTuning {
+        let f = definition.flight
+        let copter = definition.isMulticopter
+        let vtol = definition.isVTOL
+        let dimensions = definition.dimensions
+        let span = dimensions.meters.x
+        let launch: LaunchMethod = copter || vtol ? .vertical : f.launchMode == "runway" ? .runway
+            : f.launchMode == "catapult" ? .catapult : .handLaunch
+        let mode: LaunchMode = vtol ? .vtol : launch == .runway ? .runway : launch == .catapult ? .catapult : .handLaunch
+        let wing: FixedWingParameters? = copter ? nil : FixedWingParameters(
+            family: definition.family, minSustainableSpeedMps: f.minSpeedMps,
+            cruiseSpeedMps: f.cruiseSpeedMps, climbSpeedMps: max(f.minSpeedMps * 1.15, f.cruiseSpeedMps * 0.85),
+            stallWarningSpeedMps: f.minSpeedMps * 0.95,
+            waypointAcceptanceRadiusMeters: max(8, f.cruiseSpeedMps * 0.55),
+            nominalTurnRateDegPerSec: min(16, max(4, 160 / f.cruiseSpeedMps)),
+            bankResponseGain: 0.78, climbResponseGain: 0.65, descentResponseGain: 0.55,
+            dragFactor: 1, throttleResponseGain: 0.65, turnAuthority: 0.62, maxBankAngleDeg: definition.isJet ? 55 : 38,
+            supportedLaunchModes: vtol ? [.standard] : [mode], preferredLaunchMode: vtol ? .vtol : mode,
+            maxAirspeed: f.maxSpeedMps, nominalClimbRateMps: definition.isJet ? 15 : 4.5,
+            initialClimbPitchDeg: definition.isJet ? 8 : 10, handThrowSpeed: f.minSpeedMps * 1.12,
+            catapultExitSpeed: f.minSpeedMps * 1.20, runwayTakeoffDistance: definition.isJet ? 900 : max(45, span * 15),
+            initialClimbTargetAltitude: definition.isJet ? 120 : 25
+        )
+        return RuntimeTuning(
+            fallbackTakeoffMass: f.massKg, fallbackDimensions: dimensions,
+            maxHorizontalSpeedMps: f.maxSpeedMps,
+            maxAscentSpeedMps: copter ? (definition.id == "dji-mini-5-pro" ? 10 : 9) : definition.isJet ? 15 : 5,
+            maxDescentSpeedMps: copter ? 6 : 4, maxFlightTimeMin: f.flightMinutes,
+            maxHoverTimeMin: copter ? f.flightMinutes * 0.90 : 0,
+            maxWindResistanceMps: f.windSpeedMps, batteryEnergyWh: f.batteryEnergyWh,
+            cameraLayoutKey: copter ? "drone.camera.single_compact" : "drone.camera.fixed_front",
+            visualClass: definition.visualClass, operationalCategory: copter ? .multirotor : vtol ? .fixedWingVTOL : .fixedWing,
+            airframeClass: copter ? .multirotor : vtol ? .hybridVTOL : .fixedWing,
+            airframeStyle: copter ? .multirotorQuad : definition.isTailsitter ? .tailsitterVTOL
+                : vtol ? .surveyEVTOL : definition.isFlyingWing ? .flyingWing : .conventionalFixedWing,
+            fixedWingParameters: wing, launchMethod: launch,
+            landingMethod: definition.isTailsitter ? .tailsitterVerticalLanding : copter || vtol ? .vertical : .bellyLanding,
+            controlResponsiveness: definition.isJet ? 0.48 : 0.66, hoverThrottle: copter ? 0.55 : 0,
+            cameraPreset: DroneCameraPreset(fpvFov: definition.id == "dji-avata-2" ? 120 : 78,
+                followDistance: max(4, span * 4.2), followHeight: max(1.5, span * 0.65)),
+            collisionRadiusMeters: min(2, max(0.08, span * 0.12)),
+            propulsionUnitTemplate: definition.propulsionUnits
+        )
     }
 
     private static func multirotorRuntimeTuning(

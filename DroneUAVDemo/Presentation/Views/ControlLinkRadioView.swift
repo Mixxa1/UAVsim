@@ -76,9 +76,9 @@ struct ControlLinkRadioView: View {
                 let selected = candidate.id == mode.id
                 Button { viewModel.setControlLinkMode(candidate) } label: {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(LocalizedStringKey("control_link.intent.\(intent.rawValue)"))
+                        Text(LocalizedStringKey(intent.titleKey))
                             .font(.caption.weight(.semibold))
-                        Text(LocalizedStringKey("control_link.intent.\(intent.rawValue).hint"))
+                        Text(LocalizedStringKey(intent.hintKey))
                             .font(.caption2)
                             .foregroundStyle(GroundControlPalette.textSecondary)
                             .fixedSize(horizontal: false, vertical: true)

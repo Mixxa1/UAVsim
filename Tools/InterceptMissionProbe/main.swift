@@ -210,6 +210,46 @@ check(observation.active?.position == observerSource.position, "handoff cannot m
 _ = observation.step(now: 10, noSignalHold: 1)
 check(observation.revision == 1, "inactive attacker loss cannot retrigger handoff")
 
+// A recoverable radio dropout and the destruction of its camera are different events. The
+// observer is already receiving; waiting the ordinary hold hides the entire contact flash.
+var destroyedFeed = InterceptObservationRuntime()
+attackerSource.video = clean; attackerSource.cameraFunctional = false
+destroyedFeed.register(attackerSource); destroyedFeed.register(observerSource)
+let immediateEvents = destroyedFeed.step(now: 20, noSignalHold: 4)
+check(destroyedFeed.activeVehicleID == observerSource.vehicleID && destroyedFeed.revision == 1,
+      "known camera destruction hands off in the contact tick")
+check(immediateEvents.count == 2 && destroyedFeed.active?.position == observerSource.position,
+      "immediate handoff logs signal loss and the existing stationary observer")
+var destroyedCarrier = InterceptObservationRuntime()
+attackerSource.cameraFunctional = true
+destroyedCarrier.register(attackerSource); destroyedCarrier.register(observerSource)
+destroyedCarrier.disrupt(vehicleID: attackerSource.vehicleID, until: 26, permanently: true)
+_ = destroyedCarrier.step(now: 20, noSignalHold: 4)
+check(destroyedCarrier.activeVehicleID == observerSource.vehicleID
+    && !destroyedCarrier.select(attackerSource.vehicleID),
+      "a destroyed carrier cannot be selected again through stale healthy RF data")
+check(destroyedCarrier.isDisrupted(attackerSource.vehicleID, now: 100),
+      "permanent loss cannot recover when the interference timer expires")
+var transientFeed = InterceptObservationRuntime()
+transientFeed.register(attackerSource); transientFeed.register(observerSource)
+transientFeed.disrupt(vehicleID: attackerSource.vehicleID, until: 20.5)
+_ = transientFeed.step(now: 20, noSignalHold: 4)
+_ = transientFeed.step(now: 20.6, noSignalHold: 4)
+check(transientFeed.activeVehicleID == attackerSource.vehicleID && transientFeed.revision == 0,
+      "temporary module interference still recovers without a camera cut")
+var obstructedFeed = InterceptObservationRuntime()
+var blockedObserver = observerSource; blockedObserver.hasLineOfSight = false
+attackerSource.cameraFunctional = false
+obstructedFeed.register(attackerSource); obstructedFeed.register(blockedObserver)
+_ = obstructedFeed.step(now: 20, noSignalHold: 4)
+check(obstructedFeed.activeVehicleID == attackerSource.vehicleID && obstructedFeed.phase == .unavailable,
+      "a destroyed feed cannot create an observer view through an obstacle")
+blockedObserver.hasLineOfSight = true; blockedObserver.video = .unavailable
+obstructedFeed.register(blockedObserver)
+_ = obstructedFeed.step(now: 21, noSignalHold: 4)
+check(obstructedFeed.revision == 0, "an observer with lost video cannot receive an immediate handoff")
+attackerSource.cameraFunctional = true
+
 var gate = InterceptEventGate(runID: runtime.runID, authorityID: "local")
 let missionEvents = runtime.drainEvents()
 for event in missionEvents { check(gate.accept(event), "ordered authoritative event accepted") }
@@ -663,12 +703,15 @@ func rotorsFouled(_ graph: VehicleComponentGraph) -> Bool {
 
 /// Rams the target with the given module and reports what is left of both aircraft, plus which
 /// vehicles the run produced world effects for.
-func activate(module: AttachedModuleShape) -> (
+func activate(module: AttachedModuleShape, observerOffset: SIMD3<Float> = SIMD3<Float>(90, 6, 40),
+              cover: [CollisionObstacle] = []) -> (
     carrier: VehicleComponentGraph,
     target: VehicleComponentGraph,
     payload: AttachedPayloadState,
     effects: [InterceptWorldEffect],
-    feedCut: Bool
+    feedCut: Bool,
+    observer: VehicleComponentGraph,
+    session: InterceptMissionSession
 )? {
     guard let rotorProfile = LIPODroneModelRepository().allProfiles
         .first(where: { $0.airframeClass == .multirotor }) else { return nil }
@@ -695,7 +738,7 @@ func activate(module: AttachedModuleShape) -> (
     let session = InterceptMissionSession(
         configuration: settings,
         target: actor(InterceptCallsign.target, role: .target, at: station),
-        observer: actor(InterceptCallsign.observer, role: .observer, at: station + SIMD3<Float>(90, 6, 40)),
+        observer: actor(InterceptCallsign.observer, role: .observer, at: station + observerOffset),
         origin: .zero
     )
 
@@ -712,14 +755,16 @@ func activate(module: AttachedModuleShape) -> (
     _ = session.simulate(
         deltaTime: 1.0 / 60.0, playerPrevious: previous, player: &player, playerGraph: &carrierGraph,
         playerContacts: hull, playerClass: .multirotor, weather: .normal, wind: .zero,
-        ground: { _, _ in 0 }, obstacles: { _, _, _ in [] }
+        ground: { _, _ in 0 }, obstacles: { _, _, _ in cover }
     )
     return (
         carrierGraph,
         session.target.graph,
         session.playerPayload.state,
         session.effects.effects,
-        session.observation.isDisrupted(InterceptCallsign.attacker, now: session.worldTime)
+        session.observation.isDisrupted(InterceptCallsign.attacker, now: session.worldTime),
+        session.observer.graph,
+        session
     )
 }
 
@@ -779,10 +824,10 @@ if let chargeHit = activate(module: .charge) {
     // leaves behind. Detaching here would hand it an empty one.
     check(!chargeHit.carrier.failedConnectionRootIDs.isEmpty,
           "the carrier's structure is handed to the app's own detachment pass")
-    check(chargeHit.effects.contains { $0.vehicleID == InterceptCallsign.attacker && $0.kind == .secondary },
-          "the loudest moment of the run happens on the operator's own aircraft")
-    check(chargeHit.effects.contains { $0.vehicleID == InterceptCallsign.target && $0.kind == .secondary },
-          "and on the target it met")
+    check(chargeHit.effects.filter { $0.kind == .explosion }.count == 1,
+          "a charge produces one spatial detonation, not two coincident fireballs")
+    check(!chargeHit.effects.contains { $0.kind == .secondary },
+          "charge detonation is distinct from a mechanical strike")
 }
 if let slugHit = activate(module: .kineticSlug) {
     check(slugHit.payload == .consumed, "a slug is spent by the same contact")
@@ -805,6 +850,92 @@ if let ballastHit = activate(module: .ballast) {
 }
 if let chargeHit = activate(module: .charge) {
     check(chargeHit.feedCut, "a module that goes off against your own airframe takes the picture with it")
+}
+
+// Nearby actors receive the same world event; cover and distance matter. Ordinary loads
+// never acquire this behaviour just because their collision looked similar.
+if let nearby = activate(module: .charge, observerOffset: SIMD3<Float>(4, 0, 0)),
+   let distant = activate(module: .charge, observerOffset: SIMD3<Float>(14, 0, 0)) {
+    check(nearby.observer.integrity(id: "frame") < 1, "a nearby observer receives detonation damage")
+    check(distant.observer.integrity(id: "frame") == 1, "a distant observer is unaffected")
+    let cover = CollisionObstacle(id: UUID(), center: SIMD3<Float>(2, 60, 0), radius: 3,
+        source: "solid-wall", baseY: 55, topY: 65, planarHalfExtents: SIMD2<Float>(0.2, 3))
+    if let shielded = activate(module: .charge, observerOffset: SIMD3<Float>(4, 0, 0), cover: [cover]) {
+        check(shielded.observer.integrity(id: "frame") == 1, "solid scenery protects an actor behind it")
+    }
+    if let inert = activate(module: .ballast, observerOffset: SIMD3<Float>(4, 0, 0)) {
+        check(inert.observer.integrity(id: "frame") == 1 && !inert.effects.contains { $0.kind == .explosion },
+            "an inert load has no area effect or detonation")
+    }
+    var player = DroneState.initial
+    var graph = rotorHull(mass: 7)
+    let report = ImpactReport(componentID: "frame", obstacleID: UUID(), obstacleSource: "wall",
+        material: .metalVehicle, acousticSurface: .concrete, vehicleMaterial: .steel,
+        impactEnergyJ: 1000, normalClosingSpeed: 10, tangentialSpeed: 0, tier: .heavyImpact,
+        damage: [], connectionDamage: [], contactPoint: SIMD3<Float>(0, 60, 0),
+        contactNormal: SIMD3<Float>(0, 1, 0), appliedImpulse: 1, detachedPartMotions: [])
+    nearby.session.resolvePlayerEnvironment(report, player: &player, playerGraph: &graph, obstacles: { _, _, _ in [] })
+    nearby.session.resolvePlayerEnvironment(report, player: &player, playerGraph: &graph, obstacles: { _, _, _ in [] })
+    check(nearby.session.effects.effects.filter { $0.kind == .explosion }.count == 1,
+        "repeated contacts cannot spend a charge twice")
+
+    let effects = nearby.effects.filter { $0.kind == .explosion }
+    let event = InterceptMissionEvent(id: UUID(), runID: nearby.session.director.runID, sequence: 1,
+        timestamp: 1, authorityID: "local", kind: .effect(effects[0]))
+    let recorded = MissionReplayEvent(id: event.id, timestamp: 1, type: .scenarioEvent,
+        message: "detonation", position: CodableVector3D(effects[0].position), interception: event)
+    let decoded = try! JSONDecoder().decode(MissionReplayEvent.self, from: JSONEncoder().encode(recorded))
+    check(decoded == recorded, "a detonation round-trips through the recording's event format")
+    check(ChargeDetonation.replayEffects(events: [recorded, decoded], after: 0.9, through: 1.1).count == 1,
+        "playback sounds one detonation even when an event was delivered twice")
+    check(ChargeDetonation.replayEffects(events: [recorded], after: 1, through: 1.1).isEmpty &&
+          ChargeDetonation.replayEffects(events: [recorded], after: 1.1, through: 0.9).isEmpty,
+        "subsequent ticks and backward seeking do not replay a stale sound")
+    check(ChargeDetonation.replayEffects(events: [recorded], after: 0.9, through: 1.1).count == 1,
+        "playing across the detonation again after seeking reproduces its sound")
+}
+
+if let rotorProfile = LIPODroneModelRepository().allProfiles.first(where: { $0.airframeClass == .multirotor }) {
+    let mass = VehicleMassModel.baseline(for: rotorProfile, uavProfile: rotorProfile.resolvedUAVProfile)
+    let contacts = VehicleContactProfile(spheres: [VehicleContactSphere(componentID: "frame", offset: .zero, radius: 0.4)], boundingRadius: 0.4)
+    func environmentRun(_ module: AttachedModuleShape) -> InterceptMissionSession {
+        var configuration = InterceptMissionConfiguration(); configuration.moduleShape = module
+        func actor(_ role: InterceptVehicleRole, x: Float) -> InterceptVehicleRuntime {
+            InterceptVehicleRuntime(id: role.callsign, role: role, profile: rotorProfile, massModel: mass,
+                position: SIMD3<Float>(x, 60, 0), graph: rotorHull(mass: 7), contacts: contacts,
+                rotors: .empty, payload: nil, seed: 7)
+        }
+        return InterceptMissionSession(configuration: configuration, target: actor(.target, x: 30),
+            observer: actor(.observer, x: 50), origin: .zero)
+    }
+    func collide(_ run: InterceptMissionSession, tier: ImpactOutcomeTier) -> VehicleComponentGraph {
+        var player = DroneState.initial; player.position = SIMD3<Float>(0, 60, 0)
+        var graph = rotorHull(mass: 7)
+        let report = ImpactReport(componentID: "frame", obstacleID: UUID(), obstacleSource: "wall",
+            material: .metalVehicle, acousticSurface: .concrete, vehicleMaterial: .steel,
+            impactEnergyJ: 500, normalClosingSpeed: 8, tangentialSpeed: 0, tier: tier, damage: [],
+            connectionDamage: [], contactPoint: player.position, contactNormal: SIMD3<Float>(1, 0, 0),
+            appliedImpulse: 1, detachedPartMotions: [])
+        run.resolvePlayerEnvironment(report, player: &player, playerGraph: &graph, obstacles: { _, _, _ in [] })
+        return graph
+    }
+    let wallRun = environmentRun(.charge)
+    let broken = collide(wallRun, tier: .heavyImpact)
+    check(wallRun.playerPayload.state == .consumed && broken.integrity(id: "frame") == 0,
+        "a hard environment collision triggers the charge and wrecks its carrier")
+    check(wallRun.target.graph.integrity(id: "frame") == 1,
+        "detonating on a distant wall does not invent damage to the mission target")
+    check(wallRun.pendingImpacts.first?.payloadIDs == [wallRun.playerPayload.id],
+        "the environment impact records which charge actually triggered")
+    for tier in [ImpactOutcomeTier.lightTouch, .scrape] {
+        let gentle = environmentRun(.charge); _ = collide(gentle, tier: tier)
+        check(gentle.playerPayload.state.canTrigger && !gentle.effects.effects.contains { $0.kind == .explosion },
+            "ordinary landing/scrape contacts leave the charge available: \(tier)")
+    }
+    for module in [AttachedModuleShape.net, .kineticSlug, .ballast] {
+        let run = environmentRun(module); _ = collide(run, tier: .criticalImpact)
+        check(run.effects.effects.allSatisfy { $0.kind != .explosion }, "\(module) does not explode against scenery")
+    }
 }
 
 // MARK: - The delivery side

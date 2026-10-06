@@ -142,6 +142,7 @@
 		10000000000000000000022D /* UAVDimensions.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000130 /* UAVDimensions.swift */; };
 		10000000000000000000022E /* UAVProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000131 /* UAVProfile.swift */; };
 		10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000132 /* UAVReferenceCatalog.swift */; };
+		E61000000000000000000001 /* UAVExpansionCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000002 /* UAVExpansionCatalog.swift */; };
 		1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039F /* RuntimePerformancePolicy.swift */; };
 		100000000000000000000230 /* UAVVisualPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000133 /* UAVVisualPreset.swift */; };
 		100000000000000000000231 /* UAVVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000134 /* UAVVisualFactory.swift */; };
@@ -571,6 +572,15 @@
 		741C0C9BB6966239D9A58E2A /* VehiclePairContactService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B95881AB4D554AC8255B836 /* VehiclePairContactService.swift */; };
 		AD5200000000000000000000 /* InterceptTargetGuidance.swift in Sources */ = {isa = PBXBuildFile; fileRef = AD5200000000000000000001 /* InterceptTargetGuidance.swift */; };
 		D7BB5B9FFE84DE90212BE7F9 /* InterceptMissionScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = C7C33AB02D697CECF2A89B4F /* InterceptMissionScene.swift */; };
+		CBB6C1020044068C04728290 /* GroundVehicle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F5647743B6CA6F1C48A5E0E /* GroundVehicle.swift */; };
+		D0F33D2CC713CD6B133DE6C1 /* GroundVehicleRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28F75777C02D486BA04381F1 /* GroundVehicleRuntime.swift */; };
+		CE2CC3DD3592D2FB84452F55 /* GroundVehicleNavigation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0A1DB1EEC2E96755BAC6FB /* GroundVehicleNavigation.swift */; };
+		C36E60F4F95624055873169A /* GroundVehicleMissionRuntime.swift in Sources */ = {isa = PBXBuildFile; fileRef = D900791D6D08BFFB902791EF /* GroundVehicleMissionRuntime.swift */; };
+		E22D8548AD100F628EE4A982 /* GroundVehicleVisual.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6EC5970147E1C4116D284F4 /* GroundVehicleVisual.swift */; };
+		A6EC5970147E1C4116D28502 /* WorldDamageEffectVisual.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6EC5970147E1C4116D28501 /* WorldDamageEffectVisual.swift */; };
+		07480A23BF1668459010F9A0 /* GroundVehiclePreviewView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C743C7005012B9478A8D58D1 /* GroundVehiclePreviewView.swift */; };
+		E02CAEACE1E7B2D8F4C912AA /* ChargeDetonation.swift in Sources */ = {isa = PBXBuildFile; fileRef = E01CAEACE1E7B2D8F4C912AA /* ChargeDetonation.swift */; };
+		E04CAEACE1E7B2D8F4C912AA /* MissionReplayAudio.swift in Sources */ = {isa = PBXBuildFile; fileRef = E03CAEACE1E7B2D8F4C912AA /* MissionReplayAudio.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -723,6 +733,7 @@
 		100000000000000000000130 /* UAVDimensions.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVDimensions.swift; sourceTree = "<group>"; };
 		100000000000000000000131 /* UAVProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVProfile.swift; sourceTree = "<group>"; };
 		100000000000000000000132 /* UAVReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVReferenceCatalog.swift; sourceTree = "<group>"; };
+		E61000000000000000000002 /* UAVExpansionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVExpansionCatalog.swift; sourceTree = "<group>"; };
 		10000000000000000000039F /* RuntimePerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimePerformancePolicy.swift; sourceTree = "<group>"; };
 		100000000000000000000133 /* UAVVisualPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualPreset.swift; sourceTree = "<group>"; };
 		100000000000000000000134 /* UAVVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualFactory.swift; sourceTree = "<group>"; };
@@ -1151,6 +1162,15 @@
 		5B95881AB4D554AC8255B836 /* VehiclePairContactService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VehiclePairContactService.swift; sourceTree = "<group>"; };
 		AD5200000000000000000001 /* InterceptTargetGuidance.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptTargetGuidance.swift; sourceTree = "<group>"; };
 		C7C33AB02D697CECF2A89B4F /* InterceptMissionScene.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InterceptMissionScene.swift; sourceTree = "<group>"; };
+		1F5647743B6CA6F1C48A5E0E /* GroundVehicle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundVehicle.swift; sourceTree = "<group>"; };
+		28F75777C02D486BA04381F1 /* GroundVehicleRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundVehicleRuntime.swift; sourceTree = "<group>"; };
+		AB0A1DB1EEC2E96755BAC6FB /* GroundVehicleNavigation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundVehicleNavigation.swift; sourceTree = "<group>"; };
+		D900791D6D08BFFB902791EF /* GroundVehicleMissionRuntime.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundVehicleMissionRuntime.swift; sourceTree = "<group>"; };
+		A6EC5970147E1C4116D284F4 /* GroundVehicleVisual.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundVehicleVisual.swift; sourceTree = "<group>"; };
+		A6EC5970147E1C4116D28501 /* WorldDamageEffectVisual.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorldDamageEffectVisual.swift; sourceTree = "<group>"; };
+		C743C7005012B9478A8D58D1 /* GroundVehiclePreviewView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroundVehiclePreviewView.swift; sourceTree = "<group>"; };
+		E01CAEACE1E7B2D8F4C912AA /* ChargeDetonation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChargeDetonation.swift; sourceTree = "<group>"; };
+		E03CAEACE1E7B2D8F4C912AA /* MissionReplayAudio.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MissionReplayAudio.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -1202,6 +1222,7 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				1F5647743B6CA6F1C48A5E0E /* GroundVehicle.swift */,
 				9B1CFDBC9054C9459201686A /* InterceptMission.swift */,
 				A9A000000000000000000001 /* FPV */,
 				A9F000000000000000000001 /* RF */,
@@ -1314,6 +1335,7 @@
 				10000000000000000000012F /* UAVPayloadCapabilityMode.swift */,
 				100000000000000000000131 /* UAVProfile.swift */,
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
+				E61000000000000000000002 /* UAVExpansionCatalog.swift */,
 				10000000000000000000FD30 /* PropellerModel.swift */,
 				BA1100000000000000000002 /* BallisticDescriptor.swift */,
 				10000000000000000000FC10 /* AtmosphereModel.swift */,
@@ -1397,8 +1419,12 @@
 		100000000000000000000012 /* Simulation */ = {
 			isa = PBXGroup;
 			children = (
+				D900791D6D08BFFB902791EF /* GroundVehicleMissionRuntime.swift */,
+				AB0A1DB1EEC2E96755BAC6FB /* GroundVehicleNavigation.swift */,
+				28F75777C02D486BA04381F1 /* GroundVehicleRuntime.swift */,
 				5B95881AB4D554AC8255B836 /* VehiclePairContactService.swift */,
 				AD5200000000000000000001 /* InterceptTargetGuidance.swift */,
+				E01CAEACE1E7B2D8F4C912AA /* ChargeDetonation.swift */,
 				1D4A7851E1B94ED24399095D /* InterceptMissionSession.swift */,
 				A00B15CCAF2CE71525231B43 /* InterceptVehicleRuntime.swift */,
 				7A1DBE9287B7D3D83AE541CA /* InterceptObservationRuntime.swift */,
@@ -1475,6 +1501,8 @@
 		100000000000000000000013 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
+				A6EC5970147E1C4116D284F4 /* GroundVehicleVisual.swift */,
+				A6EC5970147E1C4116D28501 /* WorldDamageEffectVisual.swift */,
 				C7C33AB02D697CECF2A89B4F /* InterceptMissionScene.swift */,
 				3536A3A22D175347C0EBA163 /* World */,
 				F1000000000000000000000C /* WorkbenchModelBuilder.swift */,
@@ -1571,6 +1599,7 @@
 		100000000000000000000015 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				C743C7005012B9478A8D58D1 /* GroundVehiclePreviewView.swift */,
 				AC3BEC8221A9ED64268C0D14 /* LidarModuleView.swift */,
 				7D8D1E626A72AF9F180DAD8B /* World */,
 				F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */,
@@ -1694,6 +1723,7 @@
 				1B40C5E52ED7C5C71E5C4E65 /* LidarRawStreamWriter.swift */,
 				9235F9D6D84F0D14A4063490 /* World */,
 				10000000000000000000011B /* TelemetryExportService.swift */,
+				E03CAEACE1E7B2D8F4C912AA /* MissionReplayAudio.swift */,
 				10000000000000000000FE70 /* SimulationAudioService.swift */,
 				1000000000000000000002D1 /* MissionReplayStorageService.swift */,
 				1000000000000000000002D2 /* MissionReplaySettingsStore.swift */,
@@ -2103,9 +2133,17 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				07480A23BF1668459010F9A0 /* GroundVehiclePreviewView.swift in Sources */,
+				E22D8548AD100F628EE4A982 /* GroundVehicleVisual.swift in Sources */,
+				A6EC5970147E1C4116D28502 /* WorldDamageEffectVisual.swift in Sources */,
+				C36E60F4F95624055873169A /* GroundVehicleMissionRuntime.swift in Sources */,
+				CE2CC3DD3592D2FB84452F55 /* GroundVehicleNavigation.swift in Sources */,
+				D0F33D2CC713CD6B133DE6C1 /* GroundVehicleRuntime.swift in Sources */,
+				CBB6C1020044068C04728290 /* GroundVehicle.swift in Sources */,
 				D7BB5B9FFE84DE90212BE7F9 /* InterceptMissionScene.swift in Sources */,
 				741C0C9BB6966239D9A58E2A /* VehiclePairContactService.swift in Sources */,
 				AD5200000000000000000000 /* InterceptTargetGuidance.swift in Sources */,
+				E02CAEACE1E7B2D8F4C912AA /* ChargeDetonation.swift in Sources */,
 				CAF641E7CBA26659570ACA2D /* InterceptMissionSession.swift in Sources */,
 				E10A9E38E1388EF799DCA0F3 /* InterceptVehicleRuntime.swift in Sources */,
 				3999C19918C5F639CAF0963A /* InterceptObservationRuntime.swift in Sources */,
@@ -2244,6 +2282,7 @@
 				10000000000000000000FE81 /* CarrierAircraft.swift in Sources */,
 				10000000000000000000FE91 /* CarrierAircraftLoader.swift in Sources */,
 				10000000000000000000FE61 /* SonicBoomModel.swift in Sources */,
+				E04CAEACE1E7B2D8F4C912AA /* MissionReplayAudio.swift in Sources */,
 				10000000000000000000FE71 /* SimulationAudioService.swift in Sources */,
 				10000000000000000000FE41 /* FlightEnvelope.swift in Sources */,
 				10000000000000000000FF23 /* AeroTableCodec.swift in Sources */,
@@ -2396,6 +2435,7 @@
 				10000000000000000000022D /* UAVDimensions.swift in Sources */,
 				10000000000000000000022E /* UAVProfile.swift in Sources */,
 				10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */,
+				E61000000000000000000001 /* UAVExpansionCatalog.swift in Sources */,
 				1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */,
 				100000000000000000000230 /* UAVVisualPreset.swift in Sources */,
 				100000000000000000000231 /* UAVVisualFactory.swift in Sources */,

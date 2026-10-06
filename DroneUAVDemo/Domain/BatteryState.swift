@@ -15,6 +15,8 @@ struct BatteryState {
     /// Decaying extra sag (volts) from a recent current ramp — the punch-out dip, separate from
     /// steady-state resistive sag. See `BatteryThermalSimulationService`.
     var transientSagBoost: Float = 0.0
+    /// Survives the flame/smoke timeline; a burnt pack needs repair or replacement, not charging.
+    var hasFireDamage: Bool = false
 
     static let full = BatteryState(
         chargePercent: 100.0,
@@ -25,6 +27,10 @@ struct BatteryState {
 
     var isDepleted: Bool {
         chargePercent <= 0.1
+    }
+
+    var shouldOfferRecharge: Bool {
+        isDepleted && !hasFireDamage
     }
 
     /// Thrust derating from voltage sag under load — a real motor's achievable RPM scales with

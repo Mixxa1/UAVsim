@@ -59,6 +59,7 @@ struct ReplayCenterView: View {
     @StateObject private var sceneHolder = ReplaySceneHolder()
     @StateObject private var videoExportService = ReplayVideoExportService()
     @StateObject private var wasdMonitor = WASDMonitor()
+    @State private var replayAudio = SimulationAudioService()
     @Environment(\.dismiss) private var dismiss
     @State private var deleteCandidate: MissionReplayRecordSummary?
     @State private var cameraMode: ReplayCameraMode = .freeObserver
@@ -90,12 +91,14 @@ struct ReplayCenterView: View {
         .frame(minWidth: 1020, minHeight: 660)
         .background(GroundControlPalette.shell)
         .onAppear {
+            replayAudio.prepare()
             viewModel.refresh()
             loadSelectedSession(viewModel.selectedSummaryID)
             wasdMonitor.start()
         }
         .onDisappear {
             wasdMonitor.stop()
+            replayAudio.stop()
         }
         .onChange(of: viewModel.selectedSummaryID) { _, newID in
             loadSelectedSession(newID)
@@ -139,9 +142,14 @@ struct ReplayCenterView: View {
                 sceneHolder.controller.updateImportedWorldStreaming()
             }
             let wasPlaying = replayPlayer.isPlaying
+            let previousTime = replayPlayer.currentTime
             replayPlayer.update(deltaTime: 1.0 / 60.0)
             if wasPlaying {
                 sceneHolder.controller.update(frame: replayPlayer.currentFrame)
+                let camera = sceneHolder.controller.cameraNode
+                replayAudio.playReplayDetonations(events: fullscreenSession?.events ?? [],
+                    after: previousTime, through: replayPlayer.currentTime,
+                    listener: camera.simdWorldPosition, rotation: camera.simdWorldOrientation)
             }
             if cameraMode == .onboardMount {
                 onboardMountIsEditingDisplay = sceneHolder.controller.onboardMountIsEditing
@@ -181,6 +189,7 @@ struct ReplayCenterView: View {
 
     private func loadSelectedSession(_ newID: UUID?) {
         guard fullscreenSession?.id != newID else { return }
+        replayAudio.stop()
         replayPlayer.unload()
         cameraMode = .freeObserver
         cameraSubjectID = "player"
@@ -538,6 +547,8 @@ struct ReplayCenterView: View {
 
                 Button {
                     guard let session = fullscreenSession else { return }
+                    replayPlayer.pause()
+                    replayAudio.stop()
                     FullscreenReplayWindowHost.open(
                         session: session,
                         report: viewModel.selectedReport,

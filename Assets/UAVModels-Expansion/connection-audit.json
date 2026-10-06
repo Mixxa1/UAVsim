@@ -1,0 +1,1203 @@
+{
+  "method": "Triangle contacts, proximity and solid containment; static authoring pose.",
+  "models": [
+    {
+      "id": "wingtra-ray",
+      "geometry_sha256": "07a11bfc0e96ed92b34a0fb485c9163b0f1bd38eb7777eb88b9cf71e864ef6b9",
+      "mesh_count": 156,
+      "contact_tolerance_m": 6.25e-05,
+      "component_count": 1,
+      "islands": [],
+      "joints": [],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorCoolingRib_01",
+            "MotorCoolingRib_02",
+            "MotorCoolingRib_03",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Propeller_02",
+          "stationary_contacts": [
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorCoolingRib_04",
+            "MotorCoolingRib_05",
+            "MotorCoolingRib_06",
+            "MotorShaft_02"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 268,
+      "seconds": 0.65
+    },
+    {
+      "id": "ageagle-ebee-x",
+      "geometry_sha256": "b8f94caf3a7ba80612a34a085055a9d13df6969d8babbd0dec0dbc25dc6ec4b5",
+      "mesh_count": 173,
+      "contact_tolerance_m": 5.8e-05,
+      "component_count": 1,
+      "islands": [],
+      "joints": [],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_09",
+          "stationary_contacts": [
+            "PusherMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 388,
+      "seconds": 0.76
+    },
+    {
+      "id": "delair-dt26-open-payload",
+      "geometry_sha256": "97c4f41a0f857ece65a7c014dc20599e61b44f43d9b329d0efadafc21a213e40",
+      "mesh_count": 262,
+      "contact_tolerance_m": 0.000165,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.07840000000000001,
+            0.392
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "PusherEnginePedestal_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 450,
+      "seconds": 0.93
+    },
+    {
+      "id": "jouav-cw-20e",
+      "geometry_sha256": "4727cf99c57c67c6531b9dd497ddd57e29acaba547a060e194e678da1e5632d8",
+      "mesh_count": 335,
+      "contact_tolerance_m": 0.000175,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.13869,
+            0.5278499999999999
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Rotor_01",
+          "stationary_contacts": [
+            "MotorFairing_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Rotor_02",
+          "stationary_contacts": [
+            "MotorFairing_02",
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorShaft_02"
+          ]
+        },
+        {
+          "rotor": "Rotor_03",
+          "stationary_contacts": [
+            "MotorFairing_03",
+            "MotorStatorCase_03",
+            "MotorBell_03",
+            "MotorShaft_03"
+          ]
+        },
+        {
+          "rotor": "Rotor_04",
+          "stationary_contacts": [
+            "MotorFairing_04",
+            "MotorStatorCase_04",
+            "MotorBell_04",
+            "MotorShaft_04"
+          ]
+        },
+        {
+          "rotor": "Propeller_08",
+          "stationary_contacts": [
+            "MotorStatorCase_05",
+            "MotorBell_05",
+            "MotorShaft_05"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 479,
+      "seconds": 1.76
+    },
+    {
+      "id": "delair-ux11",
+      "geometry_sha256": "c859043261a305d92bd4723e009aced678e30dd525fd04a629719502f6d5ed31",
+      "mesh_count": 161,
+      "contact_tolerance_m": 6e-05,
+      "component_count": 1,
+      "islands": [],
+      "joints": [],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_09",
+          "stationary_contacts": [
+            "PusherMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 330,
+      "seconds": 0.63
+    },
+    {
+      "id": "c-astral-bramor-c4eye",
+      "geometry_sha256": "d4010c11f7f49bdfdf2085fd060301e50be9718da6b592574d4d6e9fc3573a77",
+      "mesh_count": 173,
+      "contact_tolerance_m": 0.00011499999999999999,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0.0,
+            -0.04512,
+            0.20159999999999997
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_09",
+          "stationary_contacts": [
+            "PusherMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 328,
+      "seconds": 0.82
+    },
+    {
+      "id": "aerovironment-puma-le",
+      "geometry_sha256": "cb7cf4933d7dade0d57cb950782f99fad48e80743fab82cca3276cfe5c381628",
+      "mesh_count": 255,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.1078,
+            0.539
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "Fuselage_01",
+            "NoseMotorMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 438,
+      "seconds": 0.88
+    },
+    {
+      "id": "tekever-ar3",
+      "geometry_sha256": "2e510d71ffc1a1a8b3dc6490d63e08cf7c19086c2b39acb4d7ac27896db40f76",
+      "mesh_count": 255,
+      "contact_tolerance_m": 0.000175,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.0833,
+            0.4165
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "PusherEnginePedestal_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 449,
+      "seconds": 0.89
+    },
+    {
+      "id": "deltaquad-evo",
+      "geometry_sha256": "a47de044271ae07e7e2392faaa87799761523a9dc73440e4c9ad6d8d49750df0",
+      "mesh_count": 247,
+      "contact_tolerance_m": 0.00013450000000000002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.035250000000000004,
+            0.1575
+          ],
+          "attached_to": [
+            "MainWingLeft_01",
+            "MainWingRight_01",
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Rotor_01",
+          "stationary_contacts": [
+            "LiftMotorPylon_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorCoolingRib_01",
+            "MotorCoolingRib_02",
+            "MotorCoolingRib_03",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Rotor_02",
+          "stationary_contacts": [
+            "LiftMotorPylon_02",
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorCoolingRib_04",
+            "MotorCoolingRib_05",
+            "MotorCoolingRib_06",
+            "MotorShaft_02"
+          ]
+        },
+        {
+          "rotor": "Rotor_03",
+          "stationary_contacts": [
+            "LiftMotorPylon_03",
+            "MotorStatorCase_03",
+            "MotorBell_03",
+            "MotorCoolingRib_07",
+            "MotorCoolingRib_08",
+            "MotorCoolingRib_09",
+            "MotorShaft_03"
+          ]
+        },
+        {
+          "rotor": "Rotor_04",
+          "stationary_contacts": [
+            "LiftMotorPylon_04",
+            "MotorStatorCase_04",
+            "MotorBell_04",
+            "MotorCoolingRib_10",
+            "MotorCoolingRib_11",
+            "MotorCoolingRib_12",
+            "MotorShaft_04"
+          ]
+        },
+        {
+          "rotor": "Propeller_09",
+          "stationary_contacts": [
+            "MainWingLeft_01",
+            "MainWingRight_01",
+            "PusherMount_01",
+            "MotorStatorCase_05",
+            "MotorBell_05",
+            "MotorCoolingRib_13",
+            "MotorCoolingRib_14",
+            "MotorCoolingRib_15",
+            "MotorShaft_05"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 418,
+      "seconds": 0.97
+    },
+    {
+      "id": "tekever-ar5",
+      "geometry_sha256": "0ab07bda50af5cec04c4716dfdde0dc34804e216ff1deea74125480ad0777f78",
+      "mesh_count": 283,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.268,
+            1.02
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Propeller_02",
+          "stationary_contacts": [
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorShaft_02"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 497,
+      "seconds": 1.53
+    },
+    {
+      "id": "aerovironment-raven-b",
+      "geometry_sha256": "137cddf968e8ea28d37593099557c7f667b8214b1edfc683aa35778a43ee1508",
+      "mesh_count": 227,
+      "contact_tolerance_m": 7e-05,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.036000000000000004,
+            0.333
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 393,
+      "seconds": 0.8
+    },
+    {
+      "id": "aerovironment-puma-3-ae",
+      "geometry_sha256": "9e836a628b73741e2cb66285f0eb64679ae17e73b3d5b10e8ccdba237a7bb454",
+      "mesh_count": 255,
+      "contact_tolerance_m": 0.00014,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.0686,
+            0.34299999999999997
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "Fuselage_01",
+            "NoseMotorMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 438,
+      "seconds": 0.94
+    },
+    {
+      "id": "aerovironment-jump-20",
+      "geometry_sha256": "5a9a1a995f265992e9689bd65741a5208105d1d7872169c14f8045fd326d70cd",
+      "mesh_count": 335,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.1372,
+            0.6859999999999999
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "NoseMotorMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Rotor_02",
+          "stationary_contacts": [
+            "LiftMotorPylon_01",
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorShaft_02"
+          ]
+        },
+        {
+          "rotor": "Rotor_03",
+          "stationary_contacts": [
+            "LiftMotorPylon_02",
+            "MotorStatorCase_03",
+            "MotorBell_03",
+            "MotorShaft_03"
+          ]
+        },
+        {
+          "rotor": "Rotor_04",
+          "stationary_contacts": [
+            "LiftMotorPylon_03",
+            "MotorStatorCase_04",
+            "MotorBell_04",
+            "MotorShaft_04"
+          ]
+        },
+        {
+          "rotor": "Rotor_05",
+          "stationary_contacts": [
+            "LiftMotorPylon_04",
+            "MotorStatorCase_05",
+            "MotorBell_05",
+            "MotorShaft_05"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 516,
+      "seconds": 1.8
+    },
+    {
+      "id": "insitu-scaneagle",
+      "geometry_sha256": "8be1ca1aa1656765a8b0974a6bf1e82223014d10c6c019cee8999eaec3344f43",
+      "mesh_count": 175,
+      "contact_tolerance_m": 0.000155,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0.0,
+            -0.04104,
+            0.60705
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "PusherMotorMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 266,
+      "seconds": 0.51
+    },
+    {
+      "id": "aeronautics-orbiter-3",
+      "geometry_sha256": "1e453b5679fdbfccba0c688413c5caa0d90ca560452a31d3fe5e03187366bf06",
+      "mesh_count": 173,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0.0,
+            -0.0564,
+            0.252
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_09",
+          "stationary_contacts": [
+            "PusherMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 316,
+      "seconds": 1.04
+    },
+    {
+      "id": "aeronautics-orbiter-4",
+      "geometry_sha256": "693995d955529729b7f738c70849a9210d7f5a2fc7ee6d69a03a754a76f26860",
+      "mesh_count": 182,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0.0,
+            -0.07050000000000001,
+            0.315
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_09",
+          "stationary_contacts": [
+            "PusherMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 342,
+      "seconds": 1.11
+    },
+    {
+      "id": "aeronautics-aerostar",
+      "geometry_sha256": "462986503dbccefef40d907ced343ee77ec7f2de57a14596e147eec1ec24dbb2",
+      "mesh_count": 342,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.3015,
+            1.1475
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_08",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 567,
+      "seconds": 1.52
+    },
+    {
+      "id": "elbit-hermes-450",
+      "geometry_sha256": "5461603f26424a44f843c2af40de8fb740f2daf65ae2e59f9c3e525ac53d2bf7",
+      "mesh_count": 338,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.39649999999999996,
+            1.3725
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "RearEngineMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 573,
+      "seconds": 1.45
+    },
+    {
+      "id": "iai-heron-mk-ii",
+      "geometry_sha256": "3a3990fa817dc78e487918ed9011a41faa79e8ccd396676bd76e6bdf25da7bf8",
+      "mesh_count": 347,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.5695,
+            2.1675
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_08",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 627,
+      "seconds": 1.6
+    },
+    {
+      "id": "iai-heron-tp",
+      "geometry_sha256": "ca880d98670dfa3518f82d54b5414c8fb6cafc528e06a4f1b5ea1cbdd389b935",
+      "mesh_count": 358,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.9380000000000001,
+            3.5700000000000003
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_08",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 644,
+      "seconds": 1.32
+    },
+    {
+      "id": "baykar-bayraktar-tb2",
+      "geometry_sha256": "b0151a80aedbbeffefc36f0756d1a01c0ac860a6b5c1fa2aa6be1d4e8394efc6",
+      "mesh_count": 338,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.4355,
+            1.6575
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_08",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 558,
+      "seconds": 1.22
+    },
+    {
+      "id": "baykar-bayraktar-tb3",
+      "geometry_sha256": "1ed9edb9f17f80a763ca1d9afe73e9abef980a19f60052533f58c5638465b6f3",
+      "mesh_count": 348,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.55945,
+            2.12925
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_08",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 573,
+      "seconds": 1.05
+    },
+    {
+      "id": "baykar-akinci",
+      "geometry_sha256": "d7499982c145be559d5a9909a2dbd32aeb1dc173342d84c14cd6d26b7ab38c68",
+      "mesh_count": 414,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.7995000000000001,
+            3.075
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Propeller_02",
+          "stationary_contacts": [
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorShaft_02"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 679,
+      "seconds": 1.55
+    },
+    {
+      "id": "baykar-kizilelma",
+      "geometry_sha256": "7ee77406934fc365968e0d3019f0c1af043dc630c54a109bfddff705d0ec6385",
+      "mesh_count": 337,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [],
+      "rotor_bearings": [],
+      "triangle_pairs_examined": 587,
+      "seconds": 1.23
+    },
+    {
+      "id": "leonardo-falco-evo",
+      "geometry_sha256": "3f39b19f253e0e444f3e242ce1ccbb0792963b0935d2f2592abfe7ee65f6f74b",
+      "mesh_count": 342,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.34840000000000004,
+            1.326
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_08",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 551,
+      "seconds": 1.03
+    },
+    {
+      "id": "leonardo-falco-xplorer",
+      "geometry_sha256": "6f97891d3997694ade16bac5dca2bf0431a61377b3f848d7fa3722bd3eee9314",
+      "mesh_count": 339,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.585,
+            2.025
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "RearEngineMount_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 576,
+      "seconds": 1.13
+    },
+    {
+      "id": "piaggio-p1hh-hammerhead",
+      "geometry_sha256": "83c0bffd20a719422f6422822eb71d84d709a2f5b20d61d431e7190f0577d0b9",
+      "mesh_count": 497,
+      "contact_tolerance_m": 0.0002,
+      "component_count": 1,
+      "islands": [],
+      "joints": [
+        {
+          "name": "CameraMount",
+          "anchor": [
+            0,
+            -0.8784,
+            3.744
+          ],
+          "attached_to": [
+            "Fuselage_01"
+          ]
+        }
+      ],
+      "rotor_bearings": [
+        {
+          "rotor": "Propeller_01",
+          "stationary_contacts": [
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Propeller_02",
+          "stationary_contacts": [
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorShaft_02"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 832,
+      "seconds": 1.27
+    },
+    {
+      "id": "dji-mini-5-pro",
+      "geometry_sha256": "fde0c9d4855b812a482f664af8d3cc26e3fc04ec8ebcab150894fbb0f2b374d9",
+      "mesh_count": 186,
+      "contact_tolerance_m": 1.852346950456209e-05,
+      "component_count": 1,
+      "islands": [],
+      "joints": [],
+      "rotor_bearings": [
+        {
+          "rotor": "Rotor_01",
+          "stationary_contacts": [
+            "FoldingArm_01",
+            "MotorFairing_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorCoolingRib_01",
+            "MotorCoolingRib_02",
+            "MotorCoolingRib_03",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Rotor_02",
+          "stationary_contacts": [
+            "FoldingArm_02",
+            "MotorFairing_02",
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorCoolingRib_04",
+            "MotorCoolingRib_05",
+            "MotorCoolingRib_06",
+            "MotorShaft_02",
+            "RearArmIndicator_01"
+          ]
+        },
+        {
+          "rotor": "Rotor_03",
+          "stationary_contacts": [
+            "FoldingArm_03",
+            "MotorFairing_03",
+            "MotorStatorCase_03",
+            "MotorBell_03",
+            "MotorCoolingRib_07",
+            "MotorCoolingRib_08",
+            "MotorCoolingRib_09",
+            "MotorShaft_03"
+          ]
+        },
+        {
+          "rotor": "Rotor_04",
+          "stationary_contacts": [
+            "FoldingArm_04",
+            "MotorFairing_04",
+            "MotorStatorCase_04",
+            "MotorBell_04",
+            "MotorCoolingRib_10",
+            "MotorCoolingRib_11",
+            "MotorCoolingRib_12",
+            "MotorShaft_04",
+            "RearArmIndicator_02"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 214,
+      "seconds": 0.39
+    },
+    {
+      "id": "dji-avata-2",
+      "geometry_sha256": "9692f4c05c67e58b5c2f00c676c0c59ac40ef430d3c65e1b10ba0bfcf8493522",
+      "mesh_count": 181,
+      "contact_tolerance_m": 1.0600000000000002e-05,
+      "component_count": 1,
+      "islands": [],
+      "joints": [],
+      "rotor_bearings": [
+        {
+          "rotor": "Rotor_01",
+          "stationary_contacts": [
+            "MotorPedestal_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorShaft_01"
+          ]
+        },
+        {
+          "rotor": "Rotor_02",
+          "stationary_contacts": [
+            "MotorPedestal_02",
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorShaft_02"
+          ]
+        },
+        {
+          "rotor": "Rotor_03",
+          "stationary_contacts": [
+            "MotorPedestal_03",
+            "MotorStatorCase_03",
+            "MotorBell_03",
+            "MotorShaft_03"
+          ]
+        },
+        {
+          "rotor": "Rotor_04",
+          "stationary_contacts": [
+            "MotorPedestal_04",
+            "MotorStatorCase_04",
+            "MotorBell_04",
+            "MotorShaft_04"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 314,
+      "seconds": 0.88
+    },
+    {
+      "id": "autel-evo-max-4t-v2",
+      "geometry_sha256": "0917a38553b281cf73bb139af6ba3aa6616ff6bf136931150114580e4a35bf7f",
+      "mesh_count": 220,
+      "contact_tolerance_m": 3.2694573220468795e-05,
+      "component_count": 1,
+      "islands": [],
+      "joints": [],
+      "rotor_bearings": [
+        {
+          "rotor": "Rotor_01",
+          "stationary_contacts": [
+            "FoldableMotorArm_01",
+            "MotorStatorCase_01",
+            "MotorBell_01",
+            "MotorCoolingRib_01",
+            "MotorCoolingRib_02",
+            "MotorCoolingRib_03",
+            "MotorShaft_01",
+            "MotorWarningRing_01",
+            "LandingLeg_01"
+          ]
+        },
+        {
+          "rotor": "Rotor_02",
+          "stationary_contacts": [
+            "FoldableMotorArm_02",
+            "MotorStatorCase_02",
+            "MotorBell_02",
+            "MotorCoolingRib_04",
+            "MotorCoolingRib_05",
+            "MotorCoolingRib_06",
+            "MotorShaft_02",
+            "MotorWarningRing_02"
+          ]
+        },
+        {
+          "rotor": "Rotor_03",
+          "stationary_contacts": [
+            "FoldableMotorArm_03",
+            "MotorStatorCase_03",
+            "MotorBell_03",
+            "MotorCoolingRib_07",
+            "MotorCoolingRib_08",
+            "MotorCoolingRib_09",
+            "MotorShaft_03",
+            "MotorWarningRing_03",
+            "LandingLeg_02"
+          ]
+        },
+        {
+          "rotor": "Rotor_04",
+          "stationary_contacts": [
+            "FoldableMotorArm_04",
+            "MotorStatorCase_04",
+            "MotorBell_04",
+            "MotorCoolingRib_10",
+            "MotorCoolingRib_11",
+            "MotorCoolingRib_12",
+            "MotorShaft_04",
+            "MotorWarningRing_04"
+          ]
+        }
+      ],
+      "triangle_pairs_examined": 289,
+      "seconds": 0.51
+    }
+  ]
+}
