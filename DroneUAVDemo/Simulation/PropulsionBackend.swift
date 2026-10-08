@@ -139,6 +139,70 @@ struct FuelPropulsionBackend {
     /// Lowest Mach at which a ramjet can sustain combustion at all.
     static let ramjetMinimumOperableMach: Float = 1.6
 
+    // MARK: - The lever for a thrust
+
+    /// Thrust the installation settles at with the lever held, N: the engine and its disc run
+    /// to their own torque balance at this airspeed, exactly as the solver runs them.
+    func settledThrust(lever: Float, airspeedMps: Float, atmosphere: AtmosphereState) -> Float {
+        var engine = runningEngine()
+        return settle(&engine, lever: lever, airspeedMps: airspeedMps, atmosphere: atmosphere)
+    }
+
+    /// The lever at which the installation settles on `thrustNewtons`; `nil` when full power
+    /// does not reach it. Zero when the idling engine already gives more.
+    func lever(forThrust thrustNewtons: Float, airspeedMps: Float, atmosphere: AtmosphereState) -> Float? {
+        // One engine carried through the search: each step starts from the balance the last one
+        // found, a short walk away, instead of spooling up from scratch.
+        var engine = runningEngine()
+        guard settle(&engine, lever: 1.0, airspeedMps: airspeedMps, atmosphere: atmosphere) >= thrustNewtons else { return nil }
+        var low: Float = 0.0, high: Float = 1.0
+        for _ in 0..<10 {
+            let middle = (low + high) / 2
+            if settle(&engine, lever: middle, airspeedMps: airspeedMps, atmosphere: atmosphere) < thrustNewtons {
+                low = middle
+            } else {
+                high = middle
+            }
+        }
+        return high < 0.002 ? 0.0 : high
+    }
+
+    private func runningEngine() -> EngineRuntimeState {
+        var engine = EngineRuntimeState.cold(ambientTemperatureC: 15.0)
+        engine.runState = .ready
+        engine.shaftRPM = (powerplant.ratedShaftRPM ?? 6_000.0) * 0.7
+        engine.temperatureC = EngineOperatingEnvelope.envelope(for: powerplant.engineType).operatingTemperatureC
+        return engine
+    }
+
+    private func settle(_ engine: inout EngineRuntimeState, lever: Float, airspeedMps: Float,
+                        atmosphere: AtmosphereState) -> Float {
+        let service = EngineRuntimeService()
+        let ratedRPM = powerplant.ratedShaftRPM ?? 6_000.0
+        // ⚠️ At the solver's own step, not a coarser one. The torque balance between a slow,
+        // large-diameter disc and its engine is stiff: stepped at a twentieth of a second a
+        // Heron Mk II's shaft lands on 317 rpm at 40 % lever and on 1,449 at 20 %, neither of
+        // which it does in flight. Thirty simulated seconds at most; an engine that has stopped
+        // moving is done sooner.
+        let step: Float = 1.0 / 120.0
+        var settledSteps = 0
+        for _ in 0..<3_600 {
+            let previousRPM = engine.shaftRPM
+            engine = service.update(
+                current: engine,
+                input: EngineUpdateInput(
+                    powerplant: powerplant, throttle: lever, startRequested: true,
+                    atmosphere: atmosphere, airspeedMps: airspeedMps, isAirborne: true,
+                    hasFuel: true, healthFactor: 1.0,
+                    propellerAbsorbedPowerW: propellerLoadWatts(
+                        engine: engine, airspeedMps: airspeedMps, airDensity: atmosphere.airDensity)),
+                deltaTime: step)
+            settledSteps = abs(engine.shaftRPM - previousRPM) < ratedRPM * 0.00002 ? settledSteps + 1 : 0
+            if settledSteps >= 60 { break }
+        }
+        return output(engine: engine, airspeedMps: airspeedMps, atmosphere: atmosphere).thrustNewtons
+    }
+
     /// Power the disc is demanding at the shaft's current speed — fed back into the
     /// engine so the two find their equilibrium.
     func propellerLoadWatts(
@@ -275,13 +339,19 @@ struct FuelPropulsionBackend {
             )
         }
 
+        // ⚠️ The engine and its disc are modelled once and the airframe carries `engineCount` of
+        // them. Until this was multiplied in, every twin flew on one engine's thrust while its
+        // tanks were sized for two: the P.1HH made 7.5 kN at rotation speed against the 15 kN
+        // its two PT6s give, needed 2.7 km of runway, and never climbed away.
+        let engines = Float(powerplant.engineCount)
+
         guard engine.runState.isFiring else {
             // Dead engine: the disc keeps turning in the airflow and costs drag.
             return PropulsionOutput(
                 thrustNewtons: -propeller.windmillingDragNewtons(
                     airspeedMps: airspeedMps,
                     airDensity: density
-                ),
+                ) * engines,
                 shaftRPM: engine.shaftRPM,
                 shaftPowerKW: 0.0,
                 propellerEfficiency: 0.0,
@@ -303,7 +373,7 @@ struct FuelPropulsionBackend {
             airDensity: density
         )
         return PropulsionOutput(
-            thrustNewtons: thrust,
+            thrustNewtons: thrust * engines,
             shaftRPM: engine.shaftRPM,
             shaftPowerKW: engine.shaftPowerKW,
             // A governed disc's efficiency is measured, not looked up: the Ct/Cp

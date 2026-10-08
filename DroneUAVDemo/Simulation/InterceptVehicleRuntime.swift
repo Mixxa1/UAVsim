@@ -26,6 +26,11 @@ final class InterceptVehicleRuntime {
     private(set) var rotorModel: VehicleRotorModel
     private(set) var video: RFVideoPresentationState = .unavailable
     private(set) var controlEvaluation: RFLinkEvaluation?
+    private(set) var videoEvaluation: RFLinkEvaluation?
+    var nominalVideoBitrateBPS: Double { baseRF.logicalLinks.video?.qualityProfile.nominalBitrateBps ?? 25_000_000 }
+    var videoLinkPreset: RFVideoLinkPreset {
+        baseRF.logicalLinks.video?.videoLinkPreset ?? .fallback(for: baseRF.logicalLinks.video?.videoMode ?? .digital)
+    }
 
     private let pristineContacts: VehicleContactProfile
     private let pristineRotors: VehicleRotorModel
@@ -512,23 +517,12 @@ final class InterceptVehicleRuntime {
         return impacts
     }
 
-    func applyGroundModule(_ effect: AttachedPayloadProfile, worldPoint: SIMD3<Float>) {
-        guard let groundVehicle else { return }
-        groundVehicle.state = state
-        groundVehicle.applyModule(effect, worldPoint: worldPoint)
-        refreshDamage()
-    }
-
     private(set) var lastDetonationPosition: SIMD3<Float>?
     private(set) var lastDetonationTime: TimeInterval = -.infinity
 
     func receiveDetonation(_ detonation: ChargeDetonation, directHit: Bool, now: TimeInterval) {
-        if let groundVehicle {
-            groundVehicle.state = state
-            groundVehicle.receiveDetonation(detonation, directHit: directHit)
-        } else {
-            detonation.apply(to: &graph, state: state, directHit: directHit, detach: true)
-        }
+        guard groundVehicle == nil else { return }
+        detonation.apply(to: &graph, state: state, directHit: directHit, detach: true)
         lastDetonationPosition = detonation.position
         lastDetonationTime = now
         refreshDamage()
@@ -638,6 +632,7 @@ final class InterceptVehicleRuntime {
             if case let .success(evaluation) = value { evaluations[kind] = evaluation }
         }
         controlEvaluation = evaluations[.control]
+        videoEvaluation = evaluations[.video]
 
         let qos = config.qos ?? .migrationDefault
         for (tx, links) in Dictionary(grouping: config.logicalLinks.all.filter(\.usesRFPropagation), by: \.transmitterDeviceID) {

@@ -22,6 +22,7 @@ struct FireResponseRuntime {
     /// Per-tree-index countdown to the next spread ignition; only present for currently-burning
     /// trees.
     private var spreadCountdowns: [Int: Double] = [:]
+    private var lastSuppressionAt: [Int: Double] = [:]
 
     init(configuration: MissionScenarioConfiguration, placement: FireZonePlacement) {
         self.configuration = configuration
@@ -136,6 +137,7 @@ struct FireResponseRuntime {
 
             let isBeingSuppressed = isSpraying && aimedFireIndex == index
             if isBeingSuppressed {
+                lastSuppressionAt[index] = elapsedSeconds
                 let newProgress = progress + deltaTime
                 if newProgress >= hoseTuning.suppressionDwellSeconds {
                     treeStatuses[index] = .charred
@@ -144,9 +146,10 @@ struct FireResponseRuntime {
                     treeStatuses[index] = .burning(ignitedAtSeconds: ignitedAt, suppressionProgress: newProgress)
                 }
             } else if progress > 0 {
-                // Not currently held in the hose's aim — decay back toward zero so partial
-                // progress can't be "banked" by strafing between multiple fires.
-                let decayed = max(0.0, progress - deltaTime)
+                // Brief nozzle jitter should not undo real foam already deposited on the fire.
+                // Progress never advances off target; after the grace interval it decays slowly.
+                guard elapsedSeconds - (lastSuppressionAt[index] ?? -.infinity) > 0.25 else { continue }
+                let decayed = max(0.0, progress - deltaTime * 0.25)
                 treeStatuses[index] = .burning(ignitedAtSeconds: ignitedAt, suppressionProgress: decayed)
             }
         }
@@ -188,5 +191,39 @@ struct FireResponseRuntime {
             bestIndex = index
         }
         return bestIndex
+    }
+}
+
+/// Semantic aim volumes follow visible flames rather than a tree's narrow collision mesh.
+/// Three overlapping spheres approximate the vertical fire envelope; the first solid object
+/// still blocks the nozzle unless it is the very tree whose flame is being extinguished.
+enum FireHoseAimTargeting {
+    struct Flame {
+        let index: Int
+        let centre: SIMD3<Float>
+        let height: Float
+        let radius: Float
+    }
+    static func hit(origin: SIMD3<Float>, direction: SIMD3<Float>, reach: Float,
+                    flames: [Flame], blockingDistance: Float?, blockingTreeIndex: Int?) -> (index: Int, distance: Float)? {
+        guard direction.x.isFinite, direction.y.isFinite, direction.z.isFinite,
+              simd_length_squared(direction) > 0.0001, reach.isFinite, reach > 0 else { return nil }
+        let forward = simd_normalize(direction)
+        var best: (index: Int, distance: Float)?
+        for flame in flames {
+            for level in [Float(-0.32), 0, 0.32] {
+                let centre = flame.centre + SIMD3<Float>(0, flame.height * level, 0)
+                let offset = centre - origin, projection = simd_dot(offset, forward)
+                let radius = max(0.7, flame.radius) + max(0, projection) * 0.045
+                let perpendicular = max(0, simd_length_squared(offset) - projection * projection)
+                guard perpendicular <= radius * radius else { continue }
+                let halfChord = sqrt(max(0, radius * radius - perpendicular))
+                let distance = max(0, projection - halfChord)
+                guard projection + halfChord >= 0, distance <= reach else { continue }
+                if blockingTreeIndex != flame.index, let blocker = blockingDistance, blocker + 0.2 < distance { continue }
+                if best == nil || distance < best!.distance { best = (flame.index, distance) }
+            }
+        }
+        return best
     }
 }

@@ -1,0 +1,19 @@
+[
+  {
+    "bounds_max_m" : [
+      0.031275998800992966,
+      0.0093075837939977646,
+      0.024265002459287643
+    ],
+    "bounds_min_m" : [
+      -0.031275998800992966,
+      -0.008999999612569809,
+      -0.024181250482797623
+    ],
+    "id" : "sensor-radar-altimeter",
+    "imported_triangles" : 3368,
+    "meshes" : 24,
+    "scene_kit_import" : "passed",
+    "textured_materials" : 11
+  }
+]

@@ -14,6 +14,7 @@ while IFS= read -r object; do
 done < "$OBJECT_DIR/DroneUAVDemo.LinkFileList"
 cp "$ROOT/DroneUAVDemo/Resources/Models/Vehicles/harop-cabover-6x6-transport.usdz" "$BUILD/Vehicles/"
 cp "$ROOT/DroneUAVDemo/Resources/Models/Vehicles/harpy-bonnet-6x6-transport.usdz" "$BUILD/Vehicles/"
+cp -R "$ROOT/DroneUAVDemo/Resources/VFX" "$BUILD/"
 cp "$ROOT/DroneUAVDemo/Resources/Models/Scenario/Fire_sheet_baseColor.png" "$BUILD/"
 cp "$ROOT/DroneUAVDemo/Resources/Models/Scenario/Fire_sheet_emissive.jpg" "$BUILD/"
 swiftc -parse-as-library -module-name DroneUAVDemo -target arm64-apple-macos14.6 \
@@ -23,5 +24,6 @@ swiftc -parse-as-library -Xfrontend -disable-access-control \
   -module-cache-path "$BUILD/module-cache" -target arm64-apple-macos14.6 \
   -I "$PRODUCTS" -Xlinker -dead_strip -lc++ \
   -o "$BUILD/probe" "$ROOT/Tools/GroundVehicleSceneProbe/main.swift" \
-  "$ROOT/Tools/GroundVehicleSceneProbe/DetonationPresentationProbe.swift" "${OBJECTS[@]}" "$BUILD/AppEntrySupport.o"
+  "$ROOT/Tools/GroundVehicleSceneProbe/DetonationPresentationProbe.swift" \
+  "$ROOT/Tools/GroundVehicleSceneProbe/BodyworkDamageProbe.swift" "${OBJECTS[@]}" "$BUILD/AppEntrySupport.o"
 "$BUILD/probe" "${2:-}"

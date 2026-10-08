@@ -15,4 +15,6 @@ struct DroneControlValues: Equatable {
     /// cruise, -1 toward hover, 0 holds the current tilt target. Ignored by
     /// non-hybridVTOL airframes.
     var vtolTransitionLever: Double = 0.0
+    var flapCommand: Double? = nil
+    var landingGearDownCommand: Bool? = nil
 }

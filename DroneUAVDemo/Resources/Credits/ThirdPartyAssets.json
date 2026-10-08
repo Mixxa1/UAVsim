@@ -209,15 +209,6 @@
       "changes": "Imported as USDZ; a diffuse/emissive flame-sheet texture was extracted from it and used to drive the cross-billboard flame flipbook visual for burning trees in the Fire Response mission of DroneUAVDemo."
     },
     {
-      "id": "arm_hand_sculpting_alfance",
-      "title": "Arm & Hand sculpting",
-      "author": "alfance",
-      "sourceURL": "0",
-      "licenseName": "Creative Commons Attribution",
-      "licenseURL": "http://creativecommons.org/licenses/by/4.0/",
-      "changes": "Imported as USDZ (HandLaunchArm.usdz), rescaled, recolored to an opaque matte skin tone and mounted on the articulated hand-launch arm rig in DroneUAVDemo."
-    },
-    {
       "id": "workbench_jj_chalupnik",
       "title": "Workbench",
       "author": "JJ Chalupnik",
@@ -666,6 +657,15 @@
       "licenseName": "No licence stated by the author",
       "licenseURL": "https://github.com/iNavFlight/inav-configurator/discussions/1573",
       "changes": "Bundled in their original MCM representation as runtime-selectable FPV OSD font presets. Published by the author in an INAV configurator discussion with no stated licence or redistribution terms."
+    },
+    {
+      "id": "fps_arms_para_makehuman",
+      "title": "fps arms (rigged only)",
+      "author": "para / MakeHuman team",
+      "sourceURL": "https://opengameart.org/content/fps-arms-rigged-only",
+      "licenseName": "Creative Commons Zero 1.0 Universal",
+      "licenseURL": "https://creativecommons.org/publicdomain/zero/1.0/",
+      "changes": "Preserved the source anatomical topology, UVs, texture and painted skin weights; refined the surface with subdivision level 2. Reoriented the skeleton to Y-up metres and anatomical finger flexion, created separate left/right animated USDZ arms, and added aircraft-specific grips with shoulder/elbow IK in DroneUAVDemo."
     }
   ]
 }

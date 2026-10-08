@@ -59,7 +59,8 @@ final class ThermalProxyRenderer {
     private let environmentRootNames = [
         "environmentContainer",
         "environment.snowDecorations",
-        "environment.abandonedCity.root"
+        "environment.abandonedCity.root",
+        "environment.charge-damage"
     ]
     private weak var importedRoot: SCNNode?
     private var importedGeometryIDs: Set<ObjectIdentifier> = []

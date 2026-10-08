@@ -344,6 +344,20 @@ struct FixedWingParameters: Hashable {
     let airLaunchReleaseAltitude: Float
     /// The carrier's true airspeed at release, m/s. The aircraft inherits it whole.
     let airLaunchReleaseSpeed: Float
+    /// Wing to tail, metres, where the airframe's own layout is known. Sets how hard the tail
+    /// damps pitch; `nil` leaves the family figure.
+    var tailArmMeters: Float? = nil
+    /// Radii of gyration about (roll, pitch, yaw), non-dimensional in the convention of the
+    /// class statistics they come from, where the airframe's own are declared. `nil` leaves the
+    /// inertia to the component graph and the box estimate that bounds it.
+    var inertiaRadii: SIMD3<Float>? = nil
+    /// Radii of gyration about (roll, pitch, yaw) in metres, where the airframe's mass layout is
+    /// known outright — a design whose parts have places. Takes precedence over the class radii.
+    var gyrationRadiiMeters: SIMD3<Float>? = nil
+    /// Reference wing area, m², where the airframe was designed and its wing is a fact. `nil`
+    /// leaves the solver to size a wing from the stall speed, which is the right way round only
+    /// for a catalogue entry that publishes a stall speed and no wing.
+    var wingAreaM2: Float? = nil
 
     init(
         family: FixedWingFamily,
@@ -739,6 +753,10 @@ struct DroneModelProfile: Identifiable, Hashable {
     /// Nil for the built-in and legacy abstract catalog profiles.
     let workbenchBuild: WorkbenchBuild?
     var engineeringAerodynamics: EngineeringAeroRuntime? = nil
+    /// Radii of gyration of a multirotor about (roll, pitch, yaw), m, where the airframe knows
+    /// them — a Workbench build does, from where its parts are fitted. The solver then flies
+    /// `m·k²` instead of its estimate from the footprint.
+    var multirotorGyrationRadiiMeters: SIMD3<Float>? = nil
 
     init(
         id: String,
@@ -942,7 +960,11 @@ struct LIPODroneModelRepository: DroneModelRepository {
                 z: $0.z * 0.88
             )
         } ?? uavProfile.dimensions.resolvedFoldedMillimeters(fallback: defaultFoldedFallback)
-        let runtimeMass = UAVExpansionCatalog.definition(for: uavProfile.id)?.flight.massKg
+        // A fuel profile's catalogue mass is its dry mass: the solver adds what is in the tanks.
+        // The expansion's figure is a maximum takeoff mass, so the fuel comes out of it here —
+        // left in, a P.1HH flew at 7.8 t against a 6.1 t maximum wherever the catalogue entry
+        // was not passed alongside the profile.
+        let runtimeMass = UAVExpansionCatalog.definition(for: uavProfile.id).map { $0.flight.massKg - $0.flight.fuelMassKg }
             ?? uavProfile.maxTakeoffMass ?? uavProfile.baseMass ?? tuning.fallbackTakeoffMass
 
         var profile = DroneModelProfile(
@@ -2940,24 +2962,34 @@ struct LIPODroneModelRepository: DroneModelRepository {
         let launch: LaunchMethod = copter || vtol ? .vertical : f.launchMode == "runway" ? .runway
             : f.launchMode == "catapult" ? .catapult : .handLaunch
         let mode: LaunchMode = vtol ? .vtol : launch == .runway ? .runway : launch == .catapult ? .catapult : .handLaunch
-        let wing: FixedWingParameters? = copter ? nil : FixedWingParameters(
+        let climbSpeed = max(f.minSpeedMps * 1.15, f.cruiseSpeedMps * 0.85)
+        // Takeoff and climb from the airframe's own mass, wing and powerplant. The VTOLs keep
+        // the class figures for now: their wing-borne thrust is shared with the lift system.
+        let performance = copter || vtol || definition.isJet ? nil
+            : AirframePerformanceEstimate.cached(for: definition, climbSpeedMps: climbSpeed, turnAuthority: 0.62)
+        var wing: FixedWingParameters? = copter ? nil : FixedWingParameters(
             family: definition.family, minSustainableSpeedMps: f.minSpeedMps,
-            cruiseSpeedMps: f.cruiseSpeedMps, climbSpeedMps: max(f.minSpeedMps * 1.15, f.cruiseSpeedMps * 0.85),
+            cruiseSpeedMps: f.cruiseSpeedMps, climbSpeedMps: climbSpeed,
             stallWarningSpeedMps: f.minSpeedMps * 0.95,
             waypointAcceptanceRadiusMeters: max(8, f.cruiseSpeedMps * 0.55),
             nominalTurnRateDegPerSec: min(16, max(4, 160 / f.cruiseSpeedMps)),
             bankResponseGain: 0.78, climbResponseGain: 0.65, descentResponseGain: 0.55,
             dragFactor: 1, throttleResponseGain: 0.65, turnAuthority: 0.62, maxBankAngleDeg: definition.isJet ? 55 : 38,
             supportedLaunchModes: vtol ? [.standard] : [mode], preferredLaunchMode: vtol ? .vtol : mode,
-            maxAirspeed: f.maxSpeedMps, nominalClimbRateMps: definition.isJet ? 15 : 4.5,
+            maxAirspeed: f.maxSpeedMps, nominalClimbRateMps: definition.isJet ? 15 : performance?.climbRateMps ?? 4.5,
+            takeoffRotationSpeed: launch == .runway ? performance?.rotationSpeedMps : nil,
             initialClimbPitchDeg: definition.isJet ? 8 : 10, handThrowSpeed: f.minSpeedMps * 1.12,
-            catapultExitSpeed: f.minSpeedMps * 1.20, runwayTakeoffDistance: definition.isJet ? 900 : max(45, span * 15),
+            catapultExitSpeed: f.minSpeedMps * 1.20,
+            runwayTakeoffDistance: definition.isJet ? 900 : performance?.groundRollM ?? max(45, span * 15),
             initialClimbTargetAltitude: definition.isJet ? 120 : 25
         )
+        wing?.tailArmMeters = performance?.tailArmM
+        wing?.inertiaRadii = AirframeInertiaRadii.declared[definition.id]
         return RuntimeTuning(
             fallbackTakeoffMass: f.massKg, fallbackDimensions: dimensions,
             maxHorizontalSpeedMps: f.maxSpeedMps,
-            maxAscentSpeedMps: copter ? (definition.id == "dji-mini-5-pro" ? 10 : 9) : definition.isJet ? 15 : 5,
+            maxAscentSpeedMps: copter ? (definition.id == "dji-mini-5-pro" ? 10 : 9) : definition.isJet ? 15
+                : performance.map { max(2, $0.climbRateMps) } ?? 5,
             maxDescentSpeedMps: copter ? 6 : 4, maxFlightTimeMin: f.flightMinutes,
             maxHoverTimeMin: copter ? f.flightMinutes * 0.90 : 0,
             maxWindResistanceMps: f.windSpeedMps, batteryEnergyWh: f.batteryEnergyWh,

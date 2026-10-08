@@ -7,6 +7,7 @@ struct UAVCatalogView: View {
     let onMassCategoryChange: (UAVMassCategoryFilter) -> Void
     let onSelectEntry: (UAVCatalogEntry) -> Void
     let onEditAbstract: () -> Void
+    var selectionEnabled = true
 
     private let columns = [GridItem(.flexible(), spacing: 8, alignment: .top), GridItem(.flexible(), spacing: 8, alignment: .top)]
 
@@ -64,6 +65,7 @@ struct UAVCatalogView: View {
                     onEditAbstract()
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(!selectionEnabled)
             }
         }
     }
@@ -91,6 +93,7 @@ struct UAVCatalogView: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(!selectionEnabled)
     }
 
     private func badgeTint(for confidence: UAVSpecConfidence) -> Color {

@@ -12,6 +12,9 @@ struct UAVCatalogModuleView: View {
             if viewModel.hasMissionScenario {
                 MissionLockBanner(messageKey: "module.uav_catalog.locked_by_mission")
             }
+            if viewModel.isInstructorFlight {
+                MissionLockBanner(messageKey: "instructor.aircraft_locked")
+            }
 
             ModuleSection(
                 titleKey: "module.uav_catalog.selection",
@@ -51,7 +54,8 @@ struct UAVCatalogModuleView: View {
                     },
                     onEditAbstract: {
                         showAbstractEditor = true
-                    }
+                    },
+                    selectionEnabled: !viewModel.isInstructorFlight
                 )
                 // The aircraft is locked in at mission setup; switching mid-mission would silently
                 // invalidate whatever briefed conditions (payload compatibility, performance) the

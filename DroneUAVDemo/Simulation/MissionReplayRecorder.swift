@@ -6,19 +6,24 @@ final class MissionReplayRecorder {
 
     let minFrameInterval: TimeInterval
     let maxFrameCount: Int
+    let archivesVisualAssetsInBackground: Bool
+    private(set) var visualAssetArchives: [String: MissionReplayVisualAssetArchive] = [:]
 
     private var lastFrameTimestamp: TimeInterval?
     private var didReachFrameLimit: Bool = false
     var visualNodeBaselines: [String: [String: MissionReplayNodeState]] = [:]
     var visualNodePaths: [String: [ObjectIdentifier: String]] = [:]
+    var visualGeometryIDs: [String: [ObjectIdentifier: ObjectIdentifier]] = [:]
     var visualAssetIDs: [String: String] = [:]
 
     init(
         minFrameInterval: TimeInterval = 0.1,
-        maxFrameCount: Int = 30_000
+        maxFrameCount: Int = 30_000,
+        archivesVisualAssetsInBackground: Bool = false
     ) {
         self.minFrameInterval = minFrameInterval
         self.maxFrameCount = maxFrameCount
+        self.archivesVisualAssetsInBackground = archivesVisualAssetsInBackground
     }
 
     var isRecording: Bool { currentSession != nil }
@@ -57,7 +62,9 @@ final class MissionReplayRecorder {
         currentSession = session
         visualNodeBaselines.removeAll()
         visualNodePaths.removeAll()
+        visualGeometryIDs.removeAll()
         visualAssetIDs.removeAll()
+        visualAssetArchives.removeAll()
         lastFrameTimestamp = nil
         didReachFrameLimit = false
     }
@@ -77,7 +84,9 @@ final class MissionReplayRecorder {
         currentSession = nil
         visualNodeBaselines.removeAll()
         visualNodePaths.removeAll()
+        visualGeometryIDs.removeAll()
         visualAssetIDs.removeAll()
+        visualAssetArchives.removeAll()
         lastFrameTimestamp = nil
     }
 
@@ -85,7 +94,9 @@ final class MissionReplayRecorder {
         currentSession = nil
         visualNodeBaselines.removeAll()
         visualNodePaths.removeAll()
+        visualGeometryIDs.removeAll()
         visualAssetIDs.removeAll()
+        visualAssetArchives.removeAll()
         lastFrameTimestamp = nil
         didReachFrameLimit = false
     }
@@ -128,6 +139,10 @@ final class MissionReplayRecorder {
     }
 
     /// The producer archives geometry only on first encounter, not at the recording cadence.
+    func hasVisualAsset(id: String) -> Bool {
+        currentSession?.visualAssets?[id] != nil || visualAssetArchives[id] != nil
+    }
+
     func registerVisualAsset(id: String, makeData: () -> Data?) -> Bool {
         guard currentSession != nil else { return false }
         if currentSession?.visualAssets?[id] != nil { return true }
@@ -137,7 +152,39 @@ final class MissionReplayRecorder {
         return true
     }
 
+    /// The scene adapter hands over a detached, immutable copy. Its archive is produced on a
+    /// worker, never by reading the live scene there. Persistence receives these same futures
+    /// alongside a value snapshot, so even an immediate exit waits for all referenced geometry.
+    func registerDeferredVisualAsset(id: String, makeData: @escaping @Sendable () -> Data?) {
+        guard isRecording, !hasVisualAsset(id: id) else { return }
+        visualAssetArchives[id] = MissionReplayVisualAssetArchive(makeData: makeData)
+    }
+
     func recordEvent(_ event: MissionReplayEvent) {
         currentSession?.events.append(event)
+    }
+}
+
+/// One archive owns one immutable source and publishes its Data once. Readers can resolve it
+/// from the persistence queue; no completion callback ever mutates the live recorder.
+final class MissionReplayVisualAssetArchive: @unchecked Sendable {
+    private static let queue = DispatchQueue(label: "uavsim.replay.asset-archives", qos: .utility)
+    private let completion = DispatchGroup()
+    private let lock = NSLock()
+    private var result: Data?
+
+    init(makeData: @escaping @Sendable () -> Data?) {
+        completion.enter()
+        Self.queue.async { [self] in
+            let data = autoreleasepool(invoking: makeData)
+            lock.lock(); result = data; lock.unlock()
+            completion.leave()
+        }
+    }
+
+    func resolvedData() -> Data? {
+        completion.wait()
+        lock.lock(); defer { lock.unlock() }
+        return result
     }
 }

@@ -1,0 +1,2025 @@
+[
+  {
+    "bounds_max_m": [
+      0.00674699991941452,
+      0.0038815001025795937,
+      0.01600000075995922
+    ],
+    "bounds_min_m": [
+      -0.00674699991941452,
+      -0.0036190003156661987,
+      -0.01749200001358986
+    ],
+    "id": "battery-1s-300",
+    "imported_triangles": 3934,
+    "meshes": 14,
+    "scene_kit_import": "passed",
+    "textured_materials": 10
+  },
+  {
+    "bounds_max_m": [
+      0.008822999894618988,
+      0.004436000250279903,
+      0.02250000089406967
+    ],
+    "bounds_min_m": [
+      -0.008822999894618988,
+      -0.004135999828577042,
+      -0.024070000275969505
+    ],
+    "id": "battery-1s-550",
+    "imported_triangles": 3934,
+    "meshes": 14,
+    "scene_kit_import": "passed",
+    "textured_materials": 10
+  },
+  {
+    "bounds_max_m": [
+      0.012974999845027924,
+      0.008872000500559807,
+      0.023000000044703484
+    ],
+    "bounds_min_m": [
+      -0.012974999845027924,
+      -0.008271999657154083,
+      -0.024815000593662262
+    ],
+    "id": "battery-2s-450",
+    "imported_triangles": 5686,
+    "meshes": 26,
+    "scene_kit_import": "passed",
+    "textured_materials": 15
+  },
+  {
+    "bounds_max_m": [
+      0.014531999826431274,
+      0.009980998933315277,
+      0.028999999165534973
+    ],
+    "bounds_min_m": [
+      -0.014531999826431274,
+      -0.009306000545620918,
+      -0.030995000153779984
+    ],
+    "id": "battery-2s-850",
+    "imported_triangles": 5686,
+    "meshes": 26,
+    "scene_kit_import": "passed",
+    "textured_materials": 15
+  },
+  {
+    "bounds_max_m": [
+      0.015569999814033508,
+      0.013862499967217445,
+      0.029999999329447746
+    ],
+    "bounds_min_m": [
+      -0.015569999814033508,
+      -0.012925000861287117,
+      -0.03202499821782112
+    ],
+    "id": "battery-3s-850",
+    "imported_triangles": 6186,
+    "meshes": 31,
+    "scene_kit_import": "passed",
+    "textured_materials": 17
+  },
+  {
+    "bounds_max_m": [
+      0.015569999814033508,
+      0.019407499581575394,
+      0.03750000149011612
+    ],
+    "bounds_min_m": [
+      -0.015569999814033508,
+      -0.018094997853040695,
+      -0.039750002324581146
+    ],
+    "id": "battery-4s-1500",
+    "imported_triangles": 6686,
+    "meshes": 36,
+    "scene_kit_import": "passed",
+    "textured_materials": 19
+  },
+  {
+    "bounds_max_m": [
+      0.017645999789237976,
+      0.019407499581575394,
+      0.05249999836087227
+    ],
+    "bounds_min_m": [
+      -0.017645999789237976,
+      -0.018094997853040695,
+      -0.05519999563694
+    ],
+    "id": "battery-4s-2200",
+    "imported_triangles": 6686,
+    "meshes": 36,
+    "scene_kit_import": "passed",
+    "textured_materials": 19
+  },
+  {
+    "bounds_max_m": [
+      0.015569999814033508,
+      0.016635000705718994,
+      0.03099999949336052
+    ],
+    "bounds_min_m": [
+      -0.015569999814033508,
+      -0.01551000028848648,
+      -0.03305500000715256
+    ],
+    "id": "battery-4s-850",
+    "imported_triangles": 6686,
+    "meshes": 36,
+    "scene_kit_import": "passed",
+    "textured_materials": 19
+  },
+  {
+    "bounds_max_m": [
+      0.017645999789237976,
+      0.021625500172376633,
+      0.03700000047683716
+    ],
+    "bounds_min_m": [
+      -0.017645999789237976,
+      -0.020162999629974365,
+      -0.03923499956727028
+    ],
+    "id": "battery-6s-1100",
+    "imported_triangles": 7686,
+    "meshes": 46,
+    "scene_kit_import": "passed",
+    "textured_materials": 23
+  },
+  {
+    "bounds_max_m": [
+      0.01868399977684021,
+      0.023288998752832413,
+      0.039000000804662704
+    ],
+    "bounds_min_m": [
+      -0.01868399977684021,
+      -0.021713998168706894,
+      -0.04129499942064285
+    ],
+    "id": "battery-6s-1300",
+    "imported_triangles": 7686,
+    "meshes": 46,
+    "scene_kit_import": "passed",
+    "textured_materials": 23
+  },
+  {
+    "bounds_max_m": [
+      0.020759999752044678,
+      0.02550699934363365,
+      0.05400000140070915
+    ],
+    "bounds_min_m": [
+      -0.020759999752044678,
+      -0.023781999945640564,
+      -0.056745000183582306
+    ],
+    "id": "battery-6s-2200",
+    "imported_triangles": 7686,
+    "meshes": 46,
+    "scene_kit_import": "passed",
+    "textured_materials": 23
+  },
+  {
+    "bounds_max_m": [
+      0.023354999721050262,
+      0.02772499993443489,
+      0.07250000536441803
+    ],
+    "bounds_min_m": [
+      -0.023354999721050262,
+      -0.025850001722574234,
+      -0.07580000162124634
+    ],
+    "id": "battery-6s-5000",
+    "imported_triangles": 10622,
+    "meshes": 44,
+    "scene_kit_import": "passed",
+    "textured_materials": 21
+  },
+  {
+    "bounds_max_m": [
+      0.02906399965286255,
+      0.03493349999189377,
+      0.08250000327825546
+    ],
+    "bounds_min_m": [
+      -0.02906399965286255,
+      -0.03257099539041519,
+      -0.08609999716281891
+    ],
+    "id": "battery-8s-6000",
+    "imported_triangles": 8686,
+    "meshes": 56,
+    "scene_kit_import": "passed",
+    "textured_materials": 27
+  },
+  {
+    "bounds_max_m": [
+      0.02231699973344803,
+      0.02384350076317787,
+      0.03750000149011612
+    ],
+    "bounds_min_m": [
+      -0.02231699973344803,
+      -0.022230997681617737,
+      -0.039750002324581146
+    ],
+    "id": "battery-liion-4s-3000",
+    "imported_triangles": 9670,
+    "meshes": 38,
+    "scene_kit_import": "passed",
+    "textured_materials": 21
+  },
+  {
+    "bounds_max_m": [
+      0.01899999938905239,
+      0.01618500053882599,
+      0.015359999611973763
+    ],
+    "bounds_min_m": [
+      -0.01899999938905239,
+      -0.014999999664723873,
+      -0.012587999925017357
+    ],
+    "id": "camera-action-mini",
+    "imported_triangles": 16812,
+    "meshes": 50,
+    "scene_kit_import": "passed",
+    "textured_materials": 38
+  },
+  {
+    "bounds_max_m": [
+      0.025499999523162842,
+      0.020501000806689262,
+      0.017920000478625298
+    ],
+    "bounds_min_m": [
+      -0.025499999523162842,
+      -0.01899999938905239,
+      -0.014685999602079391
+    ],
+    "id": "camera-action",
+    "imported_triangles": 16812,
+    "meshes": 50,
+    "scene_kit_import": "passed",
+    "textured_materials": 38
+  },
+  {
+    "bounds_max_m": [
+      0.011620590463280678,
+      0.0105150006711483,
+      0.012799998745322227
+    ],
+    "bounds_min_m": [
+      -0.011614261195063591,
+      -0.010499999858438969,
+      -0.011491479352116585
+    ],
+    "id": "camera-fpv-lowlight",
+    "imported_triangles": 17544,
+    "meshes": 67,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.007747061550617218,
+      0.007015000097453594,
+      0.010239999741315842
+    ],
+    "bounds_min_m": [
+      -0.007742839865386486,
+      -0.007000000216066837,
+      -0.009047649800777435
+    ],
+    "id": "camera-fpv-micro",
+    "imported_triangles": 17544,
+    "meshes": 67,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.010513870045542717,
+      0.009515000507235527,
+      0.012160001322627068
+    ],
+    "bounds_min_m": [
+      -0.010508140549063683,
+      -0.009499999694526196,
+      -0.010867519304156303
+    ],
+    "id": "camera-fpv",
+    "imported_triangles": 17544,
+    "meshes": 67,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.011067230254411697,
+      0.010014999657869339,
+      0.013439999893307686
+    ],
+    "bounds_min_m": [
+      -0.011061199009418488,
+      -0.009999999776482582,
+      -0.01195949874818325
+    ],
+    "id": "camera-hd-mini",
+    "imported_triangles": 17544,
+    "meshes": 67,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.015457039698958397,
+      0.012515000998973846,
+      0.01664000004529953
+    ],
+    "bounds_min_m": [
+      -0.01544949971139431,
+      -0.012500000186264515,
+      -0.01470124814659357
+    ],
+    "id": "camera-hd",
+    "imported_triangles": 17544,
+    "meshes": 67,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.028675910085439682,
+      0.022014999762177467,
+      0.02848000079393387
+    ],
+    "bounds_min_m": [
+      -0.02866264060139656,
+      -0.02199999988079071,
+      -0.02198125049471855
+    ],
+    "id": "camera-mapping-24mp",
+    "imported_triangles": 17544,
+    "meshes": 67,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.013066249899566174,
+      0.002199999988079071,
+      0.013000000268220901
+    ],
+    "bounds_min_m": [
+      -0.013066249899566174,
+      -0.0012000000569969416,
+      -0.013000000268220901
+    ],
+    "id": "esc-4in1-12a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.015070250257849693,
+      0.002199999988079071,
+      0.014999999664723873
+    ],
+    "bounds_min_m": [
+      -0.015070250257849693,
+      -0.0012000000569969416,
+      -0.014999999664723873
+    ],
+    "id": "esc-4in1-20a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.01507830061018467,
+      0.0026400000788271427,
+      0.014999999664723873
+    ],
+    "bounds_min_m": [
+      -0.01507830061018467,
+      -0.0013799999142065644,
+      -0.014999999664723873
+    ],
+    "id": "esc-4in1-25a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.016080297529697418,
+      0.0026400000788271427,
+      0.01600000075995922
+    ],
+    "bounds_min_m": [
+      -0.016080297529697418,
+      -0.0013799999142065644,
+      -0.01600000075995922
+    ],
+    "id": "esc-4in1-35a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.020088300108909607,
+      0.0026400000788271427,
+      0.019999999552965164
+    ],
+    "bounds_min_m": [
+      -0.020088300108909607,
+      -0.0013799999142065644,
+      -0.019999999552965164
+    ],
+    "id": "esc-4in1-45a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.02109450101852417,
+      0.0030249999836087227,
+      0.020999999716877937
+    ],
+    "bounds_min_m": [
+      -0.02109450101852417,
+      -0.001505000051110983,
+      -0.020999999716877937
+    ],
+    "id": "esc-4in1-55a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.02510249987244606,
+      0.003674999810755253,
+      0.02500000037252903
+    ],
+    "bounds_min_m": [
+      -0.02510249987244606,
+      -0.0016499999910593033,
+      -0.02500000037252903
+    ],
+    "id": "esc-4in1-65a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.013058199547231197,
+      0.0017599998973309994,
+      0.013000000268220901
+    ],
+    "bounds_min_m": [
+      -0.013058199547231197,
+      -0.0010199998505413532,
+      -0.013000000268220901
+    ],
+    "id": "esc-aio-5a",
+    "imported_triangles": 91976,
+    "meshes": 315,
+    "scene_kit_import": "passed",
+    "textured_materials": 34
+  },
+  {
+    "bounds_max_m": [
+      0.04140999913215637,
+      0.007120000198483467,
+      0.03434000164270401
+    ],
+    "bounds_min_m": [
+      -0.04140999913215637,
+      -0.006719999946653843,
+      -0.03434000164270401
+    ],
+    "id": "esc-powerhub-4x80a",
+    "imported_triangles": 96476,
+    "meshes": 338,
+    "scene_kit_import": "passed",
+    "textured_materials": 53
+  },
+  {
+    "bounds_max_m": [
+      0.046459998935461044,
+      0.008009999990463257,
+      0.037370000034570694
+    ],
+    "bounds_min_m": [
+      -0.046459998935461044,
+      -0.0075599998235702515,
+      -0.037370000034570694
+    ],
+    "id": "esc-powerhub-5x80a-vtol",
+    "imported_triangles": 108628,
+    "meshes": 380,
+    "scene_kit_import": "passed",
+    "textured_materials": 55
+  },
+  {
+    "bounds_max_m": [
+      0.03232000023126602,
+      0.008455000817775726,
+      0.01817999966442585
+    ],
+    "bounds_min_m": [
+      -0.03232000023126602,
+      -0.007980000227689743,
+      -0.01817999966442585
+    ],
+    "id": "esc-wing-80a",
+    "imported_triangles": 96476,
+    "meshes": 338,
+    "scene_kit_import": "passed",
+    "textured_materials": 53
+  },
+  {
+    "bounds_max_m": [
+      0.026259999722242355,
+      0.006230000406503677,
+      0.028314001858234406
+    ],
+    "bounds_min_m": [
+      -0.026259999722242355,
+      -0.005880000069737434,
+      -0.026259999722242355
+    ],
+    "id": "fc-autopilot-h7",
+    "imported_triangles": 71740,
+    "meshes": 262,
+    "scene_kit_import": "passed",
+    "textured_materials": 53
+  },
+  {
+    "bounds_max_m": [
+      0.013066249899566174,
+      0.001779500162228942,
+      0.014157000929117203
+    ],
+    "bounds_min_m": [
+      -0.013066249899566174,
+      -0.0012250000145286322,
+      -0.013000000268220901
+    ],
+    "id": "fc-f4-mini",
+    "imported_triangles": 67240,
+    "meshes": 239,
+    "scene_kit_import": "passed",
+    "textured_materials": 30
+  },
+  {
+    "bounds_max_m": [
+      0.018076250329613686,
+      0.0020119999535381794,
+      0.01960200071334839
+    ],
+    "bounds_min_m": [
+      -0.018076250329613686,
+      -0.0012250000145286322,
+      -0.017999999225139618
+    ],
+    "id": "fc-f405",
+    "imported_triangles": 67240,
+    "meshes": 239,
+    "scene_kit_import": "passed",
+    "textured_materials": 29
+  },
+  {
+    "bounds_max_m": [
+      0.01456924993544817,
+      0.0018492501694709063,
+      0.01579049974679947
+    ],
+    "bounds_min_m": [
+      -0.01456924993544817,
+      -0.0012250000145286322,
+      -0.014499999582767487
+    ],
+    "id": "fc-f411-whoop-aio",
+    "imported_triangles": 67240,
+    "meshes": 239,
+    "scene_kit_import": "passed",
+    "textured_materials": 38
+  },
+  {
+    "bounds_max_m": [
+      0.018076250329613686,
+      0.0020119999535381794,
+      0.01960200071334839
+    ],
+    "bounds_min_m": [
+      -0.018076250329613686,
+      -0.0012250000145286322,
+      -0.017999999225139618
+    ],
+    "id": "fc-f7",
+    "imported_triangles": 67240,
+    "meshes": 239,
+    "scene_kit_import": "passed",
+    "textured_materials": 33
+  },
+  {
+    "bounds_max_m": [
+      0.019090499728918076,
+      0.0024735000915825367,
+      0.020690999925136566
+    ],
+    "bounds_min_m": [
+      -0.019090499728918076,
+      -0.001505000051110983,
+      -0.01900000125169754
+    ],
+    "id": "fc-h7-dual",
+    "imported_triangles": 67240,
+    "meshes": 239,
+    "scene_kit_import": "passed",
+    "textured_materials": 34
+  },
+  {
+    "bounds_max_m": [
+      0.2143459916114807,
+      0.04548899829387665,
+      0.2143459916114807
+    ],
+    "bounds_min_m": [
+      -0.2143459916114807,
+      -0.0022499999031424522,
+      -0.2143459916114807
+    ],
+    "id": "frame-10inch-utility",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.06815379858016968,
+      0.028768999502062798,
+      0.06815379858016968
+    ],
+    "bounds_min_m": [
+      -0.06815379858016968,
+      -0.0022499999031424522,
+      -0.06815379858016968
+    ],
+    "id": "frame-35inch-ultralight",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.11949999630451202,
+      0.028768999502062798,
+      0.1054999977350235
+    ],
+    "bounds_min_m": [
+      -0.11949999630451202,
+      -0.0022499999031424522,
+      -0.08150000870227814
+    ],
+    "id": "frame-5inch-deadcat",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.09278099983930588,
+      0.028768999502062798,
+      0.09278099983930588
+    ],
+    "bounds_min_m": [
+      -0.09278099983930588,
+      -0.0022499999031424522,
+      -0.09278099983930588
+    ],
+    "id": "frame-5inch-freestyle",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.0892454981803894,
+      0.028768999502062798,
+      0.0892454981803894
+    ],
+    "bounds_min_m": [
+      -0.0892454981803894,
+      -0.0022499999031424522,
+      -0.0892454981803894
+    ],
+    "id": "frame-5inch-race",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.11457979679107666,
+      0.028768999502062798,
+      0.11457979679107666
+    ],
+    "bounds_min_m": [
+      -0.11457979679107666,
+      -0.0022499999031424522,
+      -0.11457979679107666
+    ],
+    "id": "frame-6inch-longrange",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.1311360001564026,
+      0.028768999502062798,
+      0.1311360001564026
+    ],
+    "bounds_min_m": [
+      -0.1311360001564026,
+      -0.0022499999031424522,
+      -0.1311360001564026
+    ],
+    "id": "frame-7inch-lr",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.15181350708007812,
+      0.0296890027821064,
+      0.15181350708007812
+    ],
+    "bounds_min_m": [
+      -0.15181350708007812,
+      -0.0022499999031424522,
+      -0.15181350708007812
+    ],
+    "id": "frame-8inch-expedition",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.11445850133895874,
+      0.028768999502062798,
+      0.11445850133895874
+    ],
+    "bounds_min_m": [
+      -0.11445850133895874,
+      -0.0022499999031424522,
+      -0.11445850133895874
+    ],
+    "id": "frame-cine",
+    "imported_triangles": 22312,
+    "meshes": 81,
+    "scene_kit_import": "passed",
+    "textured_materials": 65
+  },
+  {
+    "bounds_max_m": [
+      0.0764356404542923,
+      0.028768999502062798,
+      0.0764356404542923
+    ],
+    "bounds_min_m": [
+      -0.0764356404542923,
+      -0.0022499999031424522,
+      -0.0764356404542923
+    ],
+    "id": "frame-cinewhoop-25",
+    "imported_triangles": 47592,
+    "meshes": 105,
+    "scene_kit_import": "passed",
+    "textured_materials": 89
+  },
+  {
+    "bounds_max_m": [
+      0.044051799923181534,
+      0.04937367141246796,
+      0.455447793006897
+    ],
+    "bounds_min_m": [
+      -0.044051799923181534,
+      -0.038578905165195465,
+      -0.4077328145503998
+    ],
+    "id": "frame-fixedwing-survey-s1-fuselage",
+    "imported_triangles": 29188,
+    "meshes": 27,
+    "scene_kit_import": "passed",
+    "textured_materials": 15
+  },
+  {
+    "bounds_max_m": [
+      0.8100000023841858,
+      0.009655363857746124,
+      0.14559999108314514
+    ],
+    "bounds_min_m": [
+      -0.8100000023841858,
+      -0.007965832948684692,
+      -0.2632888853549957
+    ],
+    "id": "frame-fixedwing-survey-s1-wing",
+    "imported_triangles": 18144,
+    "meshes": 32,
+    "scene_kit_import": "passed",
+    "textured_materials": 28
+  },
+  {
+    "bounds_max_m": [
+      0.8100000023841858,
+      0.12540000677108765,
+      0.455447793006897
+    ],
+    "bounds_min_m": [
+      -0.8100000023841858,
+      -0.038578905165195465,
+      -0.4235140085220337
+    ],
+    "id": "frame-fixedwing-survey-s1",
+    "imported_triangles": 60756,
+    "meshes": 65,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.043660201132297516,
+      0.014019999653100967,
+      0.043660201132297516
+    ],
+    "bounds_min_m": [
+      -0.043660201132297516,
+      -0.0010999999940395355,
+      -0.043660201132297516
+    ],
+    "id": "frame-tinywhoop",
+    "imported_triangles": 31000,
+    "meshes": 82,
+    "scene_kit_import": "passed",
+    "textured_materials": 68
+  },
+  {
+    "bounds_max_m": [
+      0.05557858943939209,
+      0.06236673891544342,
+      0.48544782400131226
+    ],
+    "bounds_min_m": [
+      -0.05557858943939209,
+      -0.048731252551078796,
+      -0.4570190906524658
+    ],
+    "id": "frame-vtol-lift-cruise-v1-fuselage",
+    "imported_triangles": 29188,
+    "meshes": 27,
+    "scene_kit_import": "passed",
+    "textured_materials": 15
+  },
+  {
+    "bounds_max_m": [
+      0.7400000095367432,
+      0.00961735937744379,
+      0.1632000058889389
+    ],
+    "bounds_min_m": [
+      -0.7400000095367432,
+      -0.007811092771589756,
+      -0.23774589598178864
+    ],
+    "id": "frame-vtol-lift-cruise-v1-wing",
+    "imported_triangles": 18144,
+    "meshes": 32,
+    "scene_kit_import": "passed",
+    "textured_materials": 28
+  },
+  {
+    "bounds_max_m": [
+      0.7400000095367432,
+      0.15839999914169312,
+      0.48544782400131226
+    ],
+    "bounds_min_m": [
+      -0.7400000095367432,
+      -0.048731252551078796,
+      -0.4747079908847809
+    ],
+    "id": "frame-vtol-lift-cruise-v1",
+    "imported_triangles": 72076,
+    "meshes": 111,
+    "scene_kit_import": "passed",
+    "textured_materials": 86
+  },
+  {
+    "bounds_max_m": [
+      0.050731200724840164,
+      0.01501999981701374,
+      0.050731200724840164
+    ],
+    "bounds_min_m": [
+      -0.050731200724840164,
+      -0.0010999999940395355,
+      -0.050731200724840164
+    ],
+    "id": "frame-whoop75",
+    "imported_triangles": 31000,
+    "meshes": 82,
+    "scene_kit_import": "passed",
+    "textured_materials": 68
+  },
+  {
+    "bounds_max_m": [
+      0.05102499946951866,
+      0.008050000295042992,
+      0.05102499946951866
+    ],
+    "bounds_min_m": [
+      -0.05102499946951866,
+      -0.02449999935925007,
+      -0.05102499946951866
+    ],
+    "id": "gear-cine-bumpers",
+    "imported_triangles": 39152,
+    "meshes": 28,
+    "scene_kit_import": "passed",
+    "textured_materials": 28
+  },
+  {
+    "bounds_max_m": [
+      0.03911999985575676,
+      0.0017999997362494469,
+      0.03911999985575676
+    ],
+    "bounds_min_m": [
+      -0.03911999985575676,
+      -0.009720000438392162,
+      -0.03911999985575676
+    ],
+    "id": "gear-micro-guards",
+    "imported_triangles": 12272,
+    "meshes": 9,
+    "scene_kit_import": "passed",
+    "textured_materials": 9
+  },
+  {
+    "bounds_max_m": [
+      0.14200398325920105,
+      0.0674000084400177,
+      0.02250000089406967
+    ],
+    "bounds_min_m": [
+      -0.14200398325920105,
+      -0.09099999070167542,
+      -0.02250000089406967
+    ],
+    "id": "gear-retractable",
+    "imported_triangles": 3464,
+    "meshes": 18,
+    "scene_kit_import": "passed",
+    "textured_materials": 16
+  },
+  {
+    "bounds_max_m": [
+      0.07119999825954437,
+      0.036161281168460846,
+      0.03099999949336052
+    ],
+    "bounds_min_m": [
+      -0.07119999825954437,
+      -0.026650002226233482,
+      -0.03099999949336052
+    ],
+    "id": "gear-skid",
+    "imported_triangles": 9048,
+    "meshes": 18,
+    "scene_kit_import": "passed",
+    "textured_materials": 18
+  },
+  {
+    "bounds_max_m": [
+      0.1120000034570694,
+      0.0811431035399437,
+      0.03099999949336052
+    ],
+    "bounds_min_m": [
+      -0.1120000034570694,
+      -0.05665000528097153,
+      -0.03099999949336052
+    ],
+    "id": "gear-tall-carbon",
+    "imported_triangles": 9048,
+    "meshes": 18,
+    "scene_kit_import": "passed",
+    "textured_materials": 18
+  },
+  {
+    "bounds_max_m": [
+      0.014139999635517597,
+      0.0044838180765509605,
+      0.014139999635517597
+    ],
+    "bounds_min_m": [
+      -0.014139999635517597,
+      -0.0044099995866417885,
+      -0.014139999635517597
+    ],
+    "id": "gps-m10-compass",
+    "imported_triangles": 1784,
+    "meshes": 12,
+    "scene_kit_import": "passed",
+    "textured_materials": 8
+  },
+  {
+    "bounds_max_m": [
+      0.009999999776482582,
+      0.001931999926455319,
+      0.01069599948823452
+    ],
+    "bounds_min_m": [
+      -0.009999999776482582,
+      -0.0031799999997019768,
+      -0.009999999776482582
+    ],
+    "id": "gps-m10",
+    "imported_triangles": 5368,
+    "meshes": 30,
+    "scene_kit_import": "passed",
+    "textured_materials": 9
+  },
+  {
+    "bounds_max_m": [
+      0.007499999832361937,
+      0.0016099999193102121,
+      0.008022001013159752
+    ],
+    "bounds_min_m": [
+      -0.007499999832361937,
+      -0.0026499999221414328,
+      -0.007500000298023224
+    ],
+    "id": "gps-m8-nano",
+    "imported_triangles": 5368,
+    "meshes": 30,
+    "scene_kit_import": "passed",
+    "textured_materials": 9
+  },
+  {
+    "bounds_max_m": [
+      0.029999999329447746,
+      0.0045079998672008514,
+      0.015097251161932945
+    ],
+    "bounds_min_m": [
+      -0.029999999329447746,
+      -0.007419999688863754,
+      -0.014000000432133675
+    ],
+    "id": "gps-rtk-dual",
+    "imported_triangles": 6092,
+    "meshes": 33,
+    "scene_kit_import": "passed",
+    "textured_materials": 11
+  },
+  {
+    "bounds_max_m": [
+      0.00507500022649765,
+      0.009999999776482582,
+      0.00507500022649765
+    ],
+    "bounds_min_m": [
+      -0.00507500022649765,
+      -0.0003700000233948231,
+      -0.005574999377131462
+    ],
+    "id": "motor-0802-19000kv",
+    "imported_triangles": 30292,
+    "meshes": 122,
+    "scene_kit_import": "passed",
+    "textured_materials": 52
+  },
+  {
+    "bounds_max_m": [
+      0.006089999806135893,
+      0.010999999940395355,
+      0.006089999806135893
+    ],
+    "bounds_min_m": [
+      -0.006089999806135893,
+      -0.0004440000047907233,
+      -0.006690000183880329
+    ],
+    "id": "motor-1002-22000kv",
+    "imported_triangles": 30292,
+    "meshes": 122,
+    "scene_kit_import": "passed",
+    "textured_materials": 52
+  },
+  {
+    "bounds_max_m": [
+      0.007104999851435423,
+      0.013000000268220901,
+      0.007104999851435423
+    ],
+    "bounds_min_m": [
+      -0.007104999851435423,
+      -0.0005179999861866236,
+      -0.0078050000593066216
+    ],
+    "id": "motor-1103-8000kv",
+    "imported_triangles": 30292,
+    "meshes": 122,
+    "scene_kit_import": "passed",
+    "textured_materials": 52
+  },
+  {
+    "bounds_max_m": [
+      0.00913500040769577,
+      0.017000000923871994,
+      0.00913500040769577
+    ],
+    "bounds_min_m": [
+      -0.00913500040769577,
+      -0.0006660000653937459,
+      -0.010034998878836632
+    ],
+    "id": "motor-1404-3800kv",
+    "imported_triangles": 30292,
+    "meshes": 122,
+    "scene_kit_import": "passed",
+    "textured_materials": 52
+  },
+  {
+    "bounds_max_m": [
+      0.009642500430345535,
+      0.01833299919962883,
+      0.009642500430345535
+    ],
+    "bounds_min_m": [
+      -0.009642500430345535,
+      -0.0007029999978840351,
+      -0.010592499747872353
+    ],
+    "id": "motor-1505-3600kv",
+    "imported_triangles": 40040,
+    "meshes": 132,
+    "scene_kit_import": "passed",
+    "textured_materials": 62
+  },
+  {
+    "bounds_max_m": [
+      0.011164999566972256,
+      0.0203699991106987,
+      0.011164999566972256
+    ],
+    "bounds_min_m": [
+      -0.011164999566972256,
+      -0.0008140000863932073,
+      -0.012264998629689217
+    ],
+    "id": "motor-1804-2450kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.012179999612271786,
+      0.021388500928878784,
+      0.012179999612271786
+    ],
+    "bounds_min_m": [
+      -0.012179999612271786,
+      -0.0008880000677891076,
+      -0.013380000367760658
+    ],
+    "id": "motor-2004-3000kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.014209999702870846,
+      0.03259199857711792,
+      0.014209999702870846
+    ],
+    "bounds_min_m": [
+      -0.014209999702870846,
+      -0.0010359999723732471,
+      -0.015610000118613243
+    ],
+    "id": "motor-2207-1900kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.014209999702870846,
+      0.031573500484228134,
+      0.014209999702870846
+    ],
+    "bounds_min_m": [
+      -0.014209999702870846,
+      -0.0010359999723732471,
+      -0.015610000118613243
+    ],
+    "id": "motor-2207-2450kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.01471749972552061,
+      0.033610500395298004,
+      0.01471749972552061
+    ],
+    "bounds_min_m": [
+      -0.01471749972552061,
+      -0.0010730000212788582,
+      -0.016167499125003815
+    ],
+    "id": "motor-2306-1750kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.015732500702142715,
+      0.03564750403165817,
+      0.015732500702142715
+    ],
+    "bounds_min_m": [
+      -0.015732500702142715,
+      -0.0011469998862594366,
+      -0.017282500863075256
+    ],
+    "id": "motor-2507-1500kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.01725500077009201,
+      0.03870300203561783,
+      0.01725500077009201
+    ],
+    "bounds_min_m": [
+      -0.01725500077009201,
+      -0.0012580000329762697,
+      -0.01895499974489212
+    ],
+    "id": "motor-2806-1300kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.01928500086069107,
+      0.04277700185775757,
+      0.01928500086069107
+    ],
+    "bounds_min_m": [
+      -0.01928500086069107,
+      -0.0014059999957680702,
+      -0.021184999495744705
+    ],
+    "id": "motor-3110-900kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.022837499156594276,
+      0.047869499772787094,
+      0.022837499156594276
+    ],
+    "bounds_min_m": [
+      -0.022837499156594276,
+      -0.0016649998724460602,
+      -0.025087501853704453
+    ],
+    "id": "motor-3520-620kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.02841999940574169,
+      0.03055500239133835,
+      0.02841999940574169
+    ],
+    "bounds_min_m": [
+      -0.02841999940574169,
+      -0.0020719999447464943,
+      -0.031220000237226486
+    ],
+    "id": "motor-5010-360kv",
+    "imported_triangles": 48272,
+    "meshes": 165,
+    "scene_kit_import": "passed",
+    "textured_materials": 74
+  },
+  {
+    "bounds_max_m": [
+      0.01568000018596649,
+      0.016526639461517334,
+      0.013183999806642532
+    ],
+    "bounds_min_m": [
+      -0.01568000018596649,
+      -0.013439999893307686,
+      -0.012159999459981918
+    ],
+    "id": "payload-camera-gimbal",
+    "imported_triangles": 26992,
+    "meshes": 56,
+    "scene_kit_import": "passed",
+    "textured_materials": 48
+  },
+  {
+    "bounds_max_m": [
+      0.029200000688433647,
+      0.017402879893779755,
+      0.02032499760389328
+    ],
+    "bounds_min_m": [
+      -0.029200000688433647,
+      -0.025374997407197952,
+      -0.02618125081062317
+    ],
+    "id": "payload-cargo-release",
+    "imported_triangles": 6004,
+    "meshes": 29,
+    "scene_kit_import": "passed",
+    "textured_materials": 17
+  },
+  {
+    "bounds_max_m": [
+      0.09036000072956085,
+      0.049326322972774506,
+      0.05906999856233597
+    ],
+    "bounds_min_m": [
+      -0.09036000072956085,
+      -0.04649999737739563,
+      -0.05771999806165695
+    ],
+    "id": "payload-delivery-pod",
+    "imported_triangles": 6072,
+    "meshes": 27,
+    "scene_kit_import": "passed",
+    "textured_materials": 23
+  },
+  {
+    "bounds_max_m": [
+      0.043310850858688354,
+      0.03708517178893089,
+      0.04500000178813934
+    ],
+    "bounds_min_m": [
+      -0.043310850858688354,
+      -0.03449999913573265,
+      -0.04500000178813934
+    ],
+    "id": "payload-lidar-survey",
+    "imported_triangles": 44252,
+    "meshes": 114,
+    "scene_kit_import": "passed",
+    "textured_materials": 106
+  },
+  {
+    "bounds_max_m": [
+      0.042500000447034836,
+      0.02472345158457756,
+      0.03545999899506569
+    ],
+    "bounds_min_m": [
+      -0.042500000447034836,
+      -0.02124999836087227,
+      -0.031181249767541885
+    ],
+    "id": "payload-multispectral",
+    "imported_triangles": 66656,
+    "meshes": 177,
+    "scene_kit_import": "passed",
+    "textured_materials": 152
+  },
+  {
+    "bounds_max_m": [
+      0.04087499901652336,
+      0.044104307889938354,
+      0.03517499938607216
+    ],
+    "bounds_min_m": [
+      -0.04087499901652336,
+      -0.03525000065565109,
+      -0.02812499925494194
+    ],
+    "id": "payload-searchlight",
+    "imported_triangles": 16492,
+    "meshes": 41,
+    "scene_kit_import": "passed",
+    "textured_materials": 28
+  },
+  {
+    "bounds_max_m": [
+      0.07152000069618225,
+      0.07824689894914627,
+      0.051600001752376556
+    ],
+    "bounds_min_m": [
+      -0.07152000069618225,
+      -0.08352001011371613,
+      -0.051600001752376556
+    ],
+    "id": "payload-sprayer-1l",
+    "imported_triangles": 20348,
+    "meshes": 49,
+    "scene_kit_import": "passed",
+    "textured_materials": 43
+  },
+  {
+    "bounds_max_m": [
+      0.025480002164840698,
+      0.026855789124965668,
+      0.021423999220132828
+    ],
+    "bounds_min_m": [
+      -0.025480002164840698,
+      -0.02183999866247177,
+      -0.019760001450777054
+    ],
+    "id": "payload-thermal-gimbal",
+    "imported_triangles": 39724,
+    "meshes": 85,
+    "scene_kit_import": "passed",
+    "textured_materials": 76
+  },
+  {
+    "bounds_max_m": [
+      0.020320000126957893,
+      0.0013917498290538788,
+      0.016422349959611893
+    ],
+    "bounds_min_m": [
+      -0.01236467994749546,
+      -0.0016756439581513405,
+      -0.018870510160923004
+    ],
+    "id": "prop-1.6x1.6",
+    "imported_triangles": 12772,
+    "meshes": 5,
+    "scene_kit_import": "passed",
+    "textured_materials": 5
+  },
+  {
+    "bounds_max_m": [
+      0.024129999801516533,
+      0.0016527031548321247,
+      0.024129999801516533
+    ],
+    "bounds_min_m": [
+      -0.024129999801516533,
+      -0.0019898279570043087,
+      -0.024129999801516533
+    ],
+    "id": "prop-1.9x1.9",
+    "imported_triangles": 16688,
+    "meshes": 6,
+    "scene_kit_import": "passed",
+    "textured_materials": 6
+  },
+  {
+    "bounds_max_m": [
+      0.12700000405311584,
+      0.004928817041218281,
+      0.1026512011885643
+    ],
+    "bounds_min_m": [
+      -0.07730357348918915,
+      -0.005864848382771015,
+      -0.11795470118522644
+    ],
+    "id": "prop-10x3.8-tri",
+    "imported_triangles": 12772,
+    "meshes": 5,
+    "scene_kit_import": "passed",
+    "textured_materials": 5
+  },
+  {
+    "bounds_max_m": [
+      0.12700000405311584,
+      0.005485277622938156,
+      0.02323766052722931
+    ],
+    "bounds_min_m": [
+      -0.12700000405311584,
+      -0.006543787196278572,
+      -0.02323766052722931
+    ],
+    "id": "prop-10x4.5",
+    "imported_triangles": 8856,
+    "meshes": 4,
+    "scene_kit_import": "passed",
+    "textured_materials": 4
+  },
+  {
+    "bounds_max_m": [
+      0.15240000188350677,
+      0.019818099215626717,
+      0.02778862975537777
+    ],
+    "bounds_min_m": [
+      -0.15240000188350677,
+      -0.008397184312343597,
+      -0.02778862975537777
+    ],
+    "id": "prop-12x6-folding",
+    "imported_triangles": 11464,
+    "meshes": 13,
+    "scene_kit_import": "passed",
+    "textured_materials": 11
+  },
+  {
+    "bounds_max_m": [
+      0.03175000101327896,
+      0.002084173262119293,
+      0.03175000101327896
+    ],
+    "bounds_min_m": [
+      -0.03175000101327896,
+      -0.0025076260790228844,
+      -0.03175000101327896
+    ],
+    "id": "prop-2.5x2.3",
+    "imported_triangles": 16688,
+    "meshes": 6,
+    "scene_kit_import": "passed",
+    "textured_materials": 6
+  },
+  {
+    "bounds_max_m": [
+      0.044449999928474426,
+      0.0027084939647465944,
+      0.03592551872134209
+    ],
+    "bounds_min_m": [
+      -0.02705118991434574,
+      -0.003251340938732028,
+      -0.04128123074769974
+    ],
+    "id": "prop-3.5x2.8",
+    "imported_triangles": 12772,
+    "meshes": 5,
+    "scene_kit_import": "passed",
+    "textured_materials": 5
+  },
+  {
+    "bounds_max_m": [
+      0.038100000470876694,
+      0.0020931619219481945,
+      0.03079410083591938
+    ],
+    "bounds_min_m": [
+      -0.023188410326838493,
+      -0.0025080046616494656,
+      -0.035384878516197205
+    ],
+    "id": "prop-3x2",
+    "imported_triangles": 12772,
+    "meshes": 5,
+    "scene_kit_import": "passed",
+    "textured_materials": 5
+  },
+  {
+    "bounds_max_m": [
+      0.05079999938607216,
+      0.002687330823391676,
+      0.041059091687202454
+    ],
+    "bounds_min_m": [
+      -0.030918510630726814,
+      -0.0032152109779417515,
+      -0.04718020185828209
+    ],
+    "id": "prop-4x2.5",
+    "imported_triangles": 12772,
+    "meshes": 5,
+    "scene_kit_import": "passed",
+    "textured_materials": 5
+  },
+  {
+    "bounds_max_m": [
+      0.06476999819278717,
+      0.0036196368746459484,
+      0.06411013752222061
+    ],
+    "bounds_min_m": [
+      -0.05717473849654198,
+      -0.0043369499035179615,
+      -0.059286825358867645
+    ],
+    "id": "prop-5.1x3.5-cine",
+    "imported_triangles": 20604,
+    "meshes": 7,
+    "scene_kit_import": "passed",
+    "textured_materials": 7
+  },
+  {
+    "bounds_max_m": [
+      0.06476999819278717,
+      0.003678879700601101,
+      0.011620200239121914
+    ],
+    "bounds_min_m": [
+      -0.06476999819278717,
+      -0.004408134147524834,
+      -0.011620200239121914
+    ],
+    "id": "prop-5.1x3.6-bi",
+    "imported_triangles": 8856,
+    "meshes": 4,
+    "scene_kit_import": "passed",
+    "textured_materials": 4
+  },
+  {
+    "bounds_max_m": [
+      0.06350000202655792,
+      0.004023419227451086,
+      0.051321521401405334
+    ],
+    "bounds_min_m": [
+      -0.03864317014813423,
+      -0.004835946951061487,
+      -0.05897238850593567
+    ],
+    "id": "prop-5x4.3",
+    "imported_triangles": 12772,
+    "meshes": 5,
+    "scene_kit_import": "passed",
+    "textured_materials": 5
+  },
+  {
+    "bounds_max_m": [
+      0.07620000094175339,
+      0.0038658808916807175,
+      0.06158905476331711
+    ],
+    "bounds_min_m": [
+      -0.046378638595342636,
+      -0.004625657573342323,
+      -0.07077080756425858
+    ],
+    "id": "prop-6x3.5",
+    "imported_triangles": 12772,
+    "meshes": 5,
+    "scene_kit_import": "passed",
+    "textured_materials": 5
+  },
+  {
+    "bounds_max_m": [
+      0.08889999985694885,
+      0.004454999230802059,
+      0.016127079725265503
+    ],
+    "bounds_min_m": [
+      -0.08889999985694885,
+      -0.005327367223799229,
+      -0.016127079725265503
+    ],
+    "id": "prop-7x4",
+    "imported_triangles": 8856,
+    "meshes": 4,
+    "scene_kit_import": "passed",
+    "textured_materials": 4
+  },
+  {
+    "bounds_max_m": [
+      0.10159999877214432,
+      0.004689439199864864,
+      0.018525749444961548
+    ],
+    "bounds_min_m": [
+      -0.10159999877214432,
+      -0.00559812318533659,
+      -0.018525749444961548
+    ],
+    "id": "prop-8x4",
+    "imported_triangles": 8856,
+    "meshes": 4,
+    "scene_kit_import": "passed",
+    "textured_materials": 4
+  },
+  {
+    "bounds_max_m": [
+      0.012500000186264515,
+      0.0015749998856335878,
+      0.00800000037997961
+    ],
+    "bounds_min_m": [
+      -0.012500000186264515,
+      -0.0013200000394135714,
+      -0.00800000037997961
+    ],
+    "id": "rx-crossfire",
+    "imported_triangles": 9960,
+    "meshes": 37,
+    "scene_kit_import": "passed",
+    "textured_materials": 6
+  },
+  {
+    "bounds_max_m": [
+      0.010999999940395355,
+      0.0015749998856335878,
+      0.007000000216066837
+    ],
+    "bounds_min_m": [
+      -0.010999999940395355,
+      -0.0013200000394135714,
+      -0.007000000216066837
+    ],
+    "id": "rx-elrs-915",
+    "imported_triangles": 9960,
+    "meshes": 37,
+    "scene_kit_import": "passed",
+    "textured_materials": 6
+  },
+  {
+    "bounds_max_m": [
+      0.007499999832361937,
+      0.001184999942779541,
+      0.009999999776482582
+    ],
+    "bounds_min_m": [
+      -0.007499999832361937,
+      -0.0009900000877678394,
+      -0.009999999776482582
+    ],
+    "id": "rx-elrs",
+    "imported_triangles": 9960,
+    "meshes": 37,
+    "scene_kit_import": "passed",
+    "textured_materials": 6
+  },
+  {
+    "bounds_max_m": [
+      0.017000000923871994,
+      0.0027450001798570156,
+      0.012000000104308128
+    ],
+    "bounds_min_m": [
+      -0.017000000923871994,
+      -0.002309999894350767,
+      -0.012000000104308128
+    ],
+    "id": "rx-redundant-868",
+    "imported_triangles": 9960,
+    "meshes": 37,
+    "scene_kit_import": "passed",
+    "textured_materials": 6
+  },
+  {
+    "bounds_max_m": [
+      0.02928750216960907,
+      0.015284350141882896,
+      0.019228000193834305
+    ],
+    "bounds_min_m": [
+      -0.02928750216960907,
+      -0.014999998733401299,
+      -0.02018124982714653
+    ],
+    "id": "sensor-air-quality",
+    "imported_triangles": 16960,
+    "meshes": 68,
+    "scene_kit_import": "passed",
+    "textured_materials": 9
+  },
+  {
+    "bounds_max_m": [
+      0.020979760214686394,
+      0.013219719752669334,
+      0.020979760214686394
+    ],
+    "bounds_min_m": [
+      -0.020979760214686394,
+      -0.011959999799728394,
+      -0.020979760214686394
+    ],
+    "id": "sensor-lidar-200",
+    "imported_triangles": 52996,
+    "meshes": 129,
+    "scene_kit_import": "passed",
+    "textured_materials": 120
+  },
+  {
+    "bounds_max_m": [
+      0.024800000712275505,
+      0.009248623624444008,
+      0.024940000846982002
+    ],
+    "bounds_min_m": [
+      -0.024800000712275505,
+      -0.00827999971807003,
+      -0.024940000846982002
+    ],
+    "id": "sensor-obstacle-array",
+    "imported_triangles": 78460,
+    "meshes": 187,
+    "scene_kit_import": "passed",
+    "textured_materials": 176
+  },
+  {
+    "bounds_max_m": [
+      0.009108000434935093,
+      0.005126272328197956,
+      0.009108001366257668
+    ],
+    "bounds_min_m": [
+      -0.009108000434935093,
+      -0.006320000626146793,
+      -0.009850500151515007
+    ],
+    "id": "sensor-optical-flow",
+    "imported_triangles": 14900,
+    "meshes": 49,
+    "scene_kit_import": "passed",
+    "textured_materials": 35
+  },
+  {
+    "bounds_max_m": [
+      0.031275998800992966,
+      0.009307583793997765,
+      0.024265002459287643
+    ],
+    "bounds_min_m": [
+      -0.031275998800992966,
+      -0.008999999612569809,
+      -0.024181250482797623
+    ],
+    "id": "sensor-radar-altimeter",
+    "imported_triangles": 3368,
+    "meshes": 24,
+    "scene_kit_import": "passed",
+    "textured_materials": 11
+  },
+  {
+    "bounds_max_m": [
+      0.011119999922811985,
+      0.006142079830169678,
+      0.011739999987185001
+    ],
+    "bounds_min_m": [
+      -0.011119999922811985,
+      -0.006000000052154064,
+      -0.011039500124752522
+    ],
+    "id": "sensor-range-mini",
+    "imported_triangles": 27632,
+    "meshes": 78,
+    "scene_kit_import": "passed",
+    "textured_materials": 63
+  },
+  {
+    "bounds_max_m": [
+      0.02459999918937683,
+      0.01990199089050293,
+      0.007083999924361706
+    ],
+    "bounds_min_m": [
+      -0.021150000393390656,
+      -0.014999999664723873,
+      -0.007083999924361706
+    ],
+    "id": "servo-17g-metal",
+    "imported_triangles": 8732,
+    "meshes": 31,
+    "scene_kit_import": "passed",
+    "textured_materials": 21
+  },
+  {
+    "bounds_max_m": [
+      0.028699997812509537,
+      0.01806405931711197,
+      0.0080960001796484
+    ],
+    "bounds_min_m": [
+      -0.024675000458955765,
+      -0.013500000350177288,
+      -0.0080960001796484
+    ],
+    "id": "servo-25g-lowprofile",
+    "imported_triangles": 8732,
+    "meshes": 31,
+    "scene_kit_import": "passed",
+    "textured_materials": 21
+  },
+  {
+    "bounds_max_m": [
+      0.012299999594688416,
+      0.006080000661313534,
+      0.0039900001138448715
+    ],
+    "bounds_min_m": [
+      -0.007499999832361937,
+      -0.007419999688863754,
+      -0.0035000001080334187
+    ],
+    "id": "servo-2g-linear",
+    "imported_triangles": 22722,
+    "meshes": 32,
+    "scene_kit_import": "passed",
+    "textured_materials": 29
+  },
+  {
+    "bounds_max_m": [
+      0.03361999988555908,
+      0.025953199714422226,
+      0.010119999758899212
+    ],
+    "bounds_min_m": [
+      -0.028905000537633896,
+      -0.019500000402331352,
+      -0.010119999758899212
+    ],
+    "id": "servo-40g-hv",
+    "imported_triangles": 8732,
+    "meshes": 31,
+    "scene_kit_import": "passed",
+    "textured_materials": 21
+  },
+  {
+    "bounds_max_m": [
+      0.018859999254345894,
+      0.01595742255449295,
+      0.0060720001347362995
+    ],
+    "bounds_min_m": [
+      -0.016215000301599503,
+      -0.012000000104308128,
+      -0.0060720001347362995
+    ],
+    "id": "servo-9g",
+    "imported_triangles": 8732,
+    "meshes": 31,
+    "scene_kit_import": "passed",
+    "textured_materials": 21
+  }
+]

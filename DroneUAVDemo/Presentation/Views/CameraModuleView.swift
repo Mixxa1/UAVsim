@@ -53,6 +53,7 @@ struct CameraModuleView: View {
                         }
                     }
                 }
+                .instructorTarget("simulation.camera.modes")
 
                 Toggle("camera.payload.auto_switch", isOn: Binding(
                     get: { viewModel.isPayloadCameraAutoSwitchEnabled },

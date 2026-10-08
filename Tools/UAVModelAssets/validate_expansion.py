@@ -16,8 +16,8 @@ def validate():
     native={r['id']:r for r in json.loads((OUT/'previews/scenekit-validation.json').read_text())}
     contacts={r['id']:r for r in json.loads((OUT/'connection-audit.json').read_text())['models']}
     ids={p['id'] for p in CATALOG}
-    assert len(models)==30 and {p['id'] for p in models}==ids==set(native)==set(contacts)
-    assert len({m['geometry_sha256'] for m in models})==30,'Duplicate authored geometry'
+    assert len(models)==len(CATALOG) and {p['id'] for p in models}==ids==set(native)==set(contacts)
+    assert len({m['geometry_sha256'] for m in models})==len(models),'Duplicate authored geometry'
     original={p['id'] for p in json.loads((ROOT/'Tools/UAVModelAssets/catalog_snapshot.json').read_text())}
     assert not ids & original,'Expansion repeats an original aircraft ID'
     reports=[]
@@ -56,7 +56,44 @@ def validate():
             assert all(math.isfinite(v) for p in samples.values() for v in p)
             assert max(abs(start[i]-end[i]) for i in range(12))<1e-4,f'Open animation loop: {ident}/{name}'
             assert max(abs(start[i]-p[i]) for p in samples.values() for i in range(9))>.01,f'Static animation: {ident}/{name}'
-            assert max(abs(start[i]-p[i]) for p in samples.values() for i in range(9,12))<1e-5,f'Pivot drifts: {ident}/{name}'
+            rig=next((r for r in model['rigs'] if r['name']==name),{})
+            travel=rig.get('travel_vector_m',[0,0,0])
+            for time,pose in samples.items():
+                frequency=model['animation']['time_codes_per_second']
+                frame=time*frequency;last=round(cycle*frequency)
+                a,b=min(last,math.floor(frame)),min(last,math.floor(frame)+1)
+                da=(1-math.cos(2*math.pi*a/last))/2
+                db=(1-math.cos(2*math.pi*b/last))/2
+                deployment=da+(db-da)*(frame-a)
+                assert max(abs(pose[9+i]-start[9+i]-travel[i]*deployment) for i in range(3))<1e-5,f'Pivot leaves hinge/rail: {ident}/{name}'
+        mechanics=model.get('mechanics')
+        if mechanics and mechanics['retractable_gear']:
+            gear=[r for r in model['rigs'] if r['role']=='landing_gear']
+            doors=[r for r in model['rigs'] if r['role']=='gear_door']
+            assert len(gear)==len(mechanics['gear_hinges'])==3 and len(doors)==6
+            up_time=cycle*.5
+            for rig in gear:
+                axis=rig['axis_vector']
+                theta=rig['amplitude_degrees']*rig['mixing']['gear']*math.pi/180
+                expected=[]
+                for j in range(3):
+                    v=[int(i==j) for i in range(3)]
+                    crossv=[axis[1]*v[2]-axis[2]*v[1],axis[2]*v[0]-axis[0]*v[2],axis[0]*v[1]-axis[1]*v[0]]
+                    expected.extend(v[i]*math.cos(theta)+crossv[i]*math.sin(theta)+axis[i]*axis[j]*(1-math.cos(theta)) for i in range(3))
+                assert max(abs(a-b) for a,b in zip(poses[rig['name']][up_time][:9],expected))<1e-4,f'Gear never fully retracts: {ident}/{rig["name"]}'
+            for rig in doors:
+                assert max(abs(poses[rig['name']][up_time][j*3+i]-int(i==j)) for i in range(3) for j in range(3))<1e-4,f'Door does not close after stowing: {ident}/{rig["name"]}'
+            assert (OUT/'previews'/(ident+'-gear-cycle.gif')).stat().st_size>1000
+        if mechanics and mechanics['has_flaps']:
+            geometry=mechanics['flap_geometry']
+            assert geometry and len(geometry['panels'])>=2,f'Missing measured flap panels: {ident}'
+            wing_area=geometry['wing_planform_area_m2']
+            for panel in geometry['panels']:
+                assert 0<panel['span_start']<panel['span_end']<1
+                assert 0<panel['chord_ratio']<1 and 0<panel['lateral_arm']<.5
+                assert abs(panel['covered_area_m2']/wing_area-panel['covered_area_fraction'])<1e-6
+                assert abs(panel['panel_area_m2']/panel['covered_area_m2']-panel['chord_ratio'])<1e-6
+                assert abs(panel['mesh_projected_area_m2']-panel['panel_area_m2'])<max(1e-6,panel['panel_area_m2']*1e-5)
         for rotor in model['rotors']:
             samples=poses[rotor['name']]
             for mat in samples.values():
@@ -74,13 +111,13 @@ def validate():
         reports.append(dict(id=ident,sha256=sha,arkit='passed',self_contained_usdz='passed',
             alignment_64_bytes='passed',native_import='passed',animated_nodes=len(expected),
             motion='passed',pivots='passed',loop='passed',attachments='passed'))
-    result=dict(status='passed',models=30,winged_models=sum(m['category']!='multicopter' for m in models),
-                animated_models=30,animated_nodes=sum(r['animated_nodes'] for r in reports),
+    result=dict(status='passed',models=len(models),winged_models=sum(m['category']!='multicopter' for m in models),
+                animated_models=len(models),animated_nodes=sum(r['animated_nodes'] for r in reports),
                 meshes=sum(m['mesh_count'] for m in models),triangles=sum(m['triangles'] for m in models),
                 note='Compatibility, attachments and animation are verified; exterior metrology remains approximate.',
                 models_checked=reports)
     (OUT/'validation-summary.json').write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
-    print(f'PASS: 30 distinct USDZ; 30 native animated imports; {result["animated_nodes"]} moving nodes; closed cycles, stationary pivots and connected exterior meshes.')
+    print(f'PASS: {len(models)} distinct USDZ; {len(models)} native animated imports; {result["animated_nodes"]} moving nodes; closed cycles, stationary pivots and connected exterior meshes.')
     return result
 
 

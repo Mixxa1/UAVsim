@@ -1,4 +1,4 @@
-"""Build the thirty additional, self-contained USDZ files.
+"""Build the additional, self-contained USDZ files.
 
 Uses macOS /usr/bin/usdcat, usdzip and usdchecker, plus Pillow for original
 surface patterns and original typographic labels. Run with a Pillow-enabled
@@ -78,7 +78,7 @@ def sin_lobe(x):
 def one(profile):
     ident=profile['id'];m=build(profile)
     # Catch non-finite geometry before passing the file to native parsers.
-    assert m.parts and m.rotors or profile['layout']=='kizilelma'
+    assert m.parts and m.rotors
     for part in m.parts:
         assert all(math.isfinite(v) for point in part['points'] for v in point), part['name']
         assert all(math.isfinite(v) for normal in part['normals'] for v in normal),part['name']
@@ -122,7 +122,7 @@ def one(profile):
              mesh_count=len(m.parts),triangles=sum(len(p['faces']) for p in m.parts),
              material_count=len({p['material'] for p in m.parts}),textures=used,
              rotors=m.rotors,rotor_paths=['/Aircraft/Geometry/'+r['name'] for r in m.rotors],
-             rigs=m.rigs,transition=m.transition,
+             rigs=m.rigs,transition=m.transition,mechanics=m.mechanics,
              animation=dict(duration_seconds=12 if m.transition else 2,time_codes_per_second=60,
                             samples_per_rotor=721 if m.transition else 121,
                             preview_rpm=120,animated_rotors=len(m.rotors),

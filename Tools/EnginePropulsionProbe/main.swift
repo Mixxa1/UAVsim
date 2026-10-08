@@ -32,7 +32,11 @@ struct Subject {
     let backend: FuelPropulsionBackend
 }
 
+let requestedProfile = CommandLine.arguments.firstIndex(of: "--profile").flatMap { index in
+    index + 1 < CommandLine.arguments.count ? CommandLine.arguments[index + 1] : nil
+}
 let subjects: [Subject] = repository.allProfiles.compactMap { runtime in
+    guard requestedProfile == nil || runtime.id == requestedProfile else { return nil }
     guard let uav = runtime.resolvedUAVProfile,
           let powerplant = uav.powerplant,
           powerplant.energySource == .fuel,
@@ -511,13 +515,22 @@ for subject in subjects {
     let (groundMass, groundContact) = groundTestMassProperties(subject)
     var worstRoll: Float = 0.0
     var worstPitch: Float = 0.0
+    var peakGroundRunSpeed: Float = 0.0
+    var gearUpIssued = false
     for _ in 0..<(90 * groundRunSeconds) {
-        let control = DroneControlInput(
+        // This is an engine/ground-run check. Retract after positive climb so
+        // its sixty-second full-power segment does not become a gear-overspeed
+        // failure test (that failure is exercised by MechanizationProbe).
+        if state.position.y > 3 { gearUpIssued = true }
+        let rotationPitch: Float = wing.hasWheeledUndercarriage && state.forwardAirspeed >= wing.takeoffRotationSpeed
+            ? 8 * .pi / 180 : 0
+        var control = DroneControlInput(
             targetPosition: .zero,
-            targetOrientation: .zero,
+            targetOrientation: SIMD3<Float>(0,rotationPitch,0),
             yawIntent: 0.0, throttle: 1.0, isArmed: true,
             mode: .manual, controlMode: .stabilized
         )
+        control.landingGearDownCommand = !gearUpIssued
         let context = DroneSimulationContext(
             profile: subject.runtime, activeUAVProfile: subject.uav,
             weather: .normal, damageState: .pristine, batteryState: .full,
@@ -529,6 +542,7 @@ for subject in subjects {
             fuelPropulsion: subject.backend
         )
         state = physics.step(state: state, control: control, context: context, deltaTime: dt)
+        peakGroundRunSpeed = max(peakGroundRunSpeed, state.forwardAirspeed)
         // Only judge attitude while still on the ground; once it flies, bank is fine.
         if state.position.y < 3.0 {
             worstRoll = max(worstRoll, abs(state.orientation.x) * 180.0 / .pi)
@@ -544,6 +558,13 @@ for subject in subjects {
                  state.forwardAirspeed, worstRoll, worstPitch,
                  (wheeled ? "wheels" : "skid") as NSString,
                  engineState as NSString))
+    if state.mechanization.hasFailure {
+        print(String(format: "  mechanics: peak %.1f m/s, gear load %.2f, leg health %@, unsupported mask %d, crushed %@",
+            peakGroundRunSpeed, state.mechanization.gearLoadRatio,
+            String(describing: state.mechanization.gearLegHealth) as NSString,
+            Int(state.mechanization.gearUnsupportedMask),
+            String(state.mechanization.gearCrushedOnGround) as NSString))
+    }
 
     if worstRoll > 35.0 {
         failures.append(String(format: "%@ rolled to %.0f deg on the ground at full throttle",

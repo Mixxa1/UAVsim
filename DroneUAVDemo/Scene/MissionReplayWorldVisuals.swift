@@ -19,21 +19,28 @@ enum MissionReplayVisualCapture {
         let sourceID = "\(id):\(ObjectIdentifier(node))"
         var liveNodes: [ObjectIdentifier: SCNNode] = [:]
         visit(node, path: "") { child, _ in liveNodes[ObjectIdentifier(child)] = child }
+        let geometryIDs = liveNodes.compactMapValues { $0.geometry.map(ObjectIdentifier.init) }
         var assetID = recorder.visualAssetIDs[sourceID] ?? sourceID
         // Removing a child must not shift the paths of its surviving siblings. New children
         // need a new archive; removed children are simply hidden against the original paths.
-        if let paths = recorder.visualNodePaths[assetID], liveNodes.keys.contains(where: { paths[$0] == nil }) {
+        if let paths = recorder.visualNodePaths[assetID],
+           liveNodes.keys.contains(where: { paths[$0] == nil }) || geometryIDs.contains(where: {
+               recorder.visualGeometryIDs[assetID]?[$0.key] != $0.value
+           }) {
             assetID = "\(sourceID):\(UUID())"
         }
         recorder.visualAssetIDs[sourceID] = assetID
-        _ = recorder.registerVisualAsset(id: assetID) {
+        if !recorder.hasVisualAsset(id: assetID) {
             recorder.visualNodeBaselines[assetID] = localStates(of: node)
             var paths: [ObjectIdentifier: String] = [:]
             visit(node, path: "") { child, path in paths[ObjectIdentifier(child)] = path }
             recorder.visualNodePaths[assetID] = paths
+            recorder.visualGeometryIDs[assetID] = geometryIDs
             let copy = node.clone()
             copy.simdTransform = matrix_identity_float4x4
             copy.opacity = 1
+            var geometryCopies: [ObjectIdentifier: SCNGeometry] = [:]
+            var materialCopies: [ObjectIdentifier: SCNMaterial] = [:]
             copy.enumerateHierarchy { child, _ in
                 child.removeAllActions()
                 child.removeAllAnimations()
@@ -43,8 +50,32 @@ enum MissionReplayVisualCapture {
                 child.light = nil
                 child.constraints = nil
                 child.isHidden = false
+                if let data = child.value(forKey: "userData") as? NSDictionary {
+                    child.setValue(NSDictionary(dictionary: data), forKey: "userData")
+                }
+                // clone() shares geometry and materials with the live scene. Freeze those
+                // wrappers too: damage tint/uniforms must not change an archive on a worker.
+                if let original = child.geometry {
+                    let id = ObjectIdentifier(original)
+                    if let frozen = geometryCopies[id] { child.geometry = frozen; return }
+                    guard let geometry = original.copy() as? SCNGeometry else { return }
+                    geometry.materials = geometry.materials.map { material in
+                        let id = ObjectIdentifier(material)
+                        if let frozen = materialCopies[id] { return frozen }
+                        let frozen = material.copy() as! SCNMaterial
+                        materialCopies[id] = frozen
+                        return frozen
+                    }
+                    geometryCopies[id] = geometry
+                    child.geometry = geometry
+                }
             }
-            return try? NSKeyedArchiver.archivedData(withRootObject: copy, requiringSecureCoding: false)
+            let archive = MissionReplayNodeArchive(node: copy)
+            if recorder.archivesVisualAssetsInBackground {
+                recorder.registerDeferredVisualAsset(id: assetID) { archive.makeData() }
+            } else {
+                _ = recorder.registerVisualAsset(id: assetID) { archive.makeData() }
+            }
         }
         let paths = recorder.visualNodePaths[assetID] ?? [:]
         let hidden = liveNodes.compactMap { identity, child in child.isHidden ? paths[identity] : nil }
@@ -91,6 +122,16 @@ enum MissionReplayVisualCapture {
     }
 }
 
+/// This node is a stripped snapshot with independently copied geometry/material wrappers.
+/// Only its archive worker accesses it; the render scene retains none of its mutable objects.
+private final class MissionReplayNodeArchive: @unchecked Sendable {
+    private let node: SCNNode
+    init(node: SCNNode) { self.node = node }
+    func makeData() -> Data? {
+        try? NSKeyedArchiver.archivedData(withRootObject: node, requiringSecureCoding: false)
+    }
+}
+
 final class MissionReplayWorldVisuals {
     private let root = SCNNode()
     private var assets: [String: Data] = [:]
@@ -99,10 +140,15 @@ final class MissionReplayWorldVisuals {
     private var baselines: [String: [String: MissionReplayNodeState]] = [:]
     private var previousChildChanges: [String: [String: MissionReplayNodeState]] = [:]
     private weak var playerRoot: SCNNode?
+    private weak var sceneRoot: SCNNode?
+    private var replacedEnvironment: [String: SCNNode] = [:]
+    private let wheelTracks = GroundVehicleTrackVisuals()
     private(set) var snapshots: [MissionReplayVisualSnapshot] = []
     private(set) var assetFailures = false
 
     func load(assets: [String: Data], scene: SCNScene, playerRoot: SCNNode) {
+        replacedEnvironment.values.forEach { $0.isHidden = false }
+        replacedEnvironment.removeAll()
         root.removeFromParentNode()
         root.childNodes.forEach { $0.removeFromParentNode() }
         instances.removeAll()
@@ -113,7 +159,9 @@ final class MissionReplayWorldVisuals {
         assetFailures = false
         self.assets = assets
         self.playerRoot = playerRoot
+        self.sceneRoot = scene.rootNode
         root.name = "mission-replay-world"
+        wheelTracks.clear(); root.addChildNode(wheelTracks.node)
         root.addChildNode(WorldDamageEffectVisual.makePreparationNode())
         scene.rootNode.addChildNode(root)
     }
@@ -125,8 +173,10 @@ final class MissionReplayWorldVisuals {
         SCNTransaction.disableActions = true
         defer { SCNTransaction.commit() }
         snapshots = world.nodes
+        wheelTracks.update(world.wheelTracks ?? [])
         let live = Set(world.nodes.map(\.id))
         for id in Array(instances.keys) where !live.contains(id) {
+            replacedEnvironment.removeValue(forKey: id)?.isHidden = false
             instances.removeValue(forKey: id)?.node.removeFromParentNode()
             baselines.removeValue(forKey: id)
             previousChildChanges.removeValue(forKey: id)
@@ -156,7 +206,14 @@ final class MissionReplayWorldVisuals {
                     playerRoot.childNodes.filter { $0.name != "replayGizmoRoot" }.forEach { $0.isHidden = true }
                     playerRoot.addChildNode(node)
                 } else {
-                    root.addChildNode(node)
+                root.addChildNode(node)
+                }
+                if snapshot.role == "environment", replacedEnvironment[snapshot.id] == nil,
+                   let trees = sceneRoot?.childNode(withName: "environment.trees", recursively: true),
+                   let original = trees.childNodes.first(where: {
+                       simd_distance($0.simdWorldPosition, snapshot.pose.position) < 0.25
+                   }) {
+                    original.isHidden = true; replacedEnvironment[snapshot.id] = original
                 }
                 instances[snapshot.id] = (snapshot.assetID, node)
             }

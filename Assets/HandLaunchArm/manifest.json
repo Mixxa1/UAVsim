@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "source_url": "https://opengameart.org/content/fps-arms-rigged-only",
+  "author": "para / MakeHuman team",
+  "license": "CC0-1.0",
+  "license_url": "https://creativecommons.org/publicdomain/zero/1.0/",
+  "original_vertices": 4103,
+  "subdivision_level": 2,
+  "geometry_reduction": false,
+  "original_skin_texture": [
+    1024,
+    1024
+  ],
+  "assets": [
+    {
+      "handedness": "left",
+      "file": "hand-launch-arm-left.usdz",
+      "rig": "rig-left.json",
+      "vertices": 32649,
+      "triangles": 65216,
+      "joints": 24,
+      "influences_per_vertex": 7,
+      "sha256": "c7c2316509ed83f9008020d9e15c95d0e77d5f2f72281ca3f63fd69cda3ae5e7"
+    },
+    {
+      "handedness": "right",
+      "file": "hand-launch-arm-right.usdz",
+      "rig": "rig-right.json",
+      "vertices": 32649,
+      "triangles": 65216,
+      "joints": 24,
+      "influences_per_vertex": 7,
+      "sha256": "ea99aff7a61e4d7e816ea783097ada03ace075e63eed6d1f27a707e7deafeee0"
+    }
+  ]
+}

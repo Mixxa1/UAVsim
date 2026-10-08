@@ -17,6 +17,11 @@ struct InterceptObservationSource {
     /// because a source whose radio is not being evaluated has no honest number to show.
     var controlRSSIDBm: Double?
     var controlLQ: Int?
+    /// Decoder settings travel with the selected transmitter. Reusing the destroyed carrier's
+    /// bitrate/preset can leave a healthy observer feed stalling as if it were still damaged.
+    var nominalVideoBitrateBPS: Double?
+    var videoLinkPreset: RFVideoLinkPreset?
+    var videoEvaluation: RFLinkEvaluation?
 
     /// Usable as a feed right now. A frozen or lost picture is not a feed, however healthy the
     /// aircraft carrying the camera happens to be.

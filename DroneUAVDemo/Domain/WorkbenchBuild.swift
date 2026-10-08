@@ -84,6 +84,11 @@ struct WorkbenchBuild: Codable, Hashable, Identifiable {
     var structuralCases: [WorkbenchStructuralCase] = []
     var aerodynamicSettings: WorkbenchAeroSettings?
     var aerodynamicRuns: [WorkbenchAeroRun] = []
+    /// What the static strength calculations concluded about the airframe as it is now: the
+    /// smallest reserve factor over its current load cases. `nil` until they have been run, and
+    /// again once the build no longer is the one they were run on. The runs themselves stay out
+    /// of the blueprint; this one number goes with it into flight.
+    var structuralReserveFactor: Double?
 
     init(
         id: UUID = UUID(),
@@ -287,7 +292,7 @@ struct WorkbenchBuild: Codable, Hashable, Identifiable {
         case flightControllerSpecID, receiverSpecID, cameraSpecID, gpsSpecID
         case sensorSpecID, payloadSpecID, landingGearSpecID
         case customComponents, componentPlacements, rfSystem, tuning, revision
-        case structuralCases, aerodynamicSettings, aerodynamicRuns
+        case structuralCases, aerodynamicSettings, aerodynamicRuns, structuralReserveFactor
     }
 
     init(from decoder: Decoder) throws {
@@ -344,6 +349,7 @@ struct WorkbenchBuild: Codable, Hashable, Identifiable {
         structuralCases = try c.decodeIfPresent([WorkbenchStructuralCase].self, forKey: .structuralCases) ?? []
         aerodynamicSettings = try c.decodeIfPresent(WorkbenchAeroSettings.self, forKey: .aerodynamicSettings)
         aerodynamicRuns = try c.decodeIfPresent([WorkbenchAeroRun].self, forKey: .aerodynamicRuns) ?? []
+        structuralReserveFactor = try c.decodeIfPresent(Double.self, forKey: .structuralReserveFactor)
     }
 
     private static func inferredArchitecture(

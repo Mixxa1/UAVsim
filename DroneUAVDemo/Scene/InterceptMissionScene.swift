@@ -12,7 +12,10 @@ final class InterceptMissionScene {
     private let root = SCNNode()
     private var visuals: [String: DroneVisualModel] = [:]
     private var groundVisuals: [String: GroundVehicleVisual] = [:]
+    private let groundTracks = GroundVehicleTrackVisuals()
+    var wheelTracks: [MissionReplayWheelTrack] { groundTracks.samples }
     private var cameras: [String: SCNNode] = [:]
+    private var acquiredObserverTargets: Set<String> = []
     private var effectNodes: [UUID: WorldDamageEffectVisual] = [:]
     private var scorchNodes: [String: (node: SCNNode, bornAt: TimeInterval)] = [:]
     private var detachedVisuals: Set<String> = []
@@ -71,8 +74,8 @@ final class InterceptMissionScene {
     private static let observerGimbalDrop: Float = 0.45
     private static let cameraNear = 0.02
     private static let cameraFar = 4000.0
-    /// How quickly the observer's gimbal swings onto the target, in radians per second. Snapping
-    /// straight to `look(at:)` every frame reads as a jump cut whenever the target moves fast.
+    /// Gimbal smoothing rate after initial acquisition, per second. A mission observer is
+    /// already watching its subject when flight begins; subsequent motion remains smooth.
     private static let observerTrackingRate: Float = 1.8
     /// How far the zone disc floats above the ground sample, so it does not z-fight with terrain.
     private static let zoneGroundClearance: Float = 0.25
@@ -87,6 +90,7 @@ final class InterceptMissionScene {
     init(scene: SCNScene, showsCallsigns: Bool) {
         self.showsCallsigns = showsCallsigns
         root.name = "intercept-mission-world"
+        root.addChildNode(groundTracks.node)
         root.addChildNode(WorldDamageEffectVisual.makePreparationNode())
         scene.rootNode.addChildNode(root)
     }
@@ -447,7 +451,9 @@ final class InterceptMissionScene {
             spinPropellers(of: visual, throttle: actor.state.motorThrottle, deltaTime: deltaTime)
             shedDetachedParts(of: actor, visual: visual, now: now)
             if actor.role == .observer {
-                trackTarget(from: actor.id, to: session.target.state.position, deltaTime: deltaTime)
+                let aim = session.target.state.position
+                    + (session.target.isGroundVehicle ? SIMD3<Float>(0, 1.7, 0) : .zero)
+                trackTarget(from: actor.id, to: aim, deltaTime: deltaTime)
             }
         }
         updateDebris(now: now, deltaTime: deltaTime, wind: wind)
@@ -469,7 +475,10 @@ final class InterceptMissionScene {
     private func updateGroundActor(_ actor: InterceptVehicleRuntime, now: TimeInterval,
                                    ground: (SIMD3<Float>, Float) -> Float) {
         guard let road = actor.groundVehicle, let visual = groundVisuals[actor.id] else { return }
-        for piece in visual.update(road) {
+        let pieces = visual.update(road)
+        visual.updateGroundContact(road, ground: ground)
+        groundTracks.record(road, ground: ground)
+        for piece in pieces {
             root.addChildNode(piece)
             let mass = (piece.value(forKey: "userData") as? NSDictionary)?["debrisMass"] as? Double ?? 25
             let id = debrisRuntime.launch(kind: .debris, descriptor: BallisticDescriptor(massKg: Float(mass), shape: .debris),
@@ -573,8 +582,11 @@ final class InterceptMissionScene {
         let offset = targetPosition - camera.simdWorldPosition
         guard simd_length_squared(offset) > 1e-6 else { return }
         let desired = Self.lookRotation(forward: simd_normalize(offset))
-        let step = min(1, Self.observerTrackingRate * deltaTime)
-        let world = simd_slerp(camera.simdWorldOrientation, desired, step)
+        // The first aim must not spend the opening seconds looking at empty ground. A feed
+        // handoff can occur in that interval, hiding an otherwise immediate contact flash.
+        let isFirstAim = acquiredObserverTargets.insert(vehicleID).inserted
+        let step = 1 - exp(-Self.observerTrackingRate * max(0, deltaTime))
+        let world = isFirstAim ? desired : simd_slerp(camera.simdWorldOrientation, desired, step)
         // The camera hangs off the airframe's anchor, so the world-space aim has to come back
         // into the parent's frame before it is applied.
         let parentOrientation = camera.parent?.simdWorldOrientation ?? simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0))
@@ -703,7 +715,9 @@ final class InterceptMissionScene {
         scorchNodes.removeAll()
         visuals.removeAll()
         groundVisuals.removeAll()
+        groundTracks.clear()
         cameras.removeAll()
+        acquiredObserverTargets.removeAll()
         debris.removeAll()
         debrisNodes.removeAll()
         debrisRuntime.removeAll()

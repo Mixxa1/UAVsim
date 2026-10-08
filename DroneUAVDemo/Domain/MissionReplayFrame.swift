@@ -149,9 +149,17 @@ struct MissionReplayEffectSnapshot: Codable, Equatable, Identifiable {
     var wind: SIMD3<Float>? = nil
 }
 
+struct MissionReplayWheelTrack: Codable, Equatable, Identifiable {
+    var id: UUID
+    var corners: [SIMD3<Float>]
+    var length: Float
+    var opacity: Float
+}
+
 struct MissionReplayWorldSnapshot: Codable, Equatable {
     var nodes: [MissionReplayVisualSnapshot]
     var effects: [MissionReplayEffectSnapshot]
+    var wheelTracks: [MissionReplayWheelTrack]? = nil
 
     static func interpolated(_ start: Self?, _ end: Self?, fraction: Double) -> Self? {
         guard let start, let end else { return start ?? end }
@@ -192,7 +200,7 @@ struct MissionReplayWorldSnapshot: Codable, Equatable {
             if let next = effectsByID[effect.id] { value.age += (next.age - value.age) * fraction }
             return value
         }
-        return Self(nodes: nodes, effects: effects)
+        return Self(nodes: nodes, effects: effects, wheelTracks: start.wheelTracks)
     }
 
     private static func interpolatePose(_ a: MissionReplayPose, _ b: MissionReplayPose, _ t: Double) -> MissionReplayPose {

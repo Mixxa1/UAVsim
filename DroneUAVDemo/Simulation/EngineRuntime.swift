@@ -233,6 +233,16 @@ final class EngineRuntimeService {
         return rising * droop
     }
 
+    /// The same for a particular powerplant: a supercharged piston holds its rating up to its
+    /// critical altitude and loses it with density, relative to the air there, above.
+    static func altitudeFactor(powerplant: UAVPowerplantSpec, densityRatio: Float) -> Float {
+        guard let critical = powerplant.boostCriticalAltitudeM, critical > 0 else {
+            return altitudeFactor(engineType: powerplant.engineType, densityRatio: densityRatio)
+        }
+        let criticalDensityRatio = AtmosphereModel.standard.state(altitudeMeters: critical).densityRatio
+        return max(0.20, min(1.0, densityRatio / max(0.05, criticalDensityRatio)))
+    }
+
     /// How much of its sea-level rating the engine can make in the air it is in.
     static func altitudeFactor(engineType: UAVEngineType, densityRatio: Float) -> Float {
         switch engineType {
@@ -337,7 +347,7 @@ final class EngineRuntimeService {
             let target = ratedRPM * envelope.idleSpeedFraction
             let accelerationAuthority = (input.healthFactor.clampedUnit()
                 * Self.altitudeFactor(
-                    engineType: input.powerplant.engineType,
+                    powerplant: input.powerplant,
                     densityRatio: input.atmosphere.densityRatio
                 )).clamped(to: 0.0...1.0)
             let rate = max(1.0, (target - ratedRPM * envelope.lightOffSpeedFraction))
@@ -360,7 +370,7 @@ final class EngineRuntimeService {
 
         case .warmingUp, .ready:
             let altitude = Self.altitudeFactor(
-                engineType: input.powerplant.engineType,
+                powerplant: input.powerplant,
                 densityRatio: input.atmosphere.densityRatio
             )
             let overheat = next.temperatureC > envelope.deratingTemperatureC

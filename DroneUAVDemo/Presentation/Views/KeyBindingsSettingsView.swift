@@ -213,6 +213,9 @@ struct KeyBindingsSettingsView: View {
             }
 
             if event.type == .flagsChanged {
+                // For an ordinary command, wait for the letter after Shift. Modifier-only
+                // bindings remain available for the existing boost and camera precision inputs.
+                guard captureCoordinator.activeCommand == .accelerate || captureCoordinator.activeCommand == .cameraLookPrecision else { return event }
                 let shift = [UInt16(56), 60].contains(event.keyCode) && event.modifierFlags.contains(.shift)
                 let option = [UInt16(58), 61].contains(event.keyCode) && event.modifierFlags.contains(.option)
                 if !shift && !option { return event }
@@ -231,8 +234,9 @@ struct KeyBindingsSettingsView: View {
                 return nil
             }
 
-            let label = Self.displayLabel(for: event)
-            bindingsViewModel.rebindCurrentCommand(keyCode: event.keyCode, keyLabel: label)
+            let chord = event.type == .keyDown && event.modifierFlags.contains(.shift)
+            let label = (chord ? "⇧" : "") + Self.displayLabel(for: event)
+            bindingsViewModel.rebindCurrentCommand(keyCode: event.keyCode, keyLabel: label, requiresShift: chord)
             stopRebindingCapture()
             return nil
         }
@@ -247,45 +251,7 @@ struct KeyBindingsSettingsView: View {
     }
 
     private static func displayLabel(for event: NSEvent) -> String {
-        switch event.keyCode {
-        case 24:
-            if event.modifierFlags.contains(.shift) || event.characters == "+" {
-                return "+"
-            }
-            return "="
-        case 27:
-            return "-"
-        case 69:
-            return "Num+"
-        case 78:
-            return "Num-"
-        case 123:
-            return "←"
-        case 124:
-            return "→"
-        case 125:
-            return "↓"
-        case 126:
-            return "↑"
-        case 48:
-            return "Tab"
-        case 49:
-            return L10n.s("keybind.key.space")
-        case 53:
-            return "Esc"
-        case 56, 60:
-            return "Shift"
-        case 58, 61:
-            return "⌥"
-        default:
-            if let chars = event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines), !chars.isEmpty {
-                return chars.uppercased()
-            }
-            return String(
-                format: L10n.s("keybind.key.code"),
-                event.keyCode
-            )
-        }
+        KeyboardKeyLabel.forEvent(event)
     }
 
     private func inputSourceTitle(_ source: InputSourceKind?) -> String {

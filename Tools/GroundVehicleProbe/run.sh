@@ -25,6 +25,7 @@ PY
 export SWIFT_MODULECACHE_PATH="$BUILD/swift-cache"
 export CLANG_MODULE_CACHE_PATH="$BUILD/clang-cache"
 tr '\n' '\0' < "$BUILD/sources.txt" | xargs -0 swiftc -O -o "$BUILD/probe" "$BUILD/main.swift"
+cp -R "$ROOT/DroneUAVDemo/Resources/VFX" "$BUILD/"
 cp "$ROOT/DroneUAVDemo/Resources/Models/Scenario/Fire_sheet_baseColor.png" "$BUILD/"
 cp "$ROOT/DroneUAVDemo/Resources/Models/Scenario/Fire_sheet_emissive.jpg" "$BUILD/"
 "$BUILD/probe" "$ROOT/DroneUAVDemo/Resources/Models/Vehicles" "$BUILD"

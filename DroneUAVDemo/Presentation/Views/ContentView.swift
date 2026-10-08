@@ -54,6 +54,7 @@ private enum NameDialogMode: String, Identifiable {
 private enum PendingExitAction {
     case closeWindow
     case returnToMenu
+    case instructor(InstructorLaunchMode)
 }
 
 @MainActor
@@ -74,6 +75,7 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
     @Published var worldLoad: WorldLoadState?
     @Published var showUnsavedPrompt: Bool = false
     @Published var globalAlert: TelemetryExportAlert?
+    @Published var instructorTourRequested = false
 
     private let projectStorage: ProjectStorageManaging
     private let cadPayloadHandoffService = CADPayloadHandoffService()
@@ -608,6 +610,34 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         }
     }
 
+    func requestInstructor(_ mode: InstructorLaunchMode) {
+        if let vm = activeSimulation, vm.shouldPromptBeforeExit, vm.hasUnsavedChanges {
+            pendingExitAction = .instructor(mode)
+            showUnsavedPrompt = true
+        } else {
+            launchInstructor(mode)
+        }
+    }
+
+    private func launchInstructor(_ mode: InstructorLaunchMode) {
+        clearActiveSimulation()
+        switch mode {
+        case .appTour:
+            instructorTourRequested = true
+        case .flightCourse:
+            let vm = DroneSimulationViewModel(
+                projectStorage: projectStorage,
+                initialProjectName: L10n.s("instructor.project_name"),
+                initialDroneProfile: LIPODroneModelRepository().allProfiles.first {
+                    $0.id == TrainingAircraft.copter.profileID
+                },
+                deferInitialEnvironmentPreparation: true
+            )
+            activeSimulation = vm
+            vm.startFlightTraining()
+        }
+    }
+
     func saveOnlyFromUnsavedDialog() {
         saveActiveProject()
         pendingExitAction = nil
@@ -638,6 +668,8 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
             activeSimulation?.stopRuntimeForExit()
             allowWindowClose = true
             window?.performClose(nil)
+        case .instructor(let mode):
+            launchInstructor(mode)
         }
     }
 
@@ -1049,6 +1081,7 @@ private struct SimulationToolstripView: View {
             .padding(.vertical, 8)
         }
         .background(GroundControlPalette.shell)
+        .instructorTarget("simulation.toolbar")
     }
 
     private func moduleButton(_ module: ControlModule) -> some View {
@@ -1089,16 +1122,19 @@ private struct SimulationToolstripView: View {
         .controllerButtonTarget(id: "toolbar.module.\(module.id)") {
             viewModel.toggleActiveControlModule(module)
         }
+        .instructorTarget("simulation.\(module.rawValue)")
     }
 }
 
 private struct KeyBindingsSheetHost: View {
     @SimulationObservedObject var simulationViewModel: DroneSimulationViewModel
     @ObservedObject private var bindingsViewModel: BindingsViewModel
+    let onStartInstructor: (InstructorLaunchMode) -> Void
 
-    init(simulationViewModel: DroneSimulationViewModel) {
+    init(simulationViewModel: DroneSimulationViewModel, onStartInstructor: @escaping (InstructorLaunchMode) -> Void) {
         _simulationViewModel = SimulationObservedObject(wrappedValue: simulationViewModel)
         _bindingsViewModel = ObservedObject(wrappedValue: simulationViewModel.bindingsViewModel)
+        self.onStartInstructor = onStartInstructor
     }
 
     var body: some View {
@@ -1120,7 +1156,9 @@ private struct KeyBindingsSheetHost: View {
                     // here came up in the system language while the same screen from the start menu
                     // was translated, so the locale ContentView sets on the main hierarchy does not
                     // reach this sheet's content. Same remedy as ReplayCenterView's own window uses.
-                    SettingsView(onClose: { simulationViewModel.setBindingsPanelVisible(false) }, simulationViewModel: simulationViewModel)
+                    SettingsView(onClose: { simulationViewModel.setBindingsPanelVisible(false) }, simulationViewModel: simulationViewModel,
+                                 onStartInstructor: onStartInstructor,
+                                 initialPage: bindingsViewModel.opensKeyBindingsPage ? .keys : .guide)
                         .environment(\.locale, L10n.currentLanguage().locale)
                 }
                 .frame(width: min(1040, (NSScreen.main?.visibleFrame.width ?? 1200) - 80),
@@ -1135,6 +1173,8 @@ struct ContentView: View {
     // P2P v1.3: LANSessionViewModel lifetime must span lobby and runtime — never recreate mid-session.
     @StateObject private var lanSessionViewModel = LANSessionViewModel()
     @AppStorage("app.language") private var appLanguageRawValue: String = AppLanguage.system.rawValue
+    @AppStorage(InstructorProgressStore.appTourSeenKey) private var instructorTourSeen = false
+    @State private var instructorTourStep: InstructorTourStep?
 
     @State private var nameDialogMode: NameDialogMode?
     @State private var pendingProjectName: String?
@@ -1144,6 +1184,7 @@ struct ContentView: View {
     @State private var isOnlineTrialsPresented: Bool = false
     @State private var isMissionSetupPresented: Bool = false
     @State private var isSettingsPresented: Bool = false
+    @State private var settingsInitialPage: SettingsView.SettingsPage = .guide
     @State private var isWorkbenchPresented: Bool = false
     @StateObject private var workbenchViewModel = WorkbenchViewModel()
     @StateObject private var startScreenReplayLibrary = ReplayLibraryViewModel()
@@ -1192,6 +1233,17 @@ struct ContentView: View {
             }
         }
         .screenCurtain(for: rootScreen)
+        .overlayPreferenceValue(InstructorTargetPreferenceKey.self) { targets in
+            if let step = instructorTourStep {
+                InstructorTourOverlayView(
+                    step: step, targets: targets,
+                    onBack: { moveInstructorTour(by: -1) },
+                    onNext: { moveInstructorTour(by: 1) },
+                    onDismiss: dismissInstructorTour,
+                    onOpenTraining: showInstructorSettings
+                )
+            }
+        }
         .environment(\.locale, selectedLanguage.locale)
         .background(
             WindowAccessor { window in
@@ -1287,6 +1339,51 @@ struct ContentView: View {
         .onReceive(cadPayloadHandoffTimer) { _ in
             appShell.pollCADPayloadHandoff()
         }
+        .onAppear {
+            if !instructorTourSeen, appShell.activeSimulation == nil {
+                instructorTourStep = .welcome
+            }
+        }
+        .onChange(of: appShell.instructorTourRequested) { _, requested in
+            if requested {
+                isSettingsPresented = false
+                isOnlineTrialsPresented = false
+                isMissionSetupPresented = false
+                isWorkbenchPresented = false
+                instructorTourStep = .welcome
+                appShell.instructorTourRequested = false
+            }
+        }
+    }
+
+    private func startInstructor(_ mode: InstructorLaunchMode) {
+        if instructorTourStep != nil { dismissInstructorTour() }
+        isSettingsPresented = false
+        isOnlineTrialsPresented = false
+        isMissionSetupPresented = false
+        isWorkbenchPresented = false
+        appShell.requestInstructor(mode)
+    }
+
+    private func dismissInstructorTour() {
+        instructorTourSeen = true
+        instructorTourStep = nil
+    }
+
+    private func showInstructorSettings() {
+        dismissInstructorTour()
+        settingsInitialPage = .training
+        isSettingsPresented = true
+    }
+
+    private func moveInstructorTour(by offset: Int) {
+        guard let step = instructorTourStep,
+              let index = InstructorTourStep.allCases.firstIndex(of: step) else { return }
+        let next = index + offset
+        guard InstructorTourStep.allCases.indices.contains(next) else { return }
+        withAnimation(reduceMotion ? .easeOut(duration: 0.16) : Motion.panel) {
+            instructorTourStep = InstructorTourStep.allCases[next]
+        }
     }
 
     /// Which of the three screens the window shows; a change of it is covered by the curtain.
@@ -1320,6 +1417,7 @@ struct ContentView: View {
     private var startScreen: some View {
         HStack(spacing: 0) {
             projectSidebar
+                .instructorTarget("app.projects")
             Rectangle().fill(Color.white.opacity(0.08)).frame(width: 1)
             GeometryReader { geometry in
                 ZStack {
@@ -1330,6 +1428,7 @@ struct ContentView: View {
                     ZStack {
                         switch startPanel {
                         case .menu:
+                            ScrollViewReader { proxy in
                             ScrollView {
                                 startScreenActions
                                     .frame(maxWidth: 900)
@@ -1338,6 +1437,20 @@ struct ContentView: View {
                                     .frame(maxWidth: .infinity, minHeight: geometry.size.height)
                             }
                             .transition(.opacity)
+                            .onChange(of: instructorTourStep) { _, step in
+                                guard step != .projects, let target = step?.target else { return }
+                                if reduceMotion {
+                                    proxy.scrollTo(target, anchor: .center)
+                                } else {
+                                    // Tour guidance should not animate a large start-screen
+                                    // scroll with the long panel spring; that animation can hold
+                                    // the main run loop while the next card is already waiting.
+                                    withTransaction(Transaction(animation: Motion.press)) {
+                                        proxy.scrollTo(target, anchor: .center)
+                                    }
+                                }
+                            }
+                            }
                         case .onlineTrials:
                             ScrollView {
                                 LANOnlineTrialsView(
@@ -1371,7 +1484,9 @@ struct ContentView: View {
                         case .settings:
                             SettingsView(
                                 onClose: { isSettingsPresented = false },
-                                onApplyWindowSize: { appShell.applyWindowSizePreset($0) })
+                                onApplyWindowSize: { appShell.applyWindowSizePreset($0) },
+                                onStartInstructor: startInstructor,
+                                initialPage: settingsInitialPage)
                                 .environment(\.locale, selectedLanguage.locale)
                                 .frame(maxWidth: 1080, maxHeight: geometry.size.height - 40)
                                 .padding(20)
@@ -1479,6 +1594,7 @@ struct ContentView: View {
             }
             .buttonStyle(ShellButtonStyle(cornerRadius: 22, hoverScale: 1.02))
             .cascadeAppear(1)
+            .instructorTarget("app.create")
 
             if let recent = appShell.visibleProjects.first {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1504,6 +1620,7 @@ struct ContentView: View {
                     startMenuButton(title: L10n.s("mission.menu.entry"), systemImage: "target") {
                         isMissionSetupPresented = true
                     }
+                    .instructorTarget("app.missions")
 
                     startMenuButton(title: L10n.s("menu.online_trials"), systemImage: "network") {
                         // v1.5.1: when no project is active the simulation defaults to
@@ -1515,6 +1632,7 @@ struct ContentView: View {
                         )
                         isOnlineTrialsPresented = true
                     }
+                    .instructorTarget("app.online")
                 }
                 .cascadeAppear(3)
 
@@ -1522,13 +1640,16 @@ struct ContentView: View {
                     startMenuButton(title: L10n.s("menu.recorder"), systemImage: "archivebox") {
                         ReplayCenterWindowHost.open(viewModel: startScreenReplayLibrary)
                     }
+                    .instructorTarget("app.replay")
 
                     startMenuButton(
                         title: L10n.s("settings.menu.entry"),
                         systemImage: "gearshape"
                     ) {
+                        settingsInitialPage = .guide
                         isSettingsPresented = true
                     }
+                    .instructorTarget("app.settings")
                 }
                 .cascadeAppear(4)
 
@@ -1536,6 +1657,8 @@ struct ContentView: View {
                     isWorkbenchPresented = true
                 }
                 .cascadeAppear(5)
+                .instructorTarget("app.workbench")
+
             }
             .frame(width: 460)
         }
@@ -1611,6 +1734,7 @@ struct ContentView: View {
                                 onEndTrial: viewModel.onlineTrialContext != nil ? { lanSessionViewModel.endTrial() } : nil,
                                 onLeaveTrial: viewModel.onlineTrialContext != nil ? { appShell.requestReturnToMenu() } : nil
                             )
+                            .instructorTarget("simulation.viewport")
 
                             if viewModel.hasMissionScenario {
                                 MissionScenarioHUDView(viewModel: viewModel)
@@ -1698,7 +1822,11 @@ struct ContentView: View {
             .animation(.easeOut(duration: 0.18), value: viewModel.isPayloadPanelVisible)
             .animation(.easeOut(duration: 0.18), value: viewModel.isCommsLinkPanelVisible)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(KeyBindingsSheetHost(simulationViewModel: viewModel))
+            .background(KeyBindingsSheetHost(simulationViewModel: viewModel, onStartInstructor: startInstructor))
+            .overlayPreferenceValue(InstructorTargetPreferenceKey.self) { targets in
+                FlightInstructorOverlayView(viewModel: viewModel, targets: targets,
+                                            onExit: { appShell.requestReturnToMenu() })
+            }
             .alert("battery.depleted.title", isPresented: Binding(
                 get: { viewModel.showBatteryDepletedDialog },
                 set: { viewModel.showBatteryDepletedDialog = $0 }
@@ -2072,6 +2200,7 @@ struct ContentView: View {
             .controllerButtonTarget(id: "header.missionMap") {
                 viewModel.toggleMissionMap()
             }
+            .instructorTarget("simulation.map")
 
             Button {
                 viewModel.setToolPanelVisible(false)

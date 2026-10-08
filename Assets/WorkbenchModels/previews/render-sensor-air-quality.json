@@ -1,0 +1,19 @@
+[
+  {
+    "bounds_max_m" : [
+      0.02928750216960907,
+      0.015284350141882896,
+      0.019228000193834305
+    ],
+    "bounds_min_m" : [
+      -0.02928750216960907,
+      -0.014999998733401299,
+      -0.02018124982714653
+    ],
+    "id" : "sensor-air-quality",
+    "imported_triangles" : 16960,
+    "meshes" : 68,
+    "scene_kit_import" : "passed",
+    "textured_materials" : 9
+  }
+]

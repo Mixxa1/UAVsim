@@ -2,17 +2,25 @@ import Foundation
 
 final class MissionReplayStorageService {
     private let fileManager: FileManager
-    private let encoder: JSONEncoder
-    private let decoder: JSONDecoder
     private let directory: URL?
 
     init(fileManager: FileManager = .default, directory: URL? = nil) {
         self.fileManager = fileManager
         self.directory = directory
-        encoder = JSONEncoder()
+    }
+
+    // A background checkpoint can be written while the library reads a previous summary.
+    // Coders belong to each operation, rather than sharing mutable encoder/decoder state.
+    private func makeEncoder() -> JSONEncoder {
+        let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
-        decoder = JSONDecoder()
+        return encoder
+    }
+
+    private func makeDecoder() -> JSONDecoder {
+        let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
+        return decoder
     }
 
     // MARK: - Directories
@@ -40,6 +48,7 @@ final class MissionReplayStorageService {
     // MARK: - Public API
 
     func listSummaries() -> [MissionReplayRecordSummary] {
+        let decoder = makeDecoder()
         guard let contents = try? fileManager.contentsOfDirectory(
             at: replaysDirectory,
             includingPropertiesForKeys: nil
@@ -56,6 +65,7 @@ final class MissionReplayStorageService {
     }
 
     func save(session: MissionReplaySession, report: MissionReport) throws {
+        let encoder = makeEncoder()
         let id = session.id
         let dir = sessionDirectory(for: id)
         try fileManager.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -95,7 +105,7 @@ final class MissionReplayStorageService {
 
     func loadSession(id: UUID) throws -> MissionReplaySession {
         let data = try Data(contentsOf: sessionURL(for: id))
-        var session = try decoder.decode(MissionReplaySession.self, from: data)
+        var session = try makeDecoder().decode(MissionReplaySession.self, from: data)
         if let files = session.visualAssetFiles {
             var assets = session.visualAssets ?? [:]
             for (assetID, name) in files where name == URL(fileURLWithPath: name).lastPathComponent {
@@ -110,7 +120,7 @@ final class MissionReplayStorageService {
 
     func loadReport(id: UUID) throws -> MissionReport {
         let data = try Data(contentsOf: reportURL(for: id))
-        return MissionReportBuilder().localizedReport(try decoder.decode(MissionReport.self, from: data))
+        return MissionReportBuilder().localizedReport(try makeDecoder().decode(MissionReport.self, from: data))
     }
 
     func delete(id: UUID) throws {

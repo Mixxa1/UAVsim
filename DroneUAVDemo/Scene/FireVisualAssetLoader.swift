@@ -1,150 +1,151 @@
 import SceneKit
 import ImageIO
 
-/// Real fire/smoke/foam VFX for the fire-response scenario, replacing increment 1's placeholder
-/// burn-state marker sphere.
-///
-/// The flame texture ships as two plain image files (`Fire_sheet_baseColor.png`/
-/// `Fire_sheet_emissive.jpg`, extracted once from the original `flames.usdz` Sketchfab asset and
-/// bundled directly) rather than loading `flames.usdz` itself via `SCNScene(url:)`. That path was
-/// tried first and produced no visible flame at all — most likely because the USDZ's material is
-/// authored as a `UsdPreviewSurface` shader graph (separate `UsdUVTexture`/`UsdPrimvarReader`
-/// nodes wired together, not a flat "diffuse = image" material), which SceneKit's USD/USDZ
-/// importer may not fully flatten into a usable `SCNMaterial.diffuse.contents`. Loading the two
-/// textures directly and building our own material sidesteps that shader-graph parsing question
-/// entirely. The 2048×2048 base-color texture LOOKS like a 13×8 flipbook grid at a glance, but
-/// is not a uniformly-populated one — confirmed by direct alpha-channel analysis (mean alpha per
-/// assumed cell, plus mean alpha in a thin strip at each row boundary to detect cross-row bleed),
-/// not eyeballed. Most rows have some cells that are near-blank padding, and since the emissive
-/// JPG has no alpha channel of its own to gate against a blank diffuse cell, cycling through one
-/// of those produced a solid white block/streak over the flame — this is exactly what showed up
-/// in a user-recorded test clip. Row 6 (0-indexed, of 8 total) is the one row confirmed clean on
-/// both axes: zero measured bleed at its own top boundary, and every one of its 13 columns carries
-/// real, comparably-sized flame content (mean alpha 11.9-31.1 out of 255, vs. near-zero for
-/// genuinely blank cells found elsewhere in the sheet) — verified by cropping and viewing that row
-/// in isolation. The flipbook now cycles only through that row's 13 columns, not the full grid.
-/// Animated via a hand-driven `contentsTransform` (not `SCNParticleSystem.imageSequence*`, whose
-/// behavior against this specific texture was unproven and harder to verify blind).
-private enum FireFlipbookLayout {
-    static let totalColumns = 13
-    static let totalRows = 8
-    static let sourceRow = 6
-    static let frameRate: Double = 14.0
-    static var totalFrames: Int { totalColumns }
+/// CC0 Houdini-rendered sequences. The GPU blends adjacent frames in premultiplied colour,
+/// while simulation age selects the frame: live playback, pause and seeking agree.
+/// Padded cells and level-zero sampling prevent other frames leaking into a small flame.
+enum HoudiniFlipbook: String, CaseIterable {
+    case flame = "HoudiniFlame", burst = "HoudiniBurst", smoke = "HoudiniSmoke"
+
+    private var layout: SIMD4<Float> {
+        switch self {
+        case .flame: return SIMD4(16, 4, 128, 256)
+        case .burst: return SIMD4(5, 5, 256, 256)
+        case .smoke: return SIMD4(8, 8, 128, 128)
+        }
+    }
+    private var frames: Int { Int(layout.x * layout.y) }
+    private var fps: Double { self == .burst ? 24 : 30 }
+    private static let images: [HoudiniFlipbook: CGImage] = {
+        var result: [HoudiniFlipbook: CGImage] = [:]
+        for asset in allCases {
+            let url = Bundle.main.url(forResource: asset.rawValue, withExtension: "png", subdirectory: "VFX")
+                ?? Bundle.main.url(forResource: asset.rawValue, withExtension: "png")
+            if let url, let source = CGImageSourceCreateWithURL(url as CFURL, nil),
+               let image = CGImageSourceCreateImageAtIndex(source, 0,
+                   [kCGImageSourceShouldCacheImmediately: true] as CFDictionary) {
+                result[asset] = image
+            }
+        }
+        return result
+    }()
+
+    func makeMaterial() -> SCNMaterial {
+        let material = SCNMaterial()
+        material.name = rawValue
+        material.lightingModel = .constant
+        material.blendMode = .alpha
+        material.transparencyMode = .aOne
+        material.writesToDepthBuffer = false
+        material.readsFromDepthBuffer = true
+        material.isDoubleSided = true
+        guard let image = Self.images[self] else {
+            // A broken asset installation must not crash a flight. The native asset probe also
+            // checks that every bundled sequence renders and animates.
+            NSLog("Missing bundled VFX texture: %@", rawValue)
+            material.diffuse.contents = NSColor.clear
+            return material
+        }
+        let property = SCNMaterialProperty(contents: image)
+        property.wrapS = .clamp; property.wrapT = .clamp
+        property.minificationFilter = .linear; property.magnificationFilter = .linear
+        property.mipFilter = .none
+        material.setValue(property, forKey: "vfxAtlas")
+        material.setValue(NSValue(scnVector4: SCNVector4(layout.x, layout.y, layout.z, layout.w)), forKey: "vfxLayout")
+        material.setValue(NSValue(scnVector4: SCNVector4(1, 1, 1, 1)), forKey: "vfxTint")
+        material.setValue(NSNumber(value: Float(0)), forKey: "vfxFrame")
+        material.shaderModifiers = [.geometry: Self.geometryShader, .surface: Self.surfaceShader]
+        return material
+    }
+
+    func setAge(_ age: TimeInterval, material: SCNMaterial) {
+        let age = age.isFinite ? max(0, age) : 0
+        let frame = self == .burst ? min(Double(frames - 1), age * fps)
+            : (age * fps).truncatingRemainder(dividingBy: Double(frames))
+        // Match the Metal argument's 32-bit storage. An NSNumber backed by Double made the
+        // native renderer keep sampling frame zero even though value(forKey:) changed.
+        material.setValue(NSNumber(value: Float(frame)), forKey: "vfxFrame")
+    }
+
+    static func setTint(_ colour: SIMD3<Float>, material: SCNMaterial) {
+        material.setValue(NSValue(scnVector4: SCNVector4(colour.x, colour.y, colour.z, 1)), forKey: "vfxTint")
+    }
+
+    private static let geometryShader = """
+    #pragma varyings
+    float2 vfxUV;
+    #pragma body
+    out.vfxUV = _geometry.texcoords[0];
+    """
+
+    private static let surfaceShader = """
+    #pragma arguments
+    texture2d<float> vfxAtlas;
+    float4 vfxLayout;
+    float4 vfxTint;
+    float vfxFrame;
+    #pragma transparent
+    #pragma body
+    constexpr sampler atlasSampler(coord::normalized, address::clamp_to_edge, filter::linear);
+    float count = vfxLayout.x * vfxLayout.y;
+    float first = floor(vfxFrame);
+    float second = fmod(first + 1.0, count);
+    float2 tile = vfxLayout.zw + 4.0;
+    float2 atlasSize = tile * vfxLayout.xy;
+    float2 local = clamp(in.vfxUV, 0.0, 1.0);
+    float2 cellA = float2(fmod(first, vfxLayout.x), floor(first / vfxLayout.x));
+    float2 cellB = float2(fmod(second, vfxLayout.x), floor(second / vfxLayout.x));
+    float2 pixel = 2.5 + local * (vfxLayout.zw - 1.0);
+    float4 a = vfxAtlas.sample(atlasSampler, (cellA * tile + pixel) / atlasSize, level(0.0));
+    float4 b = vfxAtlas.sample(atlasSampler, (cellB * tile + pixel) / atlasSize, level(0.0));
+    float blend = fract(vfxFrame);
+    float alpha = mix(a.a, b.a, blend);
+    float3 colour = mix(a.rgb * a.a, b.rgb * b.a, blend) / max(alpha, 0.00001);
+    _surface.diffuse = float4(colour * vfxTint.rgb, alpha * vfxTint.a);
+    _surface.emission = float4(0.0);
+    """
 }
 
 final class FireVisualAssetLoader {
     static let shared = FireVisualAssetLoader()
 
-    private enum AssetConstants {
-        static let baseColorResourceName = "Fire_sheet_baseColor"
-        static let baseColorResourceExtension = "png"
-        static let emissiveResourceName = "Fire_sheet_emissive"
-        static let emissiveResourceExtension = "jpg"
-    }
-
-    private var cachedBaseColorImage: CGImage?
-    private var cachedEmissiveImage: CGImage?
-    private var didAttemptLoad = false
-    private var didWarnFailure = false
-
     private init() {}
 
-    /// Animated flame "cross-billboard" wrapped around a burning tree — 3 identical `SCNPlane`s
-    /// sharing one material, fixed at 60° apart around the trunk's vertical axis (0°/60°/120°,
-    /// each double-sided so that span covers the full 360° same as a full turn would). Deliberately
-    /// NOT a single `SCNBillboardConstraint`-driven plane (the previous approach): a billboard
-    /// always re-orients to face the camera, which cancels out any fixed angular offset between
-    /// multiple planes — they'd all converge to the same camera-facing orientation regardless of
-    /// how they were initially rotated, so a billboarded plane can never look "wrapped around" a
-    /// volume no matter how many copies you add. Fixed, unbillboarded angles are what actually
-    /// give the classic impostor-tree look of fire surrounding the trunk from any viewing angle,
-    /// same technique real-time engines use for cross-billboard foliage.
-    ///
-    /// `baseYawDegrees` MUST differ per tree (caller passes the tree's own random yaw) — a first
-    /// version hardcoded the same 3 world-space angles for every tree, so every burning tree's
-    /// planes lined up at the exact same 3 absolute directions; from any single camera angle, many
-    /// same-angle planes across many different trees projected into the same screen-space
-    /// orientation and merged into a few giant flat "walls" instead of 13 separate, localized fire
-    /// clumps. Falls back to an empty node if the textures failed to load.
-    func makeFlameNode(heightMeters: Float, baseYawDegrees: Float = 0.0) -> SCNNode {
+    /// Each flame faces the viewing azimuth, with several independently aged flames placed
+    /// around the actual burning component by the world renderer. No crossed sprite walls.
+    func makeFlameNode(heightMeters: Float, baseYawDegrees: Float = 0) -> SCNNode {
         let wrapper = SCNNode()
         wrapper.name = "mission.fire_tree.flame"
-
-        guard let baseColor = loadBaseColorImage(), let emissive = loadEmissiveImage() else {
-            warnOnce()
-            return wrapper
-        }
-
-        let material = SCNMaterial()
-        material.lightingModel = .constant
-        material.diffuse.contents = baseColor
-        material.emission.contents = emissive
-        material.blendMode = .add
-        material.writesToDepthBuffer = false
-        material.readsFromDepthBuffer = true
-        material.isDoubleSided = true
-
-        // Matches the source sprite cell's own aspect ratio (~157.5:256 px ≈ 0.615:1, measured
-        // directly off the grid, not guessed) instead of the earlier 0.5:1, which over-stretched
-        // the flame image vertically into a tall, rigid-looking "pillar." Also shrunk overall
-        // (was spanning near-ground to well above the crown) so the flame reads as concentrated
-        // around the crown instead of a uniform column — narrower helps it stay hugging a single
-        // tree instead of visually bridging into neighbors in a dense cluster too.
-        let width = CGFloat(heightMeters) * 0.42
-        let height = CGFloat(heightMeters) * 0.68
-        let plane = SCNPlane(width: width, height: height)
-        plane.firstMaterial = material
-
-        let yawAnglesDegrees: [Float] = [0.0, 60.0, 120.0]
-        for yawDegrees in yawAnglesDegrees {
-            let planeNode = SCNNode(geometry: plane)
-            planeNode.name = "mission.fire_tree.flame.plane"
-            planeNode.castsShadow = false
-            planeNode.eulerAngles.y = CGFloat((yawDegrees + baseYawDegrees) * .pi / 180.0)
-            wrapper.addChildNode(planeNode)
-        }
-
-        configureFlipbookSampler(material: material)
-
+        let plane = SCNPlane(width: CGFloat(heightMeters) * 0.5, height: CGFloat(heightMeters))
+        plane.firstMaterial = HoudiniFlipbook.flame.makeMaterial()
+        let node = SCNNode(geometry: plane)
+        node.name = "mission.fire_tree.flame.plane"
+        node.castsShadow = false
+        let billboard = SCNBillboardConstraint(); billboard.freeAxes = .Y
+        node.constraints = [billboard]
+        wrapper.addChildNode(node)
+        setFlameAge(wrapper, age: Double(baseYawDegrees) / 100)
         return wrapper
     }
 
-    /// Starts/stops the flame's flipbook animation on an already-built flame node (from
-    /// `makeFlameNode`) — deliberately NOT auto-started at creation time. Every tree in the fire
-    /// zone's full pool (up to 13 at hard difficulty, most of them unburned/hidden at any moment)
-    /// gets its own flame node up front; a `SCNAction.repeatForever` keeps evaluating every
-    /// rendered frame and re-writing the material's `contentsTransform` even while the node is
-    /// `.isHidden` (hidden only skips drawing, not action evaluation) — a constant, mission-long
-    /// tax across the whole tree pool regardless of how many are actually burning. Caller (see
-    /// `DroneSceneController.updateFireResponseVisuals`) starts this only on the burning-state
-    /// transition, not every tick — `runAction`/`removeAction(forKey:)` are idempotent no-ops if
-    /// already in the requested state, so redundant calls are harmless but unnecessary.
     func setFlameAnimating(_ flameNode: SCNNode, isAnimating: Bool) {
-        guard let planeNode = flameNode.childNodes.first,
-              let material = planeNode.geometry?.firstMaterial else {
-            return
-        }
+        guard let plane = flameNode.childNodes.first,
+              let material = plane.geometry?.firstMaterial else { return }
         if isAnimating {
-            guard planeNode.action(forKey: "fireFlipbook") == nil else { return }
-            runFlipbookAnimation(on: planeNode, material: material)
+            guard plane.action(forKey: "fireFlipbook") == nil else { return }
+            let duration = 64.0 / 30.0
+            let animation = SCNAction.customAction(duration: duration) { _, age in
+                HoudiniFlipbook.flame.setAge(Double(age), material: material)
+            }
+            plane.runAction(.repeatForever(animation), forKey: "fireFlipbook")
         } else {
-            planeNode.removeAction(forKey: "fireFlipbook")
+            plane.removeAction(forKey: "fireFlipbook")
         }
     }
 
-    /// Mission effects and replays use simulation age rather than a wall-clock action.
     func setFlameAge(_ flameNode: SCNNode, age: TimeInterval) {
         guard let material = flameNode.childNodes.first?.geometry?.firstMaterial else { return }
-        let column = Int(max(0, age) * FireFlipbookLayout.frameRate) % FireFlipbookLayout.totalFrames
-        let sx = 1.0 / CGFloat(FireFlipbookLayout.totalColumns)
-        let sy = 1.0 / CGFloat(FireFlipbookLayout.totalRows)
-        var transform = SCNMatrix4Identity
-        transform.m11 = sx; transform.m22 = sy
-        transform.m41 = CGFloat(column) * sx
-        transform.m42 = 1 - sy - CGFloat(FireFlipbookLayout.sourceRow) * sy
-        material.diffuse.contentsTransform = transform
-        material.emission.contentsTransform = transform
+        HoudiniFlipbook.flame.setAge(age, material: material)
     }
 
     /// Soft rising smoke above a burning tree — a procedural particle system (no image), mirroring
@@ -247,85 +248,6 @@ final class FireVisualAssetLoader {
     }
 
     // MARK: - Flame flipbook
-
-    /// One-time sampler setup, safe to do at creation regardless of burn state (unlike actually
-    /// running the animation — see `setFlameAnimating`).
-    private func configureFlipbookSampler(material: SCNMaterial) {
-        // Prevent the sampler from bleeding neighboring frames at tile edges once
-        // `contentsTransform` scales the UV rect down to a single grid cell.
-        material.diffuse.wrapS = .clamp
-        material.diffuse.wrapT = .clamp
-        material.emission.wrapS = .clamp
-        material.emission.wrapT = .clamp
-    }
-
-    private func runFlipbookAnimation(on node: SCNNode, material: SCNMaterial) {
-        let totalFrames = FireFlipbookLayout.totalFrames
-        let cycleDuration = Double(totalFrames) / FireFlipbookLayout.frameRate
-        let animate = SCNAction.customAction(duration: cycleDuration) { _, elapsedTime in
-            let progress = (Double(elapsedTime) / cycleDuration).truncatingRemainder(dividingBy: 1.0)
-            let column = min(totalFrames - 1, max(0, Int(progress * Double(totalFrames))))
-            let sx = 1.0 / CGFloat(FireFlipbookLayout.totalColumns)
-            let sy = 1.0 / CGFloat(FireFlipbookLayout.totalRows)
-
-            var transform = SCNMatrix4Identity
-            transform.m11 = sx
-            transform.m22 = sy
-            transform.m41 = CGFloat(column) * sx
-            // Sprite-sheet row 0 is the texture's top; flip so row 0 maps to the top of UV space.
-            transform.m42 = 1.0 - sy - CGFloat(FireFlipbookLayout.sourceRow) * sy
-
-            material.diffuse.contentsTransform = transform
-            material.emission.contentsTransform = transform
-        }
-        node.runAction(.repeatForever(animate), forKey: "fireFlipbook")
-    }
-
-    private func loadBaseColorImage() -> CGImage? {
-        loadTextures()
-        return cachedBaseColorImage
-    }
-
-    private func loadEmissiveImage() -> CGImage? {
-        loadTextures()
-        return cachedEmissiveImage
-    }
-
-    private func loadTextures() {
-        guard !didAttemptLoad else { return }
-        didAttemptLoad = true
-
-        cachedBaseColorImage = loadCGImage(
-            resourceName: AssetConstants.baseColorResourceName,
-            withExtension: AssetConstants.baseColorResourceExtension
-        )
-        cachedEmissiveImage = loadCGImage(
-            resourceName: AssetConstants.emissiveResourceName,
-            withExtension: AssetConstants.emissiveResourceExtension
-        )
-    }
-
-    // Loads via ImageIO/CGImageSource directly (not NSImage) — a more reliable path for feeding
-    // an image into an SCNMaterialProperty; NSImage occasionally fails to hand SceneKit's Metal
-    // renderer a usable backing representation depending on the image's internal representation.
-    private func loadCGImage(resourceName: String, withExtension ext: String) -> CGImage? {
-        guard let url = Bundle.main.url(forResource: resourceName, withExtension: ext) else {
-            return nil
-        }
-        guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else {
-            return nil
-        }
-        // Decode once when the mission prepares its fire materials instead of deferring image
-        // decompression to the first visible flame on the render thread.
-        return CGImageSourceCreateImageAtIndex(source, 0,
-            [kCGImageSourceShouldCacheImmediately: true] as CFDictionary)
-    }
-
-    private func warnOnce() {
-        guard !didWarnFailure else { return }
-        didWarnFailure = true
-        print("[Scenario] Fire_sheet textures unavailable; burning trees will show no flame VFX")
-    }
 
     // MARK: - Foam spray
 

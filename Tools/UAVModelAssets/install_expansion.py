@@ -14,7 +14,7 @@ def install():
     source=json.loads((SOURCE/'manifest.json').read_text())
     target=json.loads((TARGET/'manifest.json').read_text())
     byid={m['id']:m for m in target['models']}
-    assert set(SPECS)=={m['id'] for m in source['models']} and len(SPECS)==30
+    assert set(SPECS)=={m['id'] for m in source['models']}
     for row in source['models']:
         ident=row['id'];path=SOURCE/row['file']
         assert hashlib.sha256(path.read_bytes()).hexdigest()==row['sha256']
@@ -40,7 +40,7 @@ def install():
     target.update(date='2026-10-06',models=list(byid.values()),
                   expansion_generator='Tools/UAVModelAssets/install_expansion.py')
     (TARGET/'manifest.json').write_text(json.dumps(target,ensure_ascii=False,indent=2)+'\n')
-    print(f'Installed 30 animated models; runtime library now contains {len(byid)} aircraft.')
+    print(f'Installed {len(source["models"])} animated models; runtime library now contains {len(byid)} aircraft.')
 
 
 if __name__=='__main__':install()

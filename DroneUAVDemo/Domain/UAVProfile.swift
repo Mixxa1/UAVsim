@@ -221,6 +221,14 @@ struct UAVPowerplantSpec: Hashable {
     /// Free-stream Mach the intake is shaped for. Only meaningful for a ramp inlet: a
     /// fixed ramp is cut for one condition and pays for being anywhere else.
     let inletDesignMach: Float
+    /// Declared for an airframe whose propeller is not what its engine type implies — a piston
+    /// with a governed disc. `nil`: constant speed for a turboprop, fixed pitch for the rest.
+    var propellerIsConstantSpeed: Bool? = nil
+    /// The top level speed a fixed-pitch disc is pitched for. `nil`: pitched for cruise.
+    var fixedPitchTopSpeedMps: Float? = nil
+    /// Height up to which a supercharged piston holds its sea-level rating, m. `nil`: naturally
+    /// aspirated, losing power with density from the ground up.
+    var boostCriticalAltitudeM: Float? = nil
 
     init(
         engineType: UAVEngineType,
@@ -282,7 +290,7 @@ struct UAVPowerplantSpec: Hashable {
     /// is at rated speed and full power from brake release, which is precisely
     /// what makes a turboprop takeoff possible.
     var hasConstantSpeedPropeller: Bool {
-        drivesPropeller && engineType == .turboprop
+        drivesPropeller && (propellerIsConstantSpeed ?? (engineType == .turboprop))
     }
 
     var energySource: UAVEnergySourceType {
@@ -430,7 +438,7 @@ struct UAVProfile: Identifiable, Hashable {
         self.nominalFlightTimeSec = nominalFlightTimeSec
         self.nominalCruiseSpeedMps = nominalCruiseSpeedMps
         self.nominalMaxRangeM = nominalMaxRangeM
-        self.nominalCruiseAltitudeMeters = nominalCruiseAltitudeMeters
+        self.nominalCruiseAltitudeMeters = nominalCruiseAltitudeMeters ?? AirframeCruiseAltitude.declared[id]
         self.nominalLinkRangeM = nominalLinkRangeM
         self.batteryReserveFraction = batteryReserveFraction
         self.payloadRangePenaltyPerKg = payloadRangePenaltyPerKg
@@ -444,7 +452,7 @@ struct UAVProfile: Identifiable, Hashable {
         self.navigationCapability = navigationCapability
         self.autonomyLevel = autonomyLevel
         self.linkLossPolicy = linkLossPolicy
-        self.powerplant = powerplant
+        self.powerplant = powerplant.map { AirframePropulsionDetails.applied(to: $0, airframeID: id) }
         self.estimatedDataQuality = estimatedDataQuality ?? {
             switch specConfidence {
             case .verified:

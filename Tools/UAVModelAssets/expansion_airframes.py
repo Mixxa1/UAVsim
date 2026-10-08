@@ -6,6 +6,7 @@ No manufacturing dimensions or flight-performance geometry is implied.
 """
 from math import sin, cos, pi, sqrt
 from geometry import Model, COLORS, TEXTURES, add, sub, mul, mix, unit, spline
+from expansion_mechanics import author, RETRACTABLE, station
 import json
 
 COLORS.update({
@@ -34,17 +35,57 @@ class ExteriorModel(Model):
     def __init__(self,ident,name):
         super().__init__(ident,name)
         self.rigs=[]
+        self.fin_specs=[]
+        self.mechanics=None
 
-    def rig(self,name,center,axis,parts,amplitude,role):
+    def rig(self,name,center,axis,parts,amplitude,role,**properties):
         names=[p['name'] for p in parts if not p['group']]
         if names:
             self.rigs.append(dict(name=name,center=center,axis=axis,parts=names,
-                                  amplitude_degrees=amplitude,role=role))
+                                  amplitude_degrees=amplitude,role=role,**properties))
 
     def scale(self,factors):
         super().scale(factors)
         for rig in self.rigs:
             rig['center']=tuple(rig['center'][i]*factors[i] for i in range(3))
+            if 'axis_vector' in rig:
+                rig['axis_vector']=unit(tuple(rig['axis_vector'][i]*factors[i] for i in range(3)))
+            if 'travel_vector_m' in rig:
+                rig['travel_vector_m']=tuple(rig['travel_vector_m'][i]*factors[i] for i in range(3))
+        if self.mechanics:
+            for hinge in self.mechanics['gear_hinges']:
+                hinge['center']=tuple(hinge['center'][i]*factors[i] for i in range(3))
+                hinge['axis_vector']=unit(tuple(hinge['axis_vector'][i]*factors[i] for i in range(3)))
+            geometry=self.mechanics.get('flap_geometry')
+            if geometry:
+                geometry['wing_planform_area_m2']*=factors[0]*factors[2]
+                for panel in geometry['panels']:
+                    panel['covered_area_m2']*=factors[0]*factors[2]
+                    panel['panel_area_m2']*=factors[0]*factors[2]
+                    panel['mesh_projected_area_m2']*=factors[0]*factors[2]
+                    for key in ('hinge_start','hinge_end','travel_vector_m'):
+                        panel[key]=tuple(panel[key][i]*factors[i] for i in range(3))
+
+    def wing(self,name,stations,material='gray',side=1,curved=False):
+        super().wing(name,stations,material,side,curved)
+        self.parts[-1].update(_wing_owner=[name],_closed_skin=True)
+
+    def surface_patch(self,name,outline,hosts,mat='dark'):
+        start=len(self.parts)
+        super().surface_patch(name,outline,hosts,mat)
+        for part in self.parts[start:]:
+            part.update(_wing_owner=list(hosts),_closed_skin=True)
+
+    def decal(self,*args,**kwargs):
+        super().decal(*args,**kwargs)
+        part=self.parts[-1]
+        center=tuple(sum(p[k] for p in part['points'])/len(part['points']) for k in range(3))
+        for host,stations,_,side in self.wing_specs:
+            x=center[0]*side
+            if not stations[0][0]<=x<=stations[-1][0]:continue
+            st=station(stations,x)
+            if st[2]<=center[2]<=st[1] and abs(center[1]-st[3])<=st[4]:
+                part['_wing_owner']=[host];break
 
     def write(self,path,metadata):
         # The base exporter authors rotor hierarchies. Other articulated meshes
@@ -73,14 +114,42 @@ class ExteriorModel(Model):
             else:kept.append(line);i+=1
         end=720 if self.transition else 120;insert=[]
         for rig in self.rigs:
-            axis=rig['axis'].upper();op='xformOp:rotate'+axis
+            vector=rig.get('axis_vector')
+            axis=rig['axis'].upper();op='xformOp:orient' if vector else 'xformOp:rotate'+axis
             center='('+', '.join(f'{v:.9g}' for v in rig['center'])+')'
-            samples=', '.join(f'{t}: {rig["amplitude_degrees"]*sin(2*pi*t/end):.9g}' for t in range(end+1))
+            def value(t):
+                # The packaged loop is for inspection. Runtime strips it and uses
+                # actual servo positions, including flap and gear state.
+                u=t/end;mixing=rig.get('mixing',{})
+                def curve(keys):
+                    for (a,av),(b,bv) in zip(keys,keys[1:]):
+                        if a<=u<=b:return av+(bv-av)*(u-a)/(b-a)
+                    return 0
+                signals=dict(elevator=.65*sin(2*pi*u),aileron=.6*sin(4*pi*u),rudder=.55*sin(2*pi*u),
+                    flap=(1-cos(2*pi*u))/2,
+                    gear=curve([(0,0),(.1,0),(.4,1),(.7,1),(.9,0),(1,0)]),
+                    door=curve([(0,0),(.1,1),(.4,1),(.5,0),(.6,0),(.7,1),(.9,1),(1,0)]))
+                phase=sum(coef*signals.get(channel,0) for channel,coef in mixing.items()) if mixing else sin(2*pi*u)
+                angle=rig['amplitude_degrees']*max(-1,min(1,phase))
+                if vector:
+                    half=angle*pi/360
+                    return '('+', '.join(f'{v:.9g}' for v in (cos(half),*(sin(half)*v for v in vector)))+')'
+                return f'{angle:.9g}'
+            samples=', '.join(f'{t}: {value(t)}' for t in range(end+1))
+            default='quatf xformOp:orient = (1, 0, 0, 0)' if vector else f'float {op} = 0'
+            sample_type='quatf' if vector else 'float'
             insert += [f'        def Xform "{rig["name"]}"','        {',
                        f'            double3 xformOp:translate = {center}',
-                       f'            float {op} = 0',f'            float {op}.timeSamples = {{{samples}}}',
+                       f'            {default}',f'            {sample_type} {op}.timeSamples = {{{samples}}}',
                        f'            uniform token[] xformOpOrder = ["xformOp:translate", "{op}"]',
                        f'            custom string componentRole = {json.dumps(rig["role"])}']
+            if any(abs(v)>1e-12 for v in rig.get('travel_vector_m',())):
+                samples=[]
+                for t in range(end+1):
+                    deployment=(1-cos(2*pi*t/end))/2
+                    position=add(rig['center'],mul(rig['travel_vector_m'],deployment))
+                    samples.append(f'{t}: ('+', '.join(f'{v:.9g}' for v in position)+')')
+                insert.append(f'            double3 xformOp:translate.timeSamples = {{{", ".join(samples)}}}')
             for name in rig['parts']:insert.extend(blocks[name])
             insert.append('        }')
         at=kept.index('    def Xform "Geometry"')+2
@@ -200,10 +269,14 @@ def fin(m, name, x, y, z, height, chord, paint, cant=0, sweep=.32):
                (x+cant*height, y+height, z+chord*(.48-sweep))]
     thickness = max(abs(height)*.032, .001)
     m.plate(name, outline, thickness, paint, axis=(1, 0, 0))
+    spec=(name,x,y,z,height,chord,cant,sweep,paint)
+    m.fin_specs.append(spec)
+    m.parts[-1].update(_fin_owner=spec,_closed_skin=True)
     # Rudder hinge and a visible actuator access cover.
     q = [(x+thickness*.49+cant*height*.08, y+height*.08, z-chord*.31),
          (x+cant*height*.83+thickness*.49, y+height*.83, z-chord*.24)]
     m.tube(name+'RudderHinge', q, abs(height)*.004, 'edge_seam', steps=1, segs=8)
+    m.parts[-1]['_fin_owner']=spec
 
 
 def wing_pair(m, stations, paint, name='MainWing', controls=True):
@@ -212,6 +285,7 @@ def wing_pair(m, stations, paint, name='MainWing', controls=True):
         m.wing(host, stations, paint, side)
         if not controls:
             continue
+        detail_start=len(m.parts)
         scale = stations[-1][0]*2
         # Interpolate the actual station contour for inboard flap/elevon seams.
         for first, last in [(.18, .50), (.56, .90)]:
@@ -233,6 +307,7 @@ def wing_pair(m, stations, paint, name='MainWing', controls=True):
                     m.hatch([host], side*xx, st[2]+(st[1]-st[2])*.37,
                             scale*.025, (st[1]-st[2])*.10, scale)
                     break
+        for part in m.parts[detail_start:]:part['_wing_owner']=[host]
 
 
 def small_camera(m, center, size, lenses=2, mount=None):
@@ -555,12 +630,16 @@ def flying_wing(m,p):
 
 
 def landing_gear(m,L,wide=.105,main_z=-.06,nose_z=.30,paint='paint_gray'):
+    retractable=m.id in RETRACTABLE
     for index,(x,z) in enumerate([(0,L*nose_z),(-L*wide,L*main_z),(L*wide,L*main_z)]):
         radius=L*(.021 if index==0 else .027)
         y=-L*.18
-        mount=(x*.24,-L*.032,z)
+        mount=(x*(.72 if retractable else .24),-L*.032,z)
         axle=(x,y,z)
+        if retractable and index:
+            m.beam('GearMountBrace',(x*.24,-L*.032,z),mount,L*.014,L*.014,paint,L*.003)
         m.ellipsoid('LandingGearTrunnion',mount,(L*.015,L*.012,L*.025),paint,32,16)
+        start=len(m.parts)
         m.beam('LandingGearLeg',mount,axle,L*.011,L*.010,'metal',L*.0025)
         m.rod('ShockAbsorber',mix(mount,axle,.28),mix(mount,axle,.76),L*.007,'anodized',segs=32)
         m.rod('ShockPiston',mix(mount,axle,.72),axle,L*.0038,'silver',segs=32)
@@ -580,7 +659,24 @@ def landing_gear(m,L,wide=.105,main_z=-.06,nose_z=.30,paint='paint_gray'):
         # Brake cable and attachment fairing both meet the leg.
         m.tube('BrakeCable',[add(mount,(L*.004,0,0)),add(mix(mount,axle,.55),(L*.006,0,0)),
                             add(axle,(L*.004,0,0))],L*.0012,'black',steps=3,segs=8)
-        m.box('GearDoorFairing',mount,(L*.026,L*.009,L*.046),paint,L*.003)
+        m.box('GearLegFairing',mount,(L*.026,L*.009,L*.046),paint,L*.003)
+        if retractable:
+            axis=(1,0,0) if index==0 else (0,0,1)
+            sign=1 if index==0 or x<0 else -1
+            m.rig(f'LandingGear{index:02}',mount,'vector',m.parts[start:],90 if index==0 else 120,
+                  'landing_gear',axis_vector=axis,mixing={'gear':sign})
+            # Exterior bay openings and hinged doors. Their placement is estimated
+            # from the neutral assembly, not a claim about the original hydraulics.
+            bay=(x*.42,-L*.063,z-L*(.067 if index==0 else .0))
+            size=(L*(.040 if index==0 else .11),L*.005,L*(.16 if index==0 else .065))
+            m.box('GearBayInterior',bay,size,'black',L*.003)
+            for side in (-1,1):
+                door_center=add(bay,(side*size[0]*.25,-L*.003,0))
+                hinge=add(bay,(side*size[0]*.5,-L*.003,0))
+                door_start=len(m.parts)
+                m.box('LandingGearDoor',door_center,(size[0]*.48,L*.005,size[2]),paint,L*.002)
+                m.rig(f'GearDoor{index:02}{"Left" if side<0 else "Right"}',hinge,'vector',
+                      m.parts[door_start:],75,'gear_door',axis_vector=(0,0,1),mixing={'door':side})
 
 
 def conventional(m,p):
@@ -679,8 +775,8 @@ def scaneagle(m,p):
 
 def twinboom(m,p):
     W,L=p['wingspan_m'],p['length_m'];kind=p['layout'];paint=p['shape']['paint']
-    is_tb=kind=='tb';is_cw=kind=='cw20';is_ar5=kind=='ar5';is_tp=p['id']=='iai-heron-tp'
-    width=L*(.063 if is_tb else .070 if is_tp else .067)
+    is_cw=kind=='cw20';is_ar5=kind=='ar5';is_tp=p['id']=='iai-heron-tp'
+    width=L*(.070 if is_tp else .067)
     tall=L*(.115 if is_tp else .082)
     m.loft('Fuselage',[(-L*.31,width*.25,tall*.33,0),(-L*.21,width*.68,tall*.62,0),
            (L*.01,width,tall,0),(L*.26,width*.91,tall*.96,L*.014 if is_tp else 0),
@@ -691,8 +787,8 @@ def twinboom(m,p):
               (W*.495,L*.035,-L*.074,wy+L*.023,L*.009),
               (W*.5,L*.022,-L*.064,wy+L*.023,L*.005)]
     wing_pair(m,stations,paint)
-    bx=W*(.105 if is_tb else .135 if is_ar5 else .12)
-    tail='inverted-v' if is_tb or is_cw else p['shape'].get('tail','h')
+    bx=W*(.135 if is_ar5 else .12)
+    tail='inverted-v' if is_cw else p['shape'].get('tail','h')
     for side in (-1,1):
         x=side*bx
         m.loft('TailBoom',[(-L*.49,L*.007,L*.009,L*.023),(-L*.35,L*.012,L*.013,L*.025),
@@ -723,9 +819,9 @@ def twinboom(m,p):
         wing_pair(m,[(0,-L*.335,-L*.49,L*.028,L*.025),
                     (bx*1.02,-L*.35,-L*.49,L*.028,L*.014)],paint,'Tailplane')
     if not is_ar5:
-        blades=5 if is_tp else 3 if is_tb and p['shape'].get('revision')==3 else 2 if is_tb else 3
+        blades=5 if is_tp else 3
         m.rod('EngineRearMount',(0,0,-L*.26),(0,0,-L*.32),L*.035,'anodized',segs=48)
-        drive(m,(0,0,-L*.337),L*.029,L*(.125 if is_tb else .15),8,axis='z',blades=blades,rear=True)
+        drive(m,(0,0,-L*.337),L*.029,L*.15,8,axis='z',blades=blades,rear=True)
         for side in (-1,1):
             m.rod('ExhaustOutlet',(side*width*.7,-L*.006,-L*.21),
                   (side*width*.83,-L*.016,-L*.27),L*.012,'metal',segs=32)
@@ -736,13 +832,6 @@ def twinboom(m,p):
                  lenses=3 if is_tp else 2,mount=(0,-L*.067,L*.255))
     if p['shape'].get('gear'):
         landing_gear(m,L,paint=paint)
-    if is_tb and p['shape'].get('revision')==3:
-        for side in (-1,1):
-            host='MainWing'+('Left' if side<0 else 'Right')
-            x=side*W*.28
-            m.skin_line('WingFoldJoint',[(x,L,L*.11),(x,L,-L*.12)],[host],L*.0012)
-            for z in (-L*.055,L*.06):
-                q=m.skin((x,L,z),[host]);m.box('WingFoldHinge',q,(L*.038,L*.012,L*.028),'anodized',L*.003)
     fuselage_details(m,L,paint=paint)
 
 
@@ -768,80 +857,6 @@ def male(m,p):
     fuselage_details(m,L,paint=paint)
     for side in (-1,1):
         label(m,m.id,side*W*.26,-L*.026,W*.14,L*.045,L)
-
-
-def build_akinci(m,p):
-    W,L=p['wingspan_m'],p['length_m'];paint=p['shape']['paint']
-    width=L*.078
-    m.loft('Fuselage',[(-L*.49,L*.012,L*.021,L*.023),(-L*.27,L*.027,L*.035,0),
-           (L*.03,width*.85,L*.080,0),(L*.20,width,L*.118,L*.020),
-           (L*.37,width*.81,L*.102,L*.014),(L*.50,width*.025,L*.014,0)],paint,2.2)
-    # Gull-wing: the motors sit near the highest inner wing station.
-    stations=[(0,L*.17,-L*.18,L*.027,L*.060),
-              (W*.14,L*.15,-L*.16,L*.115,L*.051),
-              (W*.24,L*.105,-L*.14,L*.071,L*.044),
-              (W*.44,L*.015,-L*.12,L*.048,L*.025),
-              (W*.5,-L*.032,-L*.076,L*.073,L*.007)]
-    wing_pair(m,stations,paint)
-    for side in (-1,1):
-        x=side*W*.145;cy=L*.083
-        m.loft('TurbopropNacelle',[(-L*.13,L*.027,L*.033,cy),
-               (L*.06,L*.045,L*.049,cy),(L*.20,L*.033,L*.033,cy),
-               (L*.23,L*.015,L*.017,cy)],paint,2.2,cx=x)
-        drive(m,(x,cy,L*.246),L*.023,L*.138,1 if side<0 else 2,axis='z',blades=5,angle=.17)
-        m.lens('EngineAirIntake',(x,cy-L*.032,L*.197),L*.017)
-        m.rod('ExhaustPipe',(x+side*L*.025,cy-L*.008,-L*.07),
-              (x+side*L*.047,cy-L*.019,-L*.16),L*.011,'metal',segs=48)
-        m.hatch(['TurbopropNacelle'],x,L*.058,L*.046,L*.075,L)
-        label(m,m.id,side*W*.29,-L*.036,W*.15,L*.055,L)
-    wing_pair(m,[(0,-L*.32,-L*.49,L*.025,L*.028),
-                 (W*.115,-L*.36,-L*.49,L*.19,L*.012)],paint,'VTail')
-    m.loft('SATCOMRadome',[(L*.15,width*.80,L*.050,L*.098),
-           (L*.27,width*.73,L*.073,L*.111),(L*.41,width*.41,L*.04,L*.071)],paint,2)
-    small_camera(m,(0,-L*.129,L*.29),L*.085,lenses=3,mount=(0,-L*.065,L*.25))
-    landing_gear(m,L,wide=.12,paint=paint)
-    fuselage_details(m,L,paint=paint)
-
-
-def kizilelma(m,p):
-    W,L=p['wingspan_m'],p['length_m'];paint=p['shape']['paint']
-    m.loft('Fuselage',[(-L*.49,L*.043,L*.048,0),(-L*.33,L*.070,L*.062,0),
-           (-L*.10,L*.075,L*.075,0),(L*.12,L*.074,L*.092,L*.01),
-           (L*.32,L*.049,L*.07,0),(L*.45,L*.018,L*.025,0),
-           (L*.50,L*.0003,L*.0004,0)],paint,2.4)
-    wing_pair(m,[(0,L*.12,-L*.39,-L*.006,L*.042),
-                 (W*.20,-L*.015,-L*.38,-L*.002,L*.036),
-                 (W*.5,-L*.22,-L*.335,L*.004,L*.007)],paint)
-    start=len(m.parts)
-    wing_pair(m,[(0,L*.25,L*.13,L*.024,L*.021),
-                 (W*.22,L*.165,L*.075,L*.026,L*.008)],paint,'Canard')
-    m.rig('CanardPitch',(0,L*.024,L*.19),'x',m.parts[start:],6,'control_surface')
-    for side in (-1,1):
-        x=side*L*.059
-        m.loft('IntakeDuct',[(-L*.15,L*.035,L*.045,-L*.028),
-               (L*.06,L*.037,L*.045,-L*.028),(L*.14,L*.026,L*.028,-L*.025)],paint,3.6,cx=x)
-        # Duct mouth uses a dark recessed interior and a substantial modeled lip.
-        m.box('IntakeInterior',(x,-L*.025,L*.144),(L*.044,L*.043,L*.004),'black',L*.003)
-        m.profiled_ring('IntakeLip',(x,-L*.025,L*.144),L*.027,
-            [(L*.0025*cos(j*2*pi/12),L*.0025*sin(j*2*pi/12)) for j in range(12)],
-            'anodized',80,axis='z')
-        fin(m,'CantedVerticalTail',side*L*.044,L*.034,-L*.365,L*.155,L*.18,
-            paint,cant=side*.46,sweep=.43)
-        label(m,m.id,side*W*.26,-L*.226,W*.12,L*.027,L)
-    # Open-looking concentric nozzle, heat shields, and petal divisions.
-    c=(0,0,-L*.49)
-    m.rod('NozzleInterior',(0,0,-L*.489),(0,0,-L*.513),L*.039,'black',segs=80)
-    m.profiled_ring('ExhaustNozzle',c,L*.042,
-        [(-L*.003,L*.020),(L*.003,L*.010),(L*.004,-L*.009),(-L*.001,-L*.023)],
-        'metal',128,axis='z')
-    for j in range(24):
-        a=j*2*pi/24
-        m.rod('NozzlePetalSeam',(L*.042*cos(a),L*.042*sin(a),-L*.481),
-              (L*.043*cos(a),L*.043*sin(a),-L*.506),L*.00065,'anodized',segs=8)
-    m.loft('DorsalAvionicsCover',[(-L*.15,L*.041,L*.026,L*.065),
-           (L*.02,L*.043,L*.035,L*.078),(L*.21,L*.036,L*.029,L*.081)],'anodized',2.3)
-    landing_gear(m,L,wide=.13,nose_z=.34,paint=paint)
-    fuselage_details(m,L,paint=paint)
 
 
 def piaggio(m,p):
@@ -884,14 +899,14 @@ BUILDERS = {
     'orbiter': flying_wing, 'deltaquad': flying_wing,
     'dt26': conventional, 'ar3': conventional, 'puma': conventional, 'raven': conventional,
     'jump': conventional, 'scaneagle': scaneagle, 'twinboom': twinboom,
-    'tb': twinboom, 'cw20': twinboom, 'ar5': twinboom, 'male': male,
-    'akinci': build_akinci, 'kizilelma': kizilelma, 'piaggio': piaggio,
+    'cw20': twinboom, 'ar5': twinboom, 'male': male, 'piaggio': piaggio,
 }
 
 
 def build(profile):
     m=ExteriorModel(profile['id'],profile['name'])
     BUILDERS[profile['layout']](m,profile)
+    author(m,profile)
     if profile.get('wingspan_m'):
         low,high=m.bounds()
         actual=high[0]-low[0]

@@ -38,7 +38,7 @@ struct SidebarModuleHostView: View {
     private var activeModuleContent: some View {
         switch viewModel.activeControlModule {
         case .flightOps?:
-            ScrollableModuleSectionView {
+            ScrollableModuleSectionView(scrollTarget: viewModel.flightTrainingProgress?.step.spotlightTarget) {
                 FlightOpsModuleView(viewModel: viewModel)
             }
         case .uavCatalog?:
@@ -46,7 +46,7 @@ struct SidebarModuleHostView: View {
                 UAVCatalogModuleView(viewModel: viewModel)
             }
         case .camera?:
-            ScrollableModuleSectionView {
+            ScrollableModuleSectionView(scrollTarget: viewModel.flightTrainingProgress?.step.spotlightTarget) {
                 CameraModuleView(viewModel: viewModel)
             }
         case .scenario?:
@@ -266,12 +266,16 @@ struct ModuleSection<Content: View>: View {
 
 struct ScrollableModuleSectionView<Content: View>: View {
     @ViewBuilder let content: Content
+    let scrollTarget: String?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    init(@ViewBuilder content: () -> Content) {
+    init(scrollTarget: String? = nil, @ViewBuilder content: () -> Content) {
         self.content = content()
+        self.scrollTarget = scrollTarget
     }
 
     var body: some View {
+        ScrollViewReader { proxy in
         ControllerScrollableRegion(
             id: "sidebar.module.scroll",
             showsIndicators: true,
@@ -285,6 +289,21 @@ struct ScrollableModuleSectionView<Content: View>: View {
             .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onChange(of: scrollTarget) { _, target in
+            guard let target else { return }
+            // The target is a teaching affordance, not a content transition. Animating a large
+            // LazyVGrid while the simulator is changing lesson state can hold the main run loop for
+            // several seconds; the instructor card and leader keep the motion feedback.
+            if reduceMotion {
+                proxy.scrollTo(target, anchor: .center)
+            } else {
+                withTransaction(Transaction(animation: Motion.press)) {
+                    proxy.scrollTo(target, anchor: .center)
+                }
+            }
+        }
+        .onAppear { if let scrollTarget { proxy.scrollTo(scrollTarget, anchor: .center) } }
+        }
     }
 }
 

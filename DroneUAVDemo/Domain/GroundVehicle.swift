@@ -65,6 +65,7 @@ struct GroundVehicleDamageSite {
     var severity: Float
     var heat: Float
     var tearsPanels: Bool
+    var normal: SIMD3<Float>? = nil
 }
 
 struct GroundVehicleDamage {
@@ -91,11 +92,12 @@ struct GroundVehicleDamage {
 
     /// Localised contact damage. Panels absorb most of a body strike; a struck wheel loses
     /// grip and bends its suspension. There are no rotor, lift or flight-controller failures.
-    mutating func impact(energyJ: Float, bodyPoint: SIMD3<Float>, profile: GroundVehicleProfile) {
+    mutating func impact(energyJ: Float, bodyPoint: SIMD3<Float>, profile: GroundVehicleProfile,
+                         normal: SIMD3<Float>? = nil) {
         guard energyJ.isFinite, energyJ > 0, bodyPoint.x.isFinite, bodyPoint.y.isFinite, bodyPoint.z.isFinite else { return }
         let scale = max(0.5, profile.massKg / 1800)
         mark(point: bodyPoint, severity: min(1, energyJ / (70_000 * scale)), heat: 0,
-             tearsPanels: energyJ > 100_000 * scale)
+             tearsPanels: energyJ > 100_000 * scale, normal: normal)
         let nearestWheel = GroundVehiclePart.allCases.filter(\.isWheel)
             .min { simd_distance($0.position(in: profile), bodyPoint) < simd_distance($1.position(in: profile), bodyPoint) }!
         let wheelHit = simd_distance(nearestWheel.position(in: profile), bodyPoint) < profile.wheelRadius * 1.8
@@ -116,62 +118,27 @@ struct GroundVehicleDamage {
         }
     }
 
-    /// Contact-module effects remain game rules. A net can foul road wheels; it cannot
-    /// magically destroy a heavy chassis by applying the aircraft's rotor failure recipe.
-    mutating func applyModule(_ effect: AttachedPayloadProfile, at point: SIMD3<Float>, profile: GroundVehicleProfile) {
-        switch effect {
-        case .contactOnly: break
-        case .equipmentDisruption:
-            guard point.y < profile.wheelRadius * 2.2 else { return }
-            let wheel = GroundVehiclePart.allCases.filter(\.isWheel)
-                .min { simd_distance($0.position(in: profile), point) < simd_distance($1.position(in: profile), point) }!
-            degrade(wheel, by: 0.7)
-        case .kineticPenetration: impact(energyJ: 35_000, bodyPoint: point, profile: profile)
-        case .structuralDestruction: detonation(exposure: 1, bodyPoint: point, profile: profile)
-        }
-    }
-
-    /// A charge damages the chassis and nearby running gear separately from a road impact.
-    /// Location matters: a rear strike does not ignite the engine at the opposite end.
-    mutating func detonation(exposure: Float, bodyPoint: SIMD3<Float>, profile: GroundVehicleProfile) {
-        guard exposure.isFinite, exposure > 0,
-              bodyPoint.x.isFinite, bodyPoint.y.isFinite, bodyPoint.z.isFinite else { return }
-        let strength = min(1, exposure)
-        // Visual damage follows the actual strike. A severe tyre/bed strike can burn there
-        // while the engine at the other end of the truck remains intact.
-        mark(point: bodyPoint, severity: strength, heat: strength, tearsPanels: strength > 0.65)
-        degrade(.body, by: strength * 0.96)
-        for part in GroundVehiclePart.allCases where part != .body {
-            let distance = simd_distance(part.position(in: profile), bodyPoint)
-            let local = max(0, 1 - distance / 4)
-            let susceptibility: Float = part.isWheel ? 1.5 : part == .engine ? 1.2 : 1.1
-            degrade(part, by: strength * (0.12 + local * susceptibility))
-        }
-        if condition(.engine) < 0.08, condition(.body) < 0.3 {
-            ignite(at: GroundVehiclePart.engine.position(in: profile))
-        } else if strength > 0.8 {
-            let nearestWheel = GroundVehiclePart.allCases.filter(\.isWheel).min {
-                simd_distance($0.position(in: profile), bodyPoint) < simd_distance($1.position(in: profile), bodyPoint)
-            }!
-            if condition(nearestWheel) < 0.12 {
-                ignite(at: nearestWheel.position(in: profile))
-            }
-        }
-    }
-
     mutating func overturn() { rolledOver = true }
     private mutating func ignite(at point: SIMD3<Float>) {
         burning = true
         if firePoint == nil { firePoint = point }
     }
-    private mutating func mark(point: SIMD3<Float>, severity: Float, heat: Float, tearsPanels: Bool) {
+    private mutating func mark(point: SIMD3<Float>, severity: Float, heat: Float, tearsPanels: Bool,
+                               normal: SIMD3<Float>? = nil) {
         guard severity > 0.015 else { return }
+        let normal = normal.flatMap { value -> SIMD3<Float>? in
+            guard value.x.isFinite, value.y.isFinite, value.z.isFinite,
+                  simd_length_squared(value) > 0.0001 else { return nil }
+            return simd_normalize(value)
+        }
         if let index = sites.firstIndex(where: { simd_distance($0.point, point) < 0.8 }) {
             sites[index].severity = min(1, sites[index].severity + severity * 0.5)
             sites[index].heat = max(sites[index].heat, heat)
             sites[index].tearsPanels = sites[index].tearsPanels || tearsPanels
+            if let normal { sites[index].normal = normal }
         } else if sites.count < 8 {
-            sites.append(GroundVehicleDamageSite(point: point, severity: severity, heat: heat, tearsPanels: tearsPanels))
+            sites.append(GroundVehicleDamageSite(point: point, severity: severity, heat: heat,
+                tearsPanels: tearsPanels, normal: normal))
         }
     }
     private mutating func degrade(_ part: GroundVehiclePart, by amount: Float) {

@@ -8,6 +8,7 @@ final class BindingsViewModel: ObservableObject {
     @Published private(set) var conflicts: [String] = []
     @Published var preferredControllerSurfaceID: String = "keybindings-sheet"
     @Published var focusedSectionID: String?
+    @Published private(set) var opensKeyBindingsPage = false
 
     private let store: InputBindingsStore
     let captureCoordinator: InputCaptureCoordinator
@@ -21,7 +22,8 @@ final class BindingsViewModel: ObservableObject {
         refresh()
     }
 
-    func present() {
+    func present(startWithKeys: Bool = false) {
+        opensKeyBindingsPage = startWithKeys
         isPresented = true
         refresh()
     }
@@ -39,11 +41,11 @@ final class BindingsViewModel: ObservableObject {
         captureCoordinator.endCapture(restoreTo: isPresented ? .editing : .flight)
     }
 
-    func rebindCurrentCommand(keyCode: UInt16, keyLabel: String) {
+    func rebindCurrentCommand(keyCode: UInt16, keyLabel: String, requiresShift: Bool = false) {
         guard let activeCommand = captureCoordinator.activeCommand else {
             return
         }
-        store.rebind(activeCommand, keyCode: keyCode, keyLabel: keyLabel)
+        store.rebind(activeCommand, keyCode: keyCode, keyLabel: keyLabel, requiresShift: requiresShift)
         refresh()
         endCapture()
     }
@@ -52,6 +54,10 @@ final class BindingsViewModel: ObservableObject {
         endCapture()
         store.resetToDefaults()
         refresh()
+    }
+
+    func descriptor(for command: KeyboardCommand) -> KeyBindingDescriptor? {
+        sections.lazy.flatMap(\.bindings).first { $0.command == command }
     }
 
     func refresh() {

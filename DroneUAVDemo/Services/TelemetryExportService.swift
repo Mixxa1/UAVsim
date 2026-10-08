@@ -71,6 +71,8 @@ struct ProjectSnapshot: Codable {
         var pitch: Double
         var yaw: Double
         var throttle: Double
+        var flapCommand: Double? = nil
+        var landingGearDownCommand: Bool? = nil
     }
 
     struct AbstractParameters: Codable {

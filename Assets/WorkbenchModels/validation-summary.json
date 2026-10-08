@@ -1,0 +1,15 @@
+{
+  "model_count": 119,
+  "arkit_passed": 119,
+  "triangles": 3663774,
+  "total_bytes": 388937064,
+  "normals_finite": true,
+  "indices_in_range": true,
+  "no_degenerate_triangles": true,
+  "standalone_airframe_parts": [
+    "frame-fixedwing-survey-s1-fuselage",
+    "frame-vtol-lift-cruise-v1-fuselage",
+    "frame-fixedwing-survey-s1-wing",
+    "frame-vtol-lift-cruise-v1-wing"
+  ]
+}

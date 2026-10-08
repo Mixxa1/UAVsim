@@ -388,20 +388,12 @@ struct AttachedPayloadComponent: Codable, Equatable, Identifiable {
 
 /// Everything the scenario needs that is not a live world value. Built by the setup screen,
 /// clamped by `validated`, and then constant for the whole run.
-enum InterceptTargetKind: String, CaseIterable, Codable, Identifiable {
-    case aircraft, groundVehicle
-    var id: String { rawValue }
-    var titleKey: String { "intercept.target_kind.\(rawValue)" }
-}
-
 struct InterceptMissionConfiguration: Codable, Equatable {
     var missionID = "attached-payload-v2"
     /// Which end of the interception the operator flies.
     var side: InterceptMissionSide = .interceptor
-    /// Optional for backwards-compatible decoding of existing saved mission configurations.
-    var targetKind: InterceptTargetKind? = nil
-    var groundVehicleModel: GroundVehicleModel? = nil
-    var targetsGroundVehicle: Bool { side == .interceptor && targetKind == .groundVehicle }
+    // Interception always concerns aircraft. Older JSON's targetKind/groundVehicleModel keys
+    // are ignored by Codable, so removed ground-target setups remain readable as air missions.
     var targetBehavior: InterceptTargetBehavior = .routeFollower
     var targetCarriesPayload = true
     var targetPayloadInert = false
@@ -524,7 +516,6 @@ struct InterceptMissionConfiguration: Codable, Equatable {
         copy.timeLimit = timeLimit.isFinite ? max(10, min(timeLimit, 7200)) : 600
         copy.targetAgility = targetAgility.isFinite ? max(0, min(targetAgility, 4)) : 1
         copy.maximumAttempts = max(0, maximumAttempts)
-        if copy.targetsGroundVehicle { copy.targetCarriesPayload = false }
         // A load that belongs to the other side of the mission — a net on a delivery run, a
         // medical pack on an interception — is a configuration that could only have come from
         // switching sides with one already chosen.

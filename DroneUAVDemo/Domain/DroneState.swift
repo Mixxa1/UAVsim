@@ -217,6 +217,10 @@ struct DroneState {
     var elevatorDeflection: Float = 0.0
     var aileronDeflection: Float = 0.0
     var rudderDeflection: Float = 0.0
+    /// Actual surface angles, radians, in (aileron, elevator, rudder) order.
+    /// The visual mixers use the aerodynamic model's travel, after servo limits/jams.
+    var controlSurfaceAnglesRad: SIMD3<Float> = .zero
+    var mechanization = AircraftMechanizationState()
 
     /// Accumulated elevator trim, -1...1 fraction, held by the attitude loop.
     ///

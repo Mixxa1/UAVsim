@@ -1,0 +1,15 @@
+HoudiniFlame.png, HoudiniBurst.png, HoudiniSmoke.png
+
+Original animations: Unity Labs Paris / Thomas Iche, Unity Technologies (2016).
+Source: https://unity.com/blog/engine-platform/free-vfx-image-sequences-flipbooks
+License: CC0 1.0 Universal public domain dedication.
+https://creativecommons.org/publicdomain/zero/1.0/legalcode
+
+Source downloads:
+https://unity3d.com/files/labs/downloads/vfx/assets01/Flame02/Flame02-flipbooks.zip
+https://unity3d.com/files/labs/downloads/vfx/assets01/Explosion02HD/Explosion02HD-flipbooks.zip
+https://unity3d.com/files/labs/downloads/vfx/assets01/WispySmoke01/WispySmoke01-flipbooks.zip
+
+Modifications: TGA frames converted to PNG, transparent gutters added, burst frames
+resampled to 256 x 256. Reproducible conversion: Tools/VFX/prepare_flipbooks.py.
+No Unity or third-party engine code is included; these are texture assets only.

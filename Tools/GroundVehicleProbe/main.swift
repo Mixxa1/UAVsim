@@ -140,8 +140,6 @@ check(damage.condition(.engine) == 1, "a rear/side wheel hit does not invoke an 
 damage.impact(energyJ: 500_000, bodyPoint: GroundVehiclePart.engine.position(in: p), profile: p)
 check(damage.functionalState.isTerminal, "an engine disabled by contact stops the vehicle")
 var net = GroundVehicleDamage()
-net.applyModule(.equipmentDisruption, at: SIMD3<Float>(0, 3, 0), profile: p)
-check(net.functionalState == .nominal, "a net on the roof does not destroy a chassis")
 net.overturn()
 check(net.functionalState == .disabled, "an overturned vehicle is disabled")
 check(GroundVehicleRuntime.surfaceGrip(WeatherModel(preset: .snow, intensity: 1,
@@ -171,57 +169,12 @@ for _ in 0..<2400 { _ = burning.step(deltaTime: 0.05, destination: goal, threat:
     origin: .zero, areaRadius: 150, grip: 1, obstacles: [], ground: flat) }
 check(burning.effects.isEmpty, "damage effects expire on simulation time and cannot keep a recording open forever")
 
-let chargeFront = GroundVehicleRuntime(position: .zero, seed: 23)
-chargeFront.receiveDetonation(ChargeDetonation(position: GroundVehiclePart.engine.position(in: p)), directHit: true)
-check(chargeFront.damage.functionalState == .destroyed && chargeFront.damage.burning,
-    "a direct charge strike in the engine bay wrecks the vehicle and starts a local fire")
-check(chargeFront.damage.condition(.wheelFrontLeft) < 0.12 && chargeFront.damage.condition(.wheelRearLeft) > 0.5,
-    "front running gear separates while distant rear wheels survive the same detonation")
-let chargeRear = GroundVehicleRuntime(position: .zero, seed: 24)
-chargeRear.receiveDetonation(ChargeDetonation(position: GroundVehiclePart.wheelRearLeft.position(in: p)), directHit: true)
-check(chargeRear.damage.functionalState.isTerminal && chargeRear.damage.burning && chargeRear.damage.powerFactor > 0.8
-    && (chargeRear.damage.firePoint?.z ?? 0) > 0,
-    "a rear charge burns the struck running gear while leaving the distant engine intact")
-let chargeDistant = GroundVehicleRuntime(position: .zero, seed: 25)
-chargeDistant.receiveDetonation(ChargeDetonation(position: SIMD3<Float>(30, 0, 0)), directHit: false)
-check(chargeDistant.damage.functionalState == .nominal && chargeDistant.effects.isEmpty,
-    "a detonation outside the effect reach leaves a road vehicle untouched")
-let chargeNear = GroundVehicleRuntime(position: .zero, seed: 26)
-chargeNear.receiveDetonation(ChargeDetonation(position: SIMD3<Float>(6, 1, 0)), directHit: false)
-check(chargeNear.damage.functionalState == .damaged && chargeNear.damage.condition(.body) > 0.5,
-    "a near miss degrades the car instead of assigning a direct-hit kill")
-let collisionOnly = GroundVehicleRuntime(position: .zero, seed: 27)
-collisionOnly.receive(impactReport(1000, GroundVehiclePart.engine.position(in: p), SIMD3<Float>(0, 0, -1)))
-check(!collisionOnly.damage.functionalState.isTerminal && !collisionOnly.damage.burning,
-    "the same contact point with ordinary collision energy is not a charge event")
-
-let chargeRoof = GroundVehicleRuntime(position: .zero, seed: 28)
-let roofPoint = SIMD3<Float>(0, 3.06, -2.7)
-chargeRoof.receiveDetonation(ChargeDetonation(position: roofPoint), directHit: true)
-check(!chargeRoof.damage.burning && chargeRoof.effects.contains { $0.kind == .fire && $0.lifetime <= 7 },
-    "a heated roof has a brief local flame without falsely assigning an engine fuel fire")
-let roofFlame = chargeRoof.effects.first { $0.kind == .fire }!
-check(simd_distance(roofFlame.position, roofPoint + SIMD3<Float>(0, 0.20, 0)) < 0.001,
-    "the roof flame originates on the actual hit surface")
-chargeRoof.state.position = SIMD3<Float>(10, 0, 3)
-chargeRoof.state.attitudeQuat = simd_quatf(angle: .pi / 2, axis: SIMD3<Float>(0, 1, 0))
-chargeRoof.state.orientation.z = .pi / 2
-_ = chargeRoof.step(deltaTime: 0.05, destination: nil, threat: nil, evasive: false,
-    origin: .zero, areaRadius: 150, grip: 1, obstacles: [], ground: flat)
-let attachedFlame = chargeRoof.effects.first { $0.id == roofFlame.id }!
-let expectedFlame = chargeRoof.state.position + simd_act(chargeRoof.state.attitudeQuat, roofPoint + SIMD3<Float>(0, 0.20, 0))
-check(simd_distance(attachedFlame.position, expectedFlame) < 0.001,
-    "the local flare follows the damaged body's translation and rotation")
-for _ in 0..<160 { _ = chargeRoof.step(deltaTime: 0.05, destination: nil, threat: nil, evasive: false,
-    origin: .zero, areaRadius: 150, grip: 1, obstacles: [], ground: flat) }
-check(!chargeRoof.effects.contains { $0.kind == .fire } && !chargeRoof.damage.burning,
-    "heated residue dies out and never becomes an endless fire")
-
-func tick(_ mission: inout GroundVehicleMissionRuntime, dt: Double, car: SIMD2<Float> = .zero,
-          distance: Float = 40, camera: Bool = true, los: Bool = true, condition: InterceptFunctionalState = .nominal) {
+func tick(_ mission: inout GroundVehicleMissionRuntime, dt: Double, camera: Bool = true,
+          los: Bool = true, car: SIMD2<Float> = .zero, condition: InterceptFunctionalState = .nominal) {
     mission.tick(deltaTime: dt, playerAirborne: true, playerLost: false, carPosition: car,
-        carCondition: condition, distance: distance, inCamera: camera, lineOfSight: los)
+        carCondition: condition, distance: 40, inCamera: camera, lineOfSight: los)
 }
+
 var pursuit = GroundVehicleMissionRuntime(escort: false, difficulty: .easy, timeLimit: 120, route: [])
 tick(&pursuit, dt: 20, camera: false)
 check(pursuit.observedSeconds == 0, "proximity alone does not advance pursuit")
@@ -234,8 +187,8 @@ var escort = GroundVehicleMissionRuntime(escort: true, difficulty: .medium, time
     route: [SIMD2<Float>(0, -40), SIMD2<Float>(40, -80)])
 tick(&escort, dt: 35, camera: false)
 check(escort.result == nil && escort.destination == SIMD2<Float>(0, -40), "escort waits for route progress, not camera dwell")
-tick(&escort, dt: 1, car: SIMD2<Float>(0, -40), camera: false)
-tick(&escort, dt: 35, car: SIMD2<Float>(40, -80), camera: false)
+tick(&escort, dt: 1, camera: false, car: SIMD2<Float>(0, -40))
+tick(&escort, dt: 35, camera: false, car: SIMD2<Float>(40, -80))
 check(escort.result == .arrived, "escort succeeds after a safely accompanied arrival")
 var broken = GroundVehicleMissionRuntime(escort: true, difficulty: .medium, timeLimit: 120, route: [goal])
 tick(&broken, dt: 1, condition: .disabled)
@@ -245,10 +198,11 @@ check(broken.result == .vehicleDisabled && broken.result?.isSuccess == false,
 // Existing saved interception configuration has no ground-target fields.
 let encoded = try JSONEncoder().encode(InterceptMissionConfiguration())
 var object = try JSONSerialization.jsonObject(with: encoded) as! [String: Any]
-object.removeValue(forKey: "targetKind"); object.removeValue(forKey: "groundVehicleModel")
+object["targetKind"] = "groundVehicle"; object["groundVehicleModel"] = "cabover"
 let legacy = try JSONDecoder().decode(InterceptMissionConfiguration.self,
     from: JSONSerialization.data(withJSONObject: object))
-check(!legacy.targetsGroundVehicle, "old configurations still decode as aircraft interception")
+let migrated = try JSONSerialization.jsonObject(with: JSONEncoder().encode(legacy)) as! [String: Any]
+check(migrated["targetKind"] == nil && migrated["groundVehicleModel"] == nil, "legacy ground interception fields cannot restore the removed mode")
 
 if CommandLine.arguments.count > 2 {
     let directory = URL(fileURLWithPath: CommandLine.arguments[1], isDirectory: true)
@@ -289,6 +243,10 @@ if CommandLine.arguments.count > 2 {
             evasive: false, origin: .zero, areaRadius: 150, grip: 1, obstacles: [], ground: flat) }
         _ = visual.update(driven)
         let treadAfter = visual.rootNode.simdConvertPosition(treadCentre, from: tread)
+        let moving = MissionReplayVisualCapture.snapshot(id: "car", node: visual.rootNode,
+            recorder: recorder, role: "target", camera: cameraNode)
+        check(moving.assetID == initial.assetID && moving.nodeStates?.isEmpty == false,
+            "wheel movement alone reuses the intact car archive")
         check(simd_distance(treadBefore, treadAfter) > 0.08, "the actual tread geometry moves, not just an empty axle node")
         check(abs(visual.rootNode.childNode(withName: GroundVehiclePart.wheelFrontLeft.rawValue,
             recursively: true)!.eulerAngles.x) > 0.1, "the actual wheel meshes roll with road movement")
@@ -328,19 +286,19 @@ if CommandLine.arguments.count > 2 {
         let chargeVisual = GroundVehicleVisual(model: model, directory: directory)
         let cleanCharge = MissionReplayVisualCapture.snapshot(id: "wreck", node: chargeVisual.rootNode, recorder: recorder)
         let blown = GroundVehicleRuntime(position: .zero, model: model, seed: 44)
-        blown.receiveDetonation(ChargeDetonation(position: GroundVehiclePart.engine.position(in: p)), directHit: true)
+        blown.receive(impactReport(2_000_000, GroundVehiclePart.engine.position(in: p), SIMD3<Float>(0, 0, -1)))
         let chargePieces = chargeVisual.update(blown)
-        check(chargePieces.count >= 2 && chargePieces.allSatisfy { !$0.childNodes.isEmpty },
-            "a charge separates the actual USDZ front wheels, including their geometry")
-        check(chargeVisual.update(blown).isEmpty, "charge debris cannot be duplicated on following frames")
+        check(blown.damage.condition(.wheelFrontLeft) == 1 && blown.damage.condition(.wheelFrontRight) == 1,
+            "An engine impact must not apply the removed radial wheel-destruction rule")
+        check(chargeVisual.update(blown).isEmpty, "accident debris cannot be duplicated on following frames")
         for _ in 0..<600 { _ = blown.step(deltaTime: 0.05, destination: goal, threat: nil, evasive: false,
             origin: .zero, areaRadius: 150, grip: 1, obstacles: [], ground: flat) }
         _ = chargeVisual.update(blown)
         check(blown.effects.contains { $0.kind == .smoke } && blown.burnAge >= 29,
             "the wreck is still visibly burning/smoking after the previous effects would have disappeared")
         let burntCharge = MissionReplayVisualCapture.snapshot(id: "wreck", node: chargeVisual.rootNode, recorder: recorder)
-        check(burntCharge.nodeStates?.values.contains { ($0.materialTint?.x ?? 1) < 0.5 } == true,
-            "local charring is recorded as material state")
+        check(burntCharge.assetID != cleanCharge.assetID || burntCharge.nodeStates?.values.contains { ($0.materialTint?.x ?? 1) < 0.5 } == true,
+            "charring is recorded in the changed mesh or material deltas")
         let wreckReplay = MissionReplayWorldVisuals(), wreckScene = SCNScene(), wreckRoot = SCNNode()
         wreckScene.rootNode.addChildNode(wreckRoot)
         wreckReplay.load(assets: recorder.currentSession!.visualAssets!, scene: wreckScene, playerRoot: wreckRoot)
@@ -349,13 +307,14 @@ if CommandLine.arguments.count > 2 {
         let burntTint = (burntMesh.geometry?.firstMaterial?.multiply.contents as? NSColor)?.usingColorSpace(.deviceRGB)?.redComponent ?? 1
         check(burntTint < 0.6, "a replay restores the charred paint on the real car")
         wreckReplay.update(MissionReplayWorldSnapshot(nodes: [cleanCharge], effects: []))
-        let restoredTint = (burntMesh.geometry?.firstMaterial?.multiply.contents as? NSColor)?.usingColorSpace(.deviceRGB)?.redComponent ?? 1
+        let cleanMesh = wreckReplay.node(for: "wreck")!.childNode(withName: "CabLower_01", recursively: true)!
+        let restoredTint = (cleanMesh.geometry?.firstMaterial?.multiply.contents as? NSColor)?.usingColorSpace(.deviceRGB)?.redComponent ?? 1
         check(restoredTint > 0.9, "backward seeking restores the original paint, not a permanently burnt asset")
         let damaged = MissionReplayVisualCapture.snapshot(id: "car", node: visual.rootNode,
             recorder: recorder, role: "target", displayName: model.rawValue, camera: cameraNode)
         let fragment = MissionReplayVisualCapture.snapshot(id: "wheel", node: pieces[0], recorder: recorder)
-        check(initial.assetID == damaged.assetID && damaged.nodeStates?.isEmpty == false,
-            "wheel movement and body dents are captured without re-archiving the complete car")
+        check(initial.assetID != damaged.assetID || damaged.nodeStates?.isEmpty == false,
+            "mesh deformations create geometry versions while pose changes remain compact deltas")
         let world0 = MissionReplayWorldSnapshot(nodes: [initial], effects: [])
         let world1 = MissionReplayWorldSnapshot(nodes: [damaged, fragment], effects: [])
         let replayScene = SCNScene(), playerRoot = SCNNode()
@@ -372,7 +331,7 @@ if CommandLine.arguments.count > 2 {
             cameraNode.simdWorldPosition) < 0.001, "the car's own camera viewpoint is preserved")
         replay.update(world0)
         check(replay.node(for: "wheel") == nil &&
-            replayCar.childNode(withName: "wheel-mount-wheelFrontLeft", recursively: true)?.isHidden == false,
+            replay.node(for: "car")!.childNode(withName: "wheel-mount-wheelFrontLeft", recursively: true)?.isHidden == false,
             "backward seeking restores the intact car and removes future wheel debris")
     }
 }

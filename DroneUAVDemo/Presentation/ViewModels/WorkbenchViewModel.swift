@@ -122,6 +122,15 @@ enum WorkbenchFacePick: Hashable {
     }
 }
 
+enum WorkbenchFlightPassportStatus {
+    /// Not flown yet, or the build has changed since it was.
+    case pending
+    case flying
+    case flown
+    /// The build has no complete aircraft to fly: no wing parameters, no lift.
+    case unflyable
+}
+
 @MainActor
 final class WorkbenchViewModel: ObservableObject {
     @Published private(set) var build: WorkbenchBuild
@@ -148,6 +157,14 @@ final class WorkbenchViewModel: ObservableObject {
         try? FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
             .appendingPathComponent("UAVSim/CFD Runs", isDirectory: true)
     }
+    /// The build flown through its flight card by the solver the simulator flies it on: what it
+    /// does, beside what the Workbench computed for it. Kept while a newer one is being flown.
+    @Published private(set) var flightPassport: AirframeFlightCard?
+    @Published private(set) var flightPassportStatus: WorkbenchFlightPassportStatus = .pending
+    /// Counts the edits that may change how the build flies, so a card that lands after one of
+    /// them is flown again instead of being shown as the build's.
+    private var flightPassportGeneration = 0
+    private var flightPassportVehicleID: UUID?
     /// Vehicle whose runs `structuralRuns` holds: a new or opened blueprint reloads them.
     private var runsVehicleID: UUID?
     private let structuralStore = try? WorkbenchStructuralRunStore.standard()
@@ -552,6 +569,7 @@ final class WorkbenchViewModel: ObservableObject {
 
     /// Built-in checks plus the strength record derived from this vehicle's current runs.
     private func recomputeValidation() {
+        invalidateFlightPassport()
         let snapshot = WorkbenchEngineeringSnapshot.make(from: build)
         var records = WorkbenchBuiltInChecks.records(for: build, snapshot: snapshot)
         records += build.aerodynamicRuns.map(\.record)
@@ -567,6 +585,14 @@ final class WorkbenchViewModel: ObservableObject {
         let running = runningStructuralCaseID.flatMap { id in build.structuralCases.first { $0.id == id }?.testType }
         validation = EngineeringValidationEngine.evaluate(
             snapshot: snapshot, records: records, running: Set(running.map { [$0] } ?? []).union(aerodynamicRunVehicleID == build.id ? [.aerodynamics] : []))
+        // What the static cases concluded travels with the blueprint: it is what the aircraft
+        // is flown as strong as. Only a verdict on the build as it is now — an outdated one
+        // describes an airframe that no longer exists.
+        let reserve = validation.evaluation(.structuralStatic).flatMap { evaluation -> Double? in
+            guard evaluation.status.isCurrent else { return nil }
+            return evaluation.record?.metrics["reserveFactor"]?.value
+        }
+        if build.structuralReserveFactor != reserve { build.structuralReserveFactor = reserve }
     }
 
     private func reloadStructuralRuns() {
@@ -574,6 +600,45 @@ final class WorkbenchViewModel: ObservableObject {
         reloadAerodynamicRuns()
         structuralRuns = structuralStore?.runs(vehicleID: build.id.uuidString.lowercased()) ?? []
         recomputeValidation()
+    }
+
+    // MARK: Flight passport
+
+    /// Every edit that reaches the validation may also change how the build flies — a part, a
+    /// frame, an imported aerodynamic table. Telling them apart would need the synthesized
+    /// profiles compared; flying the card again costs less than that comparison is worth.
+    private func invalidateFlightPassport() {
+        flightPassportGeneration += 1
+        // An edited build keeps its last card on screen until the new one lands; another
+        // aircraft's card is not this one's at any moment.
+        if flightPassport != nil, flightPassportVehicleID != build.id { flightPassport = nil }
+        if flightPassportStatus == .flown || flightPassportStatus == .unflyable {
+            flightPassportStatus = .pending
+        }
+    }
+
+    /// Flies the card for the build as it is now, off the main thread. Asked for by the views
+    /// that show it, so a build nobody is looking at the card of is never flown.
+    func flyFlightPassportIfNeeded() {
+        guard flightPassportStatus == .pending else { return }
+        flightPassportStatus = .flying
+        let flown = build
+        let generation = flightPassportGeneration
+        Task { [weak self] in
+            let card = await Task.detached(priority: .userInitiated) {
+                AirframeFlightCard.measure(profile: UAVBuildProfileSynthesizer.synthesizeProfile(for: flown))
+            }.value
+            guard let self else { return }
+            guard self.flightPassportGeneration == generation else {
+                // Edited while it was in the air: that card belongs to a build that is gone.
+                self.flightPassportStatus = .pending
+                self.flyFlightPassportIfNeeded()
+                return
+            }
+            self.flightPassport = card
+            self.flightPassportVehicleID = flown.id
+            self.flightPassportStatus = card == nil ? .unflyable : .flown
+        }
     }
 
     // MARK: Aerodynamics

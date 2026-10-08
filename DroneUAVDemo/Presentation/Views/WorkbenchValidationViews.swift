@@ -410,6 +410,7 @@ struct WorkbenchValidationHub: View {
 
     enum Panel: String, CaseIterable, Identifiable {
         case overview
+        case flight
         case cfd
         case structural
 
@@ -418,6 +419,7 @@ struct WorkbenchValidationHub: View {
         var title: String {
             switch self {
             case .overview: return L10n.s("workbench.validation.overview")
+            case .flight: return L10n.s("workbench.validation.flight")
             case .cfd: return L10n.s("workbench.validation.cfd")
             case .structural: return L10n.s("workbench.validation.structural")
             }
@@ -426,6 +428,7 @@ struct WorkbenchValidationHub: View {
         var icon: String {
             switch self {
             case .overview: return "checkmark.seal"
+            case .flight: return "list.clipboard"
             case .cfd: return "wind"
             case .structural: return "cube.transparent"
             }
@@ -447,12 +450,24 @@ struct WorkbenchValidationHub: View {
             switch selectedPanel {
             case .overview:
                 overview
+            case .flight:
+                WorkbenchFlightPassportPanel(viewModel: viewModel)
             case .cfd:
                 WorkbenchAerodynamicsPanel(viewModel: viewModel)
             case .structural:
                 WorkbenchStructuralPanel(viewModel: viewModel)
             }
         }
+        .onAppear { flyPassportIfShown() }
+        .onChange(of: selectedPanel) { _, _ in flyPassportIfShown() }
+        .onChange(of: viewModel.flightPassportStatus) { _, _ in flyPassportIfShown() }
+    }
+
+    /// The card is flown for whoever is looking at it: the overview carries its verdict, the
+    /// flight panel the card itself. Editing a strength case does not fly the aircraft.
+    private func flyPassportIfShown() {
+        guard selectedPanel == .overview || selectedPanel == .flight else { return }
+        viewModel.flyFlightPassportIfNeeded()
     }
 
     private var compactSummary: some View {
@@ -491,8 +506,39 @@ struct WorkbenchValidationHub: View {
         return pairs.filter { $0.1 > 0 }.map { "\($0.0) \($0.1)" }.joined(separator: " · ")
     }
 
+    private var flightPassportRow: some View {
+        let summary = WorkbenchFlightPassportText.summary(
+            card: viewModel.flightPassport, status: viewModel.flightPassportStatus)
+        return Button {
+            selectedPanel = .flight
+        } label: {
+            HStack(spacing: 7) {
+                Circle().fill(summary.color).frame(width: 7, height: 7)
+                Text(L10n.s("workbench.flightcard.title"))
+                    .font(.system(size: 11, weight: .semibold))
+                Spacer(minLength: 2)
+                Text(summary.text)
+                    .font(.system(size: 8, weight: .heavy, design: .monospaced))
+                    .foregroundStyle(summary.color)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 8, weight: .bold))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 7)
+            .background(GroundControlPalette.inset, in: RoundedRectangle(cornerRadius: 7))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(L10n.s("workbench.flightcard.open"))
+    }
+
     private var overview: some View {
         VStack(alignment: .leading, spacing: 8) {
+            Text(L10n.s("workbench.flightcard.section"))
+                .font(.caption.weight(.bold))
+                .foregroundStyle(GroundControlPalette.textSecondary)
+            flightPassportRow
             Text(L10n.s("workbench.validation.state"))
                 .font(.caption.weight(.bold))
                 .foregroundStyle(GroundControlPalette.textSecondary)
@@ -527,5 +573,206 @@ struct WorkbenchValidationHub: View {
             .font(.system(size: 12, weight: .semibold))
             .tint(GroundControlPalette.accent)
         }
+    }
+}
+
+// MARK: - Flight passport
+
+enum WorkbenchFlightPassportText {
+    static func name(_ quantity: FlightCardLine.Quantity, airframeClass: String) -> String {
+        switch quantity {
+        case .stallSpeed: return L10n.s("workbench.flightcard.quantity.stall")
+        case .cruiseSpeed: return L10n.s("workbench.flightcard.quantity.cruise")
+        case .maximumSpeed: return L10n.s("workbench.flightcard.quantity.maximum")
+        case .climbRate: return L10n.s("workbench.flightcard.quantity.climb")
+        case .endurance:
+            switch airframeClass {
+            case "multirotor": return L10n.s("workbench.flightcard.quantity.hover_time")
+            // A hybrid has two, and the one this line carries is the long one.
+            case "hybridVTOL": return L10n.s("workbench.flightcard.quantity.wing_time")
+            default: return L10n.s("workbench.flightcard.quantity.flight_time")
+            }
+        case .glideRatio: return L10n.s("workbench.flightcard.quantity.glide")
+        case .hoverLever: return L10n.s("workbench.flightcard.quantity.hover_lever")
+        case .hoverEndurance: return L10n.s("workbench.flightcard.quantity.hover_time")
+        }
+    }
+
+    static func value(_ value: Float?, _ quantity: FlightCardLine.Quantity) -> String {
+        guard let value else { return "—" }
+        switch quantity {
+        case .stallSpeed, .cruiseSpeed, .maximumSpeed, .climbRate:
+            return String(format: "%.1f м/с", value)
+        case .endurance, .hoverEndurance:
+            // The card keeps hours, which is the unit of a Heron; a build from this bench is
+            // read in minutes until it stays up for a couple of hours.
+            let minutes = value * 60
+            if minutes < 10 { return String(format: "%.1f мин", minutes) }
+            return minutes < 120 ? String(format: "%.0f мин", minutes) : String(format: "%.1f ч", value)
+        case .glideRatio:
+            return String(format: "%.1f", value)
+        case .hoverLever:
+            return String(format: "%.0f %%", value * 100)
+        }
+    }
+
+    /// Declared and measured side by side under one unit, for a card too narrow for a table.
+    static func pair(_ line: FlightCardLine) -> String {
+        func both(_ format: String, _ scale: Float = 1) -> (String, String) {
+            (line.declared.map { String(format: format, $0 * scale) } ?? "—",
+             line.measured.map { String(format: format, $0 * scale) } ?? "—")
+        }
+        switch line.quantity {
+        case .stallSpeed, .cruiseSpeed, .maximumSpeed, .climbRate:
+            let (declared, measured) = both("%.1f")
+            return "\(declared) / \(measured) м/с"
+        case .endurance, .hoverEndurance:
+            let longest = max(line.declared ?? 0, line.measured ?? 0) * 60
+            if longest >= 120 {
+                let (declared, measured) = both("%.1f")
+                return "\(declared) / \(measured) ч"
+            }
+            let (declared, measured) = both(longest < 10 ? "%.1f" : "%.0f", 60)
+            return "\(declared) / \(measured) мин"
+        case .glideRatio:
+            let (declared, measured) = both("%.1f")
+            return "\(declared) / \(measured)"
+        case .hoverLever:
+            let (declared, measured) = both("%.0f", 100)
+            return "\(declared) / \(measured) %"
+        }
+    }
+
+    /// The band a line is judged by, in the words of the column it sits under.
+    static func band(_ quantity: FlightCardLine.Quantity) -> String {
+        guard let band = quantity.band else { return L10n.s("workbench.flightcard.band.none") }
+        let lower = Int((band.lowerBound * 100).rounded())
+        guard band.upperBound < 100 else { return L10n.f("workbench.flightcard.band.floor", lower) }
+        return L10n.f("workbench.flightcard.band.range", lower, Int((band.upperBound * 100).rounded()))
+    }
+
+    static func color(_ verdict: FlightCardLine.Verdict) -> Color {
+        switch verdict {
+        case .within: return GroundControlPalette.success
+        case .outside: return GroundControlPalette.warning
+        case .informational, .notMeasured: return Color.white.opacity(0.35)
+        }
+    }
+
+    static func summary(card: AirframeFlightCard?, status: WorkbenchFlightPassportStatus) -> (text: String, color: Color) {
+        let idle = Color.white.opacity(0.35)
+        if status == .unflyable { return (L10n.s("workbench.flightcard.summary.unflyable"), GroundControlPalette.danger) }
+        guard let card, status == .flown else { return (L10n.s("workbench.flightcard.summary.flying"), idle) }
+        let judged = card.lines.filter { $0.verdict == .within || $0.verdict == .outside }
+        let within = judged.filter { $0.verdict == .within }.count
+        return (L10n.f("workbench.flightcard.summary.count", within, judged.count),
+                within == judged.count ? GroundControlPalette.success : GroundControlPalette.warning)
+    }
+}
+
+/// The build's flight card: each figure the Workbench computed for it beside the one the
+/// simulator's solver produced when the build was flown for it.
+struct WorkbenchFlightPassportPanel: View {
+    @ObservedObject var viewModel: WorkbenchViewModel
+
+    private var isFlying: Bool {
+        viewModel.flightPassportStatus == .flying || viewModel.flightPassportStatus == .pending
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Text(L10n.s("workbench.flightcard.title")).font(.system(size: 17, weight: .semibold))
+                Spacer()
+                if isFlying {
+                    ProgressView().controlSize(.small)
+                    Text(L10n.s("workbench.flightcard.flying"))
+                        .font(.system(size: 10)).foregroundStyle(GroundControlPalette.textSecondary)
+                }
+            }
+            Text(L10n.s("workbench.flightcard.intro"))
+                .font(.system(size: 11)).foregroundStyle(GroundControlPalette.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            if let card = viewModel.flightPassport {
+                table(card)
+                    // The last card stays readable while the edited build is in the air.
+                    .opacity(isFlying ? 0.55 : 1.0)
+                Text(conditions(card))
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if card.airframeClass == "hybridVTOL" {
+                    note(L10n.s("workbench.flightcard.note.hybrid"))
+                }
+                if !card.outside.isEmpty {
+                    note(L10n.s("workbench.flightcard.note.outside"))
+                }
+            } else if viewModel.flightPassportStatus == .unflyable {
+                note(L10n.s("workbench.flightcard.unflyable"))
+            }
+        }
+    }
+
+    private func table(_ card: AirframeFlightCard) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+            GridRow {
+                header("workbench.flightcard.column.quantity")
+                header("workbench.flightcard.column.designed").gridColumnAlignment(.trailing)
+                header("workbench.flightcard.column.flown").gridColumnAlignment(.trailing)
+                header("workbench.flightcard.column.ratio").gridColumnAlignment(.trailing)
+            }
+            Divider().overlay(GroundControlPalette.border)
+            ForEach(card.lines, id: \.quantity) { line in
+                GridRow {
+                    Text(WorkbenchFlightPassportText.name(line.quantity, airframeClass: card.airframeClass))
+                        .font(.system(size: 11, weight: .semibold))
+                    Text(WorkbenchFlightPassportText.value(line.declared, line.quantity))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundStyle(GroundControlPalette.textSecondary)
+                    Text(WorkbenchFlightPassportText.value(line.measured, line.quantity))
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    verdict(line)
+                }
+                .help(WorkbenchFlightPassportText.band(line.quantity))
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(GroundControlPalette.panelRaised, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(GroundControlPalette.border))
+    }
+
+    private func header(_ key: String) -> some View {
+        Text(L10n.s(key).uppercased())
+            .font(.system(size: 8, weight: .heavy))
+            .foregroundStyle(GroundControlPalette.textSecondary)
+    }
+
+    private func verdict(_ line: FlightCardLine) -> some View {
+        let color = WorkbenchFlightPassportText.color(line.verdict)
+        let judged = line.verdict == .within || line.verdict == .outside
+        return HStack(spacing: 5) {
+            Text(judged ? line.ratio.map { String(format: "%.0f %%", $0 * 100) } ?? "—" : "—")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .foregroundStyle(judged ? color : GroundControlPalette.textSecondary)
+            Circle().fill(color).frame(width: 7, height: 7)
+        }
+    }
+
+    private func conditions(_ card: AirframeFlightCard) -> String {
+        let mass = WorkbenchValidationText.format(Double(card.flownMassKg), unit: "kg")
+        var text = L10n.f("workbench.flightcard.conditions", mass, Int(card.workingAltitudeM.rounded()))
+        if let lever = card.cruiseLeverHeld {
+            text += " · " + L10n.f("workbench.flightcard.cruise_lever", Int((lever * 100).rounded()))
+        }
+        return text
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10))
+            .foregroundStyle(GroundControlPalette.textSecondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }

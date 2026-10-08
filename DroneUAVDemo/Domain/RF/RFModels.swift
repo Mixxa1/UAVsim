@@ -399,6 +399,12 @@ struct RFLinkConfiguration: Codable, Hashable, Identifiable, Sendable {
     /// Optional so authored RF schema-v1 files remain decodable. New compatibility profiles set
     /// this explicitly; legacy files receive a conservative mode-specific fallback at runtime.
     var videoLinkPreset: RFVideoLinkPreset? = nil
+    /// Further antennas on the same radio that it switches between, taking whichever hears best —
+    /// selection diversity. An airframe that flies in two attitudes a right angle apart carries
+    /// one element for each, because a single whip that is upright in one lies flat in the other.
+    /// Optional so earlier files decode unchanged; nil is a radio with one antenna.
+    var transmitterDiversityAntennaIDs: [String]? = nil
+    var receiverDiversityAntennaIDs: [String]? = nil
 
     /// Tethered video remains a logical delivery link, but it does not radiate, consume RF
     /// channel capacity or participate in propagation/interference calculations.

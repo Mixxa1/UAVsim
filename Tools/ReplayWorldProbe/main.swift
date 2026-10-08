@@ -342,11 +342,14 @@ struct ReplayWorldProbe {
             building.name = "building"
             uniqueChunk.addChildNode(building)
         }
-        for n in 0..<300 {
+        // Construction has a wall-clock budget as well as a node budget. Allow enough batches
+        // for slower machines; assertions below still require all 1,200 independent slots.
+        for n in 0..<1_200 {
             update(Double(n) * 0.05 + 50)
             if renderer.importedGeometryCount == 1_200 && !renderer.hasPendingImportedGeometry { break }
         }
-        check(renderer.importedMaterialCount == 1_200, "Unique imported materials must retain independent slots")
+        check(renderer.importedMaterialCount == 1_200,
+              "Unique imported materials must retain independent slots (got \(renderer.importedMaterialCount))")
         let beforeWeather = renderer.importedUniformUpdateCount
         update(80, rain)
         check(renderer.importedUniformUpdateCount - beforeWeather <= 64,

@@ -320,10 +320,10 @@ final class InterceptMissionSession {
                 kind: .vehicle,
                 secondComponent: contact.secondSphere.componentID
             )
-            if playerPayload.effectProfileID == .structuralDestruction {
+            if !actor.isGroundVehicle && playerPayload.effectProfileID == .structuralDestruction {
                 triggerPlayerCharge(impact: &event, directVehicleID: actor.id,
                     player: &player, playerGraph: &playerGraph, obstacles: obstacles)
-            } else if actor.role == .target {
+            } else if !actor.isGroundVehicle && actor.role == .target {
                 triggerPlayerPayload(on: actor, impact: &event, playerGraph: &playerGraph)
             }
             pendingImpacts.append(event)
@@ -374,14 +374,10 @@ final class InterceptMissionSession {
         impact: inout InterceptImpactEvent,
         playerGraph: inout VehicleComponentGraph
     ) {
-        guard impact.impactClass != .touch,
+        guard !actor.isGroundVehicle, impact.impactClass != .touch,
               playerPayload.trigger(impactID: impact.id, policy: .targetContact) else { return }
         impact.payloadIDs.append(playerPayload.id)
-        if actor.isGroundVehicle {
-            actor.applyGroundModule(playerPayload.effectProfileID, worldPoint: impact.position)
-        } else {
-            applyEquipmentEffect(profile: playerPayload.effectProfileID, graph: &actor.graph)
-        }
+        applyEquipmentEffect(profile: playerPayload.effectProfileID, graph: &actor.graph)
         // Whatever the module does to the target at contact range, it does to the aircraft carrying
         // it. There is no standing off from something bolted to your own airframe.
         applyCarrierEffect(profile: playerPayload.effectProfileID, graph: &playerGraph)
@@ -611,7 +607,7 @@ final class InterceptMissionSession {
                     until: worldTime + Self.contactBlackoutSeconds, permanently: true)
             }
         }
-        for actor in actors {
+        for actor in actors where !actor.isGroundVehicle {
             let direct = actor.id == sourceID || actor.id == directVehicleID
             let nearest = actor.contactProfile.spheres.map { sphere in
                 max(0, simd_distance(impact.position,

@@ -1,6 +1,7 @@
 import Foundation
 import SceneKit
 import simd
+import CryptoKit
 
 // Headless check of the bundled USDZ airframe library against the catalogue.
 //
@@ -80,6 +81,10 @@ guard FileManager.default.fileExists(atPath: modelsDirectory.path) else {
 
 let library = UAVModelAssetLibrary(directory: modelsDirectory)
 let profiles = UAVReferenceCatalog.realProfiles
+let rigDecoder = JSONDecoder()
+rigDecoder.keyDecodingStrategy = .convertFromSnakeCase
+let rigManifest = try rigDecoder.decode(UAVModelManifest.self,
+    from: Data(contentsOf: modelsDirectory.appendingPathComponent("manifest.json")))
 
 var failures: [String] = []
 var notes: [String] = []
@@ -157,7 +162,7 @@ func bladeReference(
 
 let profileIDs = Set(profiles.map { $0.id })
 let modelIDs = Set(library.coveredIDs)
-if UAVExpansionCatalog.ids.count != 30 { fail("additional flight catalogue must contain 30 aircraft") }
+if UAVExpansionCatalog.ids.count != 26 { fail("additional flight catalogue must contain 26 aircraft") }
 if profileIDs.count != profiles.count { fail("duplicate catalogue profile IDs") }
 for definition in UAVExpansionCatalog.definitions {
     let runtime = LIPODroneModelRepository.runtimeProfile(from: definition.profile)
@@ -175,6 +180,23 @@ for definition in UAVExpansionCatalog.definitions {
         if UAVCameraFitmentCatalog.fitment(for: definition.profile).allowsOperatorCameraPayload {
             fail("\(definition.id): stock integrated camera incorrectly treated as detachable payload")
         }
+    }
+    if !definition.isMulticopter && definition.mechanics == nil {
+        fail("\(definition.id): bundled manifest has no mechanics configuration")
+    }
+}
+// Verify the exact packages the app loads, not merely the authoring directory.
+let expansionDirectory = repoRoot.appendingPathComponent("Assets/UAVModels-Expansion")
+if let data = try? Data(contentsOf: expansionDirectory.appendingPathComponent("manifest.json")),
+   let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+   let rows = json["models"] as? [[String: Any]] {
+    for row in rows {
+        guard let id = row["id"] as? String, let expected = row["sha256"] as? String,
+              let data = try? Data(contentsOf: modelsDirectory.appendingPathComponent(id+".usdz")) else {
+            fail("an expansion package is missing from the app resources"); continue
+        }
+        let actual = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        if actual != expected { fail("\(id): installed USDZ differs from the validated authoring package") }
     }
 }
 
@@ -230,7 +252,7 @@ for profile in profiles.sorted(by: { $0.id < $1.id }) {
         fail("\(profile.id): \(liveAnimations) imported animations survived import")
     }
 
-    // New rigid camera/canard assemblies must respond to live simulation input,
+    // Articulated assemblies must respond to live simulation input,
     // with fixed pivots, after their packaged demonstration clips are removed.
     if visual.articulatedNodes.count != library.articulationCount(for: profile.id) {
         fail("\(profile.id): articulated camera/control assembly is missing")
@@ -239,9 +261,17 @@ for profile in profiles.sorted(by: { $0.id < $1.id }) {
         let rest = rig.node.simdTransform
         let pivot = rig.node.simdWorldPosition
         rig.applyCamera(yawDegrees: 15, pitchDegrees: -20)
-        rig.applyControl(elevatorDeflection: 0.65)
-        if simd_length(rig.node.simdWorldPosition - pivot) > 0.00001 {
-            fail("\(profile.id): camera/control pivot translates when actuated")
+        var live = DroneState.initial
+        live.elevatorDeflection = 0.65
+        live.controlSurfaceAnglesRad = SIMD3<Float>(0.22, 0.13, 0.07)
+        live.mechanization.flapDeployment = 0.65
+        live.mechanization.flapAngleRadians = 0.35
+        live.mechanization.gearExtension = 0.35
+        live.mechanization.gearDoorOpening = 0.7
+        rig.applyMechanization(state: live)
+        let travel = rig.node.parent?.simdConvertVector(rig.travelVector*live.mechanization.flapDeployment, to: nil) ?? .zero
+        if simd_length(rig.node.simdWorldPosition-pivot-travel) > 0.00001 {
+            fail("\(profile.id): articulated pivot departed from its hinge/rail")
         }
         let turned = rig.node.simdTransform
         if simd_length(turned.columns.0 - rest.columns.0)
@@ -250,6 +280,121 @@ for profile in profiles.sorted(by: { $0.id < $1.id }) {
             fail("\(profile.id): camera/control assembly did not move")
         }
         rig.node.simdTransform = rest
+        let name = rig.node.name?.split(separator: ".").last.map(String.init)
+        let mixing = rigManifest.models.first(where: { $0.id == profile.id })?.rigs?
+            .first(where: { $0.name == name })?.mixing ?? [:]
+        for (channel, coefficient) in mixing where ["aileron", "elevator", "rudder"].contains(channel) {
+            var isolated = DroneState.initial
+            let axis = channel == "aileron" ? 0 : channel == "elevator" ? 1 : 2
+            isolated.controlSurfaceAnglesRad[axis] = 0.2
+            rig.applyMechanization(state: isolated)
+            let rotation = rig.node.simdOrientation
+            let signed = 2*atan2(simd_dot(rotation.imag, rig.axisVector), rotation.real)
+            if abs(signed-coefficient*0.2) > 0.0001 {
+                fail("\(profile.id): \(rig.node.name ?? "rig") mixes \(channel) in the wrong direction")
+            }
+            rig.node.simdTransform = rest
+        }
+    }
+
+    // Flaps and undercarriage: the rigs the scene moves must be the hardware the physics
+    // moves — the same leg, the same wing, the same direction. Left and right are mirrored
+    // between the asset and the body frame, so none of this is taken from a rig's name.
+    let mechanizedProfile = LIPODroneModelRepository.runtimeProfile(from: profile)
+    if let mechanization = AircraftMechanizationModel.shared(for: mechanizedProfile, uav: profile) {
+        let frame = SCNNode()
+        frame.addChildNode(visual.rootNode)
+        defer { visual.rootNode.removeFromParentNode() }
+        func apply(_ state: DroneState) {
+            for rig in visual.articulatedNodes { rig.applyMechanization(state: state) }
+        }
+        func lowestPoint(_ rig: UAVArticulatedNode) -> Float {
+            bounds(of: rig.node, in: frame)?.min.y ?? .greatestFiniteMagnitude
+        }
+        // This model is still in the asset's frame: `DroneModelBuilder` yaws it half a turn
+        // and lifts it onto the ground, and that is the frame the physics works in.
+        let groundLift = max(0, -(UAVExpansionCatalog.definition(for: profile.id)?.boundsMin.dropFirst().first ?? 0))
+        func bodyPosition(_ rig: UAVArticulatedNode) -> SIMD3<Float> {
+            let p = frame.simdConvertPosition(.zero, from: rig.node)
+            return SIMD3<Float>(-p.x, p.y + groundLift, -p.z)
+        }
+        let neutral = DroneState.initial
+        apply(neutral)
+
+        if mechanization.configuration.retractableGear {
+            let legs = visual.articulatedNodes.filter { $0.role == "landing_gear" }
+            if legs.count != mechanization.hinges.count {
+                fail("\(profile.id): \(legs.count) leg rigs for \(mechanization.hinges.count) physics hinges")
+            }
+            for (index, hinge) in mechanization.hinges.enumerated() {
+                guard let leg = legs.min(by: {
+                    simd_distance(bodyPosition($0), hinge.center) < simd_distance(bodyPosition($1), hinge.center)
+                }) else { continue }
+                let offset = simd_distance(bodyPosition(leg), hinge.center)
+                if offset > 0.02 * max(1, size.x) {
+                    fail(String(format: "%@: leg %d pivots %.2f m from the hinge the physics uses", profile.id, index, offset))
+                }
+                // Failing this leg must fold this rig and no other.
+                var failed = DroneState.initial
+                failed.mechanization.gearLegHealth[index] = 0
+                apply(failed)
+                let folded = legs.filter { abs($0.node.simdOrientation.real) < 0.9999 }
+                if folded.count != 1 || folded.first?.node !== leg.node {
+                    fail("\(profile.id): failing leg \(index) folds \(folded.count) rigs, or the wrong one")
+                }
+                apply(neutral)
+            }
+            let down = legs.map(lowestPoint)
+            var retracted = DroneState.initial
+            retracted.mechanization.gearExtension = 0
+            apply(retracted)
+            for (index, leg) in legs.enumerated() where lowestPoint(leg) < down[index] + 0.05 * size.y {
+                fail("\(profile.id): leg rig \(index) does not rise when the undercarriage retracts")
+            }
+            var doorless = DroneState.initial
+            doorless.mechanization.gearDoorsLost = true
+            apply(doorless)
+            let doors = visual.articulatedNodes.filter { $0.role == "gear_door" }
+            if doors.isEmpty || doors.contains(where: { !$0.node.isHidden }) {
+                fail("\(profile.id): lost undercarriage doors are still drawn")
+            }
+            apply(neutral)
+        }
+
+        if mechanization.configuration.hasFlaps {
+            let flaps = visual.articulatedNodes.filter {
+                $0.role == "control_surface" && ($0.node.name ?? "").contains("Flap")
+            }
+            let declaredFlaps = rigManifest.models.first(where: { $0.id == profile.id })?.rigs?
+                .filter { ($0.mixing?["flap"] ?? 0) != 0 } ?? []
+            if flaps.count != declaredFlaps.count { fail("\(profile.id): not all declared flap sections were imported") }
+            let mainFlaps = flaps.filter { ($0.node.name ?? "").contains("MainWing") }
+            if mainFlaps.count != mechanization.characteristics.flapPanels.count {
+                fail("\(profile.id): visual flap sections differ from the measured aerodynamic panels")
+            }
+            let up = flaps.map(lowestPoint)
+            var lowered = DroneState.initial
+            lowered.mechanization.flapDeployment = 1
+            lowered.mechanization.flapAngleRadians = mechanization.characteristics.flapMaxRad
+            apply(lowered)
+            for (index, flap) in flaps.enumerated() where lowestPoint(flap) > up[index] - 0.001 * size.x {
+                fail("\(profile.id): flap rig \(index) does not come down when the flaps are lowered")
+            }
+            // Body frame: +X is the right wing.
+            for (health, sign, side) in [(SIMD2<Float>(0, 1), Float(-1), "left"), (SIMD2<Float>(1, 0), Float(1), "right")] {
+                var lost = lowered
+                lost.mechanization.flapPanelHealth = health
+                apply(lost)
+                let hidden = flaps.filter { $0.node.isHidden }
+                let x = hidden.first.map { bodyPosition($0).x } ?? 0
+                let expected = Set(flaps.filter { bodyPosition($0).x*sign > 0 }.map { ObjectIdentifier($0.node) })
+                let actual = Set(hidden.map { ObjectIdentifier($0.node) })
+                if actual != expected || expected.isEmpty {
+                    fail("\(profile.id): losing the \(side) flap panel hides \(hidden.count) rigs, at x = \(x)")
+                }
+            }
+            apply(neutral)
+        }
     }
 
     // Does spinning the wrapper actually turn the disc in its own plane?
@@ -467,6 +612,119 @@ for profile in profiles.sorted(by: { $0.id < $1.id }) {
         vehicleMassModel: VehicleMassModel.baseline(for: runtime, uavProfile: profile),
         geometry: sample
     )
+    if let configuration = UAVExpansionCatalog.definition(for: profile.id)?.mechanics,
+       let wing = runtime.fixedWingParameters {
+        let baseMass = VehicleMassModel.baseline(for: runtime, uavProfile: profile)
+        var flying = DroneState.initial
+        flying.position.y = 100
+        flying.velocity.z = -wing.cruiseAirspeed
+        flying.forwardAirspeed = wing.cruiseAirspeed
+        flying.equivalentAirspeedMps = wing.cruiseAirspeed
+        flying.physicalState = .airborne
+        flying.propulsionUnits = runtime.propulsionUnitTemplate
+        var command = DroneControlInput(targetPosition: flying.position, targetOrientation: SIMD3<Float>(0.5,0.4,0),
+            yawIntent: 0.5, throttle: 0.5, isArmed: true, mode: .manual, controlMode: .acro)
+        let context = DroneSimulationContext(profile: runtime, activeUAVProfile: profile,
+            weather: .normal,
+            damageState: .pristine, batteryState: .full, collisionRisk: 0,
+            windVector: .zero, vehicleMassModel: baseMass, contactProfile: built.contactProfile,
+            jammedSurfaces: [.elevator: -0.35, .aileron: 0.2, .rudder: 0.15])
+        let stepped = SimpleDronePhysicsEngine().step(state: flying, control: command, context: context, deltaTime: 0.05)
+        if abs(stepped.elevatorDeflection + 0.35) > 0.00001
+            || abs(stepped.aileronDeflection-0.2) > 0.00001 || abs(stepped.rudderDeflection-0.15) > 0.00001 {
+            fail("\(profile.id): seized servo position did not reach live physics state")
+        }
+        if simd_length(stepped.controlSurfaceAnglesRad) < 0.01 {
+            fail("\(profile.id): physics did not publish live surface angles")
+        }
+        command.flapCommand = 1
+        let mechanismModel = AircraftMechanizationModel.make(configuration: configuration,
+            profile: runtime, uav: profile, modelGroundLift: groundLift)
+        if configuration.hasFlaps, let mechanismModel {
+            let neutral = AircraftMechanizationState()
+            let moving = mechanismModel.advance(neutral, control: command,
+                condition: AircraftMechanizationFlightCondition(dynamicPressurePa: 0, airspeedMps: wing.cruiseAirspeed,
+                    yawRateRadPerSec: 0, heightAboveGroundM: 100), actuatorAuthority: 1,
+                isDestroyed: false, dt: 0.1)
+            if moving.flapDeployment <= 0 || moving.flapDeployment >= 1 {
+                fail("\(profile.id): flap servo jumps or does not respond")
+            }
+            var deployed = AircraftMechanizationState()
+            deployed.flapDeployment = 1
+            deployed.flapAngleRadians = mechanismModel.characteristics.flapMaxRad
+            let overloaded = mechanismModel.advance(deployed, control: command,
+                condition: AircraftMechanizationFlightCondition(dynamicPressurePa: mechanismModel.characteristics.flapLimitDynamicPressurePa*2,
+                    airspeedMps: wing.maxAirspeed, yawRateRadPerSec: 0, heightAboveGroundM: 100), actuatorAuthority: 1,
+                isDestroyed: false, dt: 0.05)
+            if overloaded.flapPanelHealth.x > 0.5 || overloaded.flapPanelHealth.y > 0.5 {
+                fail("\(profile.id): excessive flap load did not cause the modeled panel failures")
+            }
+            let aero = FixedWingAerodynamics.build(family: wing.family, massKg: baseMass.effectiveMass,
+                wingSpanM: runtime.dimensionsUnfoldedMm.x/1000,
+                fuselageLengthM: runtime.dimensionsUnfoldedMm.y/1000,
+                heightM: runtime.dimensionsUnfoldedMm.z/1000, turnAuthority: wing.turnAuthority,
+                minSustainableSpeedMps: wing.minSustainableSpeedMps)
+            var clean = AircraftMechanizationState(); clean.gearExtension = 0
+            var dirty = AircraftMechanizationState(); dirty.flapDeployment = 1
+            let cleanForces = aero.applyingMechanization(mechanismModel, state: clean).liftDrag(alphaRad: 0.05)
+            let dirtyForces = aero.applyingMechanization(mechanismModel, state: dirty).liftDrag(alphaRad: 0.05)
+            if dirtyForces.cl <= cleanForces.cl || dirtyForces.cd <= cleanForces.cd {
+                fail("\(profile.id): flap/gear positions are cosmetic; aerodynamic forces did not change")
+            }
+        }
+        if configuration.retractableGear, let mechanismModel {
+            command.landingGearDownCommand = false
+            var mechanism = AircraftMechanizationState()
+            let duration = mechanismModel.characteristics.gearTravelSeconds
+                + 2*mechanismModel.characteristics.doorTravelSeconds + 1
+            let ticks = Int((duration/0.05).rounded(.up))
+            for _ in 0..<ticks {
+                let previous = mechanism
+                mechanism = mechanismModel.advance(previous, control: command,
+                    condition: AircraftMechanizationFlightCondition(dynamicPressurePa: 0, airspeedMps: wing.cruiseAirspeed,
+                        yawRateRadPerSec: 0, heightAboveGroundM: 100), actuatorAuthority: 1,
+                    isDestroyed: false, dt: 0.05)
+                if mechanism.gearExtension != previous.gearExtension && previous.gearDoorOpening < 0.999 {
+                    fail("\(profile.id): leg moved before its doors opened")
+                }
+            }
+            if mechanism.gearExtension != 0 || mechanism.gearInTransit {
+                fail("\(profile.id): gear retraction did not finish and lock")
+            }
+            let folded = mechanismModel.contacts(built.contactProfile, unsupportedMask: mechanism.gearUnsupportedMask)
+            if folded.referenceGroundOffset != built.contactProfile.referenceGroundOffset {
+                fail("\(profile.id): retracting the gear moved the reference frame")
+            }
+            let oldGear = built.contactProfile.spheres.filter { $0.componentID.hasPrefix("gear.") }
+            let newGear = folded.spheres.filter { $0.componentID.hasPrefix("gear.") }
+            if oldGear.isEmpty || !newGear.isEmpty {
+                fail("\(profile.id): retracted wheels still supply ground support")
+            }
+            command.landingGearDownCommand = true
+            for _ in 0..<ticks {
+                mechanism = mechanismModel.advance(mechanism, control: command,
+                    condition: AircraftMechanizationFlightCondition(dynamicPressurePa: 0, airspeedMps: wing.cruiseAirspeed,
+                        yawRateRadPerSec: 0, heightAboveGroundM: 100), actuatorAuthority: 1,
+                    isDestroyed: false, dt: 0.05)
+            }
+            if mechanism.gearExtension != 1 || mechanism.gearInTransit {
+                fail("\(profile.id): gear extension did not finish and lock")
+            }
+            var unlocked = AircraftMechanizationState(); unlocked.gearExtension = 0.5
+            let crushed = mechanismModel.touchingGround(unlocked)
+            if !crushed.gearCrushedOnGround || crushed.gearDownAndLocked || !crushed.gearLegFailed {
+                fail("\(profile.id): unlocked legs still carry the aircraft on ground contact")
+            }
+            command.landingGearDownCommand = false
+            let frozen = mechanismModel.advance(mechanism, control: command,
+                condition: AircraftMechanizationFlightCondition(dynamicPressurePa: 0, airspeedMps: wing.cruiseAirspeed,
+                    yawRateRadPerSec: 0, heightAboveGroundM: 100), actuatorAuthority: 0,
+                isDestroyed: false, dt: 0.05)
+            if frozen.gearExtension != mechanism.gearExtension || frozen.gearDoorOpening != mechanism.gearDoorOpening {
+                fail("\(profile.id): failed controller still drives mechanics")
+            }
+        }
+    }
 
     if built.rotorModel.rotors.count != visual.propellerNodes.count {
         fail("\(profile.id): graph has \(built.rotorModel.rotors.count) rotor slots for \(visual.propellerNodes.count) visual rotors")

@@ -9,16 +9,22 @@ struct SettingsView: View {
     /// Applies a window-size preset through the app's bound main window (ContentView wires this to
     /// `AppShell.applyWindowSizePreset` — more reliable than reaching for `NSApp.mainWindow` here).
     var onApplyWindowSize: (WindowSizePreset) -> Void = { _ in }
+    private let onStartInstructor: ((InstructorLaunchMode) -> Void)?
+    @AppStorage(InstructorProgressStore.flightCourseCompletedKey) private var flightCourseCompleted = false
 
     @StateObject private var bindings: BindingsViewModel
     @State private var selected: SettingsPage = .guide
     private let simulationViewModel: DroneSimulationViewModel?
 
     init(onClose: @escaping () -> Void, onApplyWindowSize: @escaping (WindowSizePreset) -> Void = { _ in },
-         simulationViewModel: DroneSimulationViewModel? = nil) {
+         simulationViewModel: DroneSimulationViewModel? = nil,
+         onStartInstructor: ((InstructorLaunchMode) -> Void)? = nil,
+         initialPage: SettingsPage = .guide) {
         self.onClose = onClose
         self.onApplyWindowSize = onApplyWindowSize
         self.simulationViewModel = simulationViewModel
+        self.onStartInstructor = onStartInstructor
+        _selected = State(initialValue: initialPage)
         if let simulationViewModel {
             _bindings = StateObject(wrappedValue: simulationViewModel.bindingsViewModel)
         } else {
@@ -27,12 +33,13 @@ struct SettingsView: View {
                 captureCoordinator: InputCaptureCoordinator(keyboardInputService: keyboard, inputManager: InputManager())))
         }
     }
-    private enum SettingsPage: String, CaseIterable, Identifiable {
-        case guide, keys, controller, video, audio, language, about
+    enum SettingsPage: String, CaseIterable, Identifiable {
+        case training, guide, keys, controller, video, audio, language, about
         var id: String { rawValue }
         var key: String { "settings.page." + rawValue }
         var icon: String {
             switch self {
+            case .training: return "graduationcap.fill"
             case .guide: return "book.closed"
             case .keys: return "keyboard"
             case .controller: return "gamecontroller"
@@ -108,6 +115,7 @@ struct SettingsView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 16) {
                             switch selected {
+                            case .training: instructorSection
                             case .guide: guideSection
                             case .controller: controlsSection
                             case .video: videoSection; resolutionSection
@@ -146,6 +154,8 @@ struct SettingsView: View {
                       commands: [.cycleCameraMode, .toggleFPV, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .zoomIn, .zoomOut, .resetCameraOrientation])
             guideCard("settings.guide.vtol", icon: "arrow.triangle.2.circlepath", detail: "settings.guide.vtol.detail",
                       commands: [.vtolTransitionForward, .vtolTransitionBack])
+            guideCard("settings.guide.mechanization", icon: "airplane.arrival", detail: "settings.guide.mechanization.detail",
+                      commands: [.toggleLandingGear, .stepFlaps])
             guideCard("settings.guide.tools", icon: "slider.horizontal.3", detail: "settings.guide.tools.detail",
                       commands: [.toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD, .releasePayload, .resetDrone])
             sectionCard(titleKey: "settings.guide.cfd") {
@@ -153,6 +163,12 @@ struct SettingsView: View {
             }
             Button("settings.guide.edit") { selected = .keys }.buttonStyle(.borderedProminent)
         }
+    }
+
+    private var instructorSection: some View {
+        InstructorSettingsView(completed: flightCourseCompleted, isEnabled: onStartInstructor != nil,
+            onFlight: { onClose(); onStartInstructor?(.flightCourse) },
+            onTour: { onClose(); onStartInstructor?(.appTour) })
     }
 
     private func guideCard(_ title: String, icon: String, detail: String, commands: [KeyboardCommand]) -> some View {

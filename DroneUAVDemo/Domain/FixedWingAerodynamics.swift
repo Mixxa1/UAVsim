@@ -94,6 +94,61 @@ struct FixedWingAerodynamics {
     var damagePanels: [DamagedWingPanel] = []
     var damageLiftScale: Float = 1.0
     var damageDragExtra: Float = 0.0
+    /// Flaps and undercarriage as they stand this instant. Neutral for an airframe that has
+    /// neither, or has both stowed, and then no coefficient below changes by a bit.
+    var mechanization = FixedWingMechanizationIncrements()
+
+    func applyingMechanization(_ model: AircraftMechanizationModel?,
+                              state: AircraftMechanizationState) -> Self {
+        guard let model else { return self }
+        var result = self
+        result.mechanization = model.characteristics.aeroIncrements(
+            state: state, hasFlaps: model.configuration.hasFlaps,
+            retractableGear: model.configuration.retractableGear)
+        return result
+    }
+
+    /// How much of a flap's lift is there to be had. Camber works on attached flow: it cannot
+    /// resurrect lift on a stalled or inverted wing, and it fades with the other surfaces
+    /// through the transonic.
+    private func flapAttachment(alphaRad: Float, mach: Float) -> Float {
+        (1 - stallBlend(alphaRad: alphaRad)) * transonic.controlEffectiveness(mach: mach)
+    }
+
+    private func mechanizedLiftDrag(_ base: (cl: Float, cd: Float), alphaRad: Float, mach: Float) -> (cl: Float, cd: Float) {
+        let m = mechanization
+        let flapLift = (m.flapLiftLeft + m.flapLiftRight) * flapAttachment(alphaRad: alphaRad, mach: mach)
+        // A panel that has left the aircraft took its part of the wing with it.
+        let cl = base.cl * (1 - m.lostAreaLeft - m.lostAreaRight) + flapLift
+        // Induced drag is charged on the lift the wing now makes.
+        let cd = base.cd + m.flapDragLeft + m.flapDragRight + m.gearDrag
+            + inducedDragFactor * (cl * cl - base.cl * base.cl)
+        return (cl, max(0, cd))
+    }
+
+    /// Nose-down moment of the flaps' own lift, which acts well aft of the quarter chord.
+    private func mechanizationPitchMoment(alphaRad: Float, mach: Float) -> Float {
+        let m = mechanization
+        guard m.flapPitchRatio != 0 else { return 0 }
+        return m.flapPitchRatio * (m.flapLiftLeft + m.flapLiftRight) * flapAttachment(alphaRad: alphaRad, mach: mach)
+    }
+
+    /// Rolling moment of unequal flaps: one panel gone, the other still down.
+    /// Body axes as in `stripCoefficients` — lift on the right wing rolls it up (+).
+    private func mechanizationRollMoment(alphaRad: Float, mach: Float) -> Float {
+        let m = mechanization
+        guard m.flapLiftLeft != m.flapLiftRight || m.lostAreaLeft != m.lostAreaRight else { return 0 }
+        var difference = (m.flapLiftRight - m.flapLiftLeft) * flapAttachment(alphaRad: alphaRad, mach: mach)
+        if m.lostAreaLeft != m.lostAreaRight {
+            difference -= undamagedLiftDrag(alphaRad: alphaRad, mach: mach).cl * (m.lostAreaRight - m.lostAreaLeft)
+        }
+        return m.lateralArm * difference
+    }
+
+    /// Yawing moment of unequal flap drag — an aft force on the right wing swings the nose right (−).
+    private var mechanizationYawMoment: Float {
+        -mechanization.lateralArm * (mechanization.flapDragRight - mechanization.flapDragLeft)
+    }
     /// How much of the geometric inflow change a rotating wing's strips actually see.
     ///
     /// Strip theory takes the whole `p·y/V` at every station and so over-damps roll: for a
@@ -115,6 +170,9 @@ struct FixedWingAerodynamics {
     /// `boxInertiaTensor` below for why that's the order and not
     /// generic world-axis (Ixx, Iyy, Izz).
     let inertiaTensor: SIMD3<Float>
+    /// The tensor above was built from the airframe's own declared radii of gyration, not from
+    /// the box estimate. The solver then flies it as given instead of the component graph's.
+    var inertiaIsDeclared = false
 
     // MARK: - Propulsion-airframe coupling (Layer 2)
 
@@ -169,7 +227,8 @@ struct FixedWingAerodynamics {
     /// cancel exactly, so the first dent changes the aircraft by what the dent does and not
     /// by the gap between two models of it.
     func liftDrag(alphaRad: Float, mach: Float = 0.0, pHat: Float = 0, rHat: Float = 0, betaRad: Float = 0) -> (cl: Float, cd: Float) {
-        let pristine = undamagedLiftDrag(alphaRad: alphaRad, mach: mach, betaRad: betaRad)
+        let base = undamagedLiftDrag(alphaRad: alphaRad, mach: mach, betaRad: betaRad)
+        let pristine = mechanization.isNeutral ? base : mechanizedLiftDrag(base, alphaRad: alphaRad, mach: mach)
         guard !damagePanels.isEmpty else {
             return (pristine.cl * damageLiftScale, pristine.cd + damageDragExtra)
         }
@@ -254,11 +313,13 @@ struct FixedWingAerodynamics {
         let effectiveCmDeltaE = cmDeltaE * (1.0 - 0.6 * blend) * controlScale
         if let point = engineering?.sample(alphaRad: alphaRad, betaRad: betaRad, mach: mach) {
             return Float(point.cm) + effectiveCmDeltaE * elevatorFraction + effectiveCmq * qHat
+                + mechanizationPitchMoment(alphaRad: alphaRad, mach: mach)
         }
         let base = cm0
             + effectiveCmAlpha * alphaRad
             + effectiveCmDeltaE * elevatorFraction
             + effectiveCmq * qHat
+            + mechanizationPitchMoment(alphaRad: alphaRad, mach: mach)
 
         let shift = transonic.aeroCenterShiftFraction(mach: mach)
         guard shift > 1.0e-5 else { return base }
@@ -370,6 +431,7 @@ struct FixedWingAerodynamics {
             + rollRateMoment(alphaRad: alphaRad, mach: mach, pHat: pHat)
             + damage
             + clRollDamageOffset
+            + mechanizationRollMoment(alphaRad: alphaRad, mach: mach)
     }
 
     /// Yawing moment coefficient: sideslip (weathercock) + rudder + yaw-rate
@@ -397,6 +459,7 @@ struct FixedWingAerodynamics {
             + effectiveCnDeltaR * rudderFraction
             + effectiveCnr * rHat
             + cnYawDamageOffset
+            + mechanizationYawMoment
             + (damagePanels.isEmpty ? 0 : damageStripDelta(alphaRad: alphaRad, mach: mach, pHat: pHat, rHat: rHat).yaw)
     }
 
@@ -472,7 +535,13 @@ struct FixedWingAerodynamics {
         /// ⚠️ Until this parameter existed the lookup always passed `nil`: per-airframe tables
         /// were loaded at launch and registered, and then never flown — only family tables were.
         profileID: String? = nil,
-        engineering: EngineeringAeroRuntime? = nil
+        engineering: EngineeringAeroRuntime? = nil,
+        /// Wing to tail, metres, for an airframe whose own geometry is known. `nil` keeps the
+        /// family's pitch damping exactly as it was.
+        tailArmM: Float? = nil,
+        inertiaRadii: SIMD3<Float>? = nil,
+        wingAreaM2: Float? = nil,
+        gyrationRadiiMeters: SIMD3<Float>? = nil
     ) -> FixedWingAerodynamics {
         let preset = FamilyAeroPreset.preset(for: family)
         let span = engineering.map { Float($0.table.reference.spanM) } ?? max(0.3, wingSpanM)
@@ -539,7 +608,12 @@ struct FixedWingAerodynamics {
         // at 340 m/s against a catalogued 250. Inertia below still uses the live mass, because
         // that genuinely does change as fuel burns.
         let geometryMass = max(mass, designMassKg ?? mass)
-        let area = engineering.map { Float($0.table.reference.areaM2) } ?? ((2.0 * geometryMass * 9.81) / (AtmosphereModel.seaLevelDensity * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
+        // A wing that was designed is taken as designed. Sizing one from a stall speed is for
+        // airframes that publish the speed and not the wing; applied to a Workbench build it flew
+        // a 0.086 m² wing in place of the 0.48 m² one on the drawing.
+        let area = engineering.map { Float($0.table.reference.areaM2) }
+            ?? wingAreaM2.map { $0.clamped(to: 0.02...400.0) }
+            ?? ((2.0 * geometryMass * 9.81) / (AtmosphereModel.seaLevelDensity * stallSpeed * stallSpeed * max(0.3, clMaxAtStall))).clamped(to: 0.05...400.0)
         let chord = engineering.map { Float($0.table.reference.chordM) } ?? area / span
         // Effective aspect ratio, back-derived from the calibrated area, used
         // only for induced drag — clamped to a believable range so a
@@ -600,12 +674,23 @@ struct FixedWingAerodynamics {
         let cmqFloorMagnitude = (preset.cmDeltaE)
             * (2.0 * referenceSpeed / max(0.08, chord)) / targetPitchRateRadPerSec
 
-        let inertia = boxInertiaTensor(
+        let inertia = gyrationRadiiMeters.map {
+            simd_max(SIMD3<Float>(repeating: 0.001), mass * $0 * $0)
+        } ?? inertiaRadii.map {
+            AirframeInertiaRadii.tensor(massKg: mass, wingSpanM: span, fuselageLengthM: fuselageLength, radii: $0)
+        } ?? boxInertiaTensor(
             massKg: mass,
             wingSpanM: span,
             fuselageLengthM: fuselageLength,
             heightM: height
         )
+
+        // A tail sized by volume coefficient damps pitch in proportion to its arm over the
+        // chord: Cmq = −2·a_t·V_H·(l_t/c̄). The family figure stands for the proportions of a
+        // light aircraft, an arm of about three chords; a slender wing on a long fuselage has
+        // twice that, and without it the family damping left a P.1HH's nose swinging ±3.5°
+        // about a steady command. Never less than the family gives.
+        let tailArmFactor = tailArmM.map { max(1.0, ($0 / max(0.05, chord)) / 3.0) } ?? 1.0
 
         var aerodynamics = FixedWingAerodynamics(
             wingArea: area,
@@ -619,7 +704,7 @@ struct FixedWingAerodynamics {
             cm0: preset.cm0,
             cmAlpha: preset.cmAlpha,
             cmDeltaE: preset.cmDeltaE,
-            cmq: -max(abs(preset.cmqBase * dampingScale), cmqFloorMagnitude),
+            cmq: -max(abs(preset.cmqBase * dampingScale) * tailArmFactor, cmqFloorMagnitude),
             clBeta: preset.clBetaSlope,
             clDeltaA: preset.clDeltaA * turnGain,
             clp: -max(abs(preset.clpBase * dampingScale), clpFloorMagnitude),
@@ -649,6 +734,7 @@ struct FixedWingAerodynamics {
             propSpinSign: 1.0
         )
         aerodynamics.engineering = engineering
+        aerodynamics.inertiaIsDeclared = inertiaRadii != nil || gyrationRadiiMeters != nil
         aerodynamics.rotationalInflowScale = aerodynamics.calibratedRotationalInflowScale()
         return aerodynamics
     }

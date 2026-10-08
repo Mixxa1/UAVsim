@@ -429,18 +429,15 @@ struct MissionSetupView: View {
     }
 
     private var displayingGroundTarget: Bool {
-        displayedAircraftSlot == .target && (kind.isGroundVehicleMission || interception.targetsGroundVehicle)
+        displayedAircraftSlot == .target && kind.isGroundVehicleMission
     }
 
     private var selectedGroundModel: GroundVehicleModel {
-        kind == .attachedPayloadIntercept ? interception.groundVehicleModel ?? .cabover : groundVehicleModel
+        groundVehicleModel
     }
 
     private var groundModelBinding: Binding<GroundVehicleModel> {
-        Binding(get: { selectedGroundModel }, set: {
-            if kind == .attachedPayloadIntercept { interception.groundVehicleModel = $0 }
-            else { groundVehicleModel = $0 }
-        })
+        $groundVehicleModel
     }
 
     private var displayedAircraft: DroneModelProfile? {
@@ -454,7 +451,7 @@ struct MissionSetupView: View {
                 if kind == .attachedPayloadIntercept || kind.isGroundVehicleMission {
                     Picker("", selection: $activeAircraftSlot) {
                         ForEach(kind.isGroundVehicleMission ? [AircraftSlot.player, .target] : [.player, .target, .observer]) { slot in
-                            Text(LocalizedStringKey(slot == .target && (kind.isGroundVehicleMission || interception.targetsGroundVehicle)
+                            Text(LocalizedStringKey(slot == .target && kind.isGroundVehicleMission
                                 ? "ground.vehicle" : slot.titleKey)).tag(slot)
                         }
                     }
@@ -872,7 +869,7 @@ struct MissionSetupView: View {
                 .foregroundStyle(.white.opacity(0.55))
                 .fixedSize(horizontal: false, vertical: true)
 
-            if isFixedWingTargetSelected, interception.side == .interceptor, !interception.targetsGroundVehicle {
+            if isFixedWingTargetSelected, interception.side == .interceptor {
                 Text("intercept.setup.fixed_wing.hint")
                     .font(.caption2)
                     .foregroundStyle(.white.opacity(0.55))
@@ -882,24 +879,7 @@ struct MissionSetupView: View {
             // The other aircraft's profile is the operator's choice only when they are the one
             // hunting it. On the delivery side there is exactly one thing it can be doing.
             if interception.side == .interceptor {
-                labeledRow("intercept.target_kind") {
-                    Picker("", selection: Binding(get: { interception.targetKind ?? .aircraft }, set: { value in
-                        interception.targetKind = value
-                        activeAircraftSlot = .target
-                    })) {
-                        ForEach(InterceptTargetKind.allCases) { value in
-                            Text(LocalizedStringKey(value.titleKey)).tag(value)
-                        }
-                    }
-                    .pickerStyle(.segmented).labelsHidden()
-                }
-                if interception.targetsGroundVehicle {
-                    groundModelPicker
-                    Text("ground.intercept.brief").font(.caption2)
-                        .foregroundStyle(GroundControlPalette.textSecondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                } else {
-                    labeledRow("intercept.target.behavior") {
+                labeledRow("intercept.target.behavior") {
                         Picker("", selection: $interception.targetBehavior) {
                             ForEach(InterceptTargetBehavior.selectable) { value in
                                 Text(LocalizedStringKey(value.titleKey)).tag(value)
@@ -910,7 +890,6 @@ struct MissionSetupView: View {
                         .labelsHidden()
                         .tint(.white)
                     }
-                }
             }
 
             labeledRow("intercept.module.title") {
@@ -951,8 +930,7 @@ struct MissionSetupView: View {
                     .foregroundStyle(.white.opacity(0.55))
                     .fixedSize(horizontal: false, vertical: true)
 
-                if !interception.targetsGroundVehicle {
-                    Toggle("intercept.target.payload", isOn: $interception.targetCarriesPayload)
+                Toggle("intercept.target.payload", isOn: $interception.targetCarriesPayload)
                         .font(.caption)
                         .foregroundStyle(.white.opacity(0.8))
                     if interception.targetCarriesPayload {
@@ -964,7 +942,6 @@ struct MissionSetupView: View {
                             .foregroundStyle(.white.opacity(0.55))
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                }
             } else {
                 labeledRow("intercept.setup.zone_radius") {
                     HStack(spacing: 10) {

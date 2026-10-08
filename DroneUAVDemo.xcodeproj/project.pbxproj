@@ -7,6 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CD9A28D2AAC62B1FAE3554FD /* InstructorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979D225B4D06B2DB8F5D678C /* InstructorSettingsView.swift */; };
+		9742ACC2B79EE77F0305FC55 /* InstructorOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63458084B9AC60F7BD88AE32 /* InstructorOverlayView.swift */; };
+		38029451243063A5666C9368 /* FlightTrainingSceneLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E072402FB0BC1EA4E87296E /* FlightTrainingSceneLayer.swift */; };
+		E9DA86637B40E470553F1692 /* InstructorProgressStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91FB9068EF8A83509ACDBB6B /* InstructorProgressStore.swift */; };
+		967FFEE20AF3FD65539E8D14 /* InstructorTour.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4863CAE62DF0A53D9F9D7650 /* InstructorTour.swift */; };
+		47DC81E14E6048C95CC0F69C /* FlightTrainingSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25CC5CD0BE0A72FAB646B93A /* FlightTrainingSession.swift */; };
 		CFD200000000000000000003 /* WorkbenchAerodynamicsViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD100000000000000000003 /* WorkbenchAerodynamicsViews.swift */; };
 		CFD200000000000000000002 /* WorkbenchAerodynamics.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD100000000000000000002 /* WorkbenchAerodynamics.swift */; };
 		CFD200000000000000000001 /* EngineeringAeroTable.swift in Sources */ = {isa = PBXBuildFile; fileRef = CFD100000000000000000001 /* EngineeringAeroTable.swift */; };
@@ -105,6 +111,10 @@
 		B5A0000000000000000000E2 /* CanisterAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000E1 /* CanisterAssetLoader.swift */; };
 		B5A0000000000000000000F2 /* CanisterLaunchers in Resources */ = {isa = PBXBuildFile; fileRef = B5A0000000000000000000F1 /* CanisterLaunchers */; };
 		B5A000000000000000000102 /* Vehicles in Resources */ = {isa = PBXBuildFile; fileRef = B5A000000000000000000101 /* Vehicles */; };
+		B5A000000000000000000112 /* UAVLaunchPad.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A000000000000000000111 /* UAVLaunchPad.swift */; };
+		B5A000000000000000000132 /* AdaptiveHandLaunchRig.swift in Sources */ = {isa = PBXBuildFile; fileRef = B5A000000000000000000131 /* AdaptiveHandLaunchRig.swift */; };
+		B5A000000000000000000122 /* LaunchPads in Resources */ = {isa = PBXBuildFile; fileRef = B5A000000000000000000121 /* LaunchPads */; };
+		B5A000000000000000000142 /* HandLaunchHands in Resources */ = {isa = PBXBuildFile; fileRef = B5A000000000000000000141 /* HandLaunchHands */; };
 		10000000000000000000FE41 /* FlightEnvelope.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FE40 /* FlightEnvelope.swift */; };
 		10000000000000000000FF23 /* AeroTableCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF22 /* AeroTableCodec.swift */; };
 		10000000000000000000FF13 /* MachCoefficientDatabase.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF12 /* MachCoefficientDatabase.swift */; };
@@ -143,6 +153,10 @@
 		10000000000000000000022E /* UAVProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000131 /* UAVProfile.swift */; };
 		10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000132 /* UAVReferenceCatalog.swift */; };
 		E61000000000000000000001 /* UAVExpansionCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000002 /* UAVExpansionCatalog.swift */; };
+		E61000000000000000000003 /* AircraftMechanization.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000004 /* AircraftMechanization.swift */; };
+		E61000000000000000000005 /* AircraftMechanizationCharacteristics.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000006 /* AircraftMechanizationCharacteristics.swift */; };
+		E61000000000000000000007 /* AirframePerformanceEstimate.swift in Sources */ = {isa = PBXBuildFile; fileRef = E61000000000000000000008 /* AirframePerformanceEstimate.swift */; };
+		E61000000000000000000009 /* AirframeFlightCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6100000000000000000000A /* AirframeFlightCard.swift */; };
 		1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000039F /* RuntimePerformancePolicy.swift */; };
 		100000000000000000000230 /* UAVVisualPreset.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000133 /* UAVVisualPreset.swift */; };
 		100000000000000000000231 /* UAVVisualFactory.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000134 /* UAVVisualFactory.swift */; };
@@ -451,9 +465,9 @@
 		10000000000000000000FF11 /* C130.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF10 /* C130.usdz */; };
 		10000000000000000000FF21 /* B52_Stratofortress.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000FF20 /* B52_Stratofortress.usdz */; };
 		100000000000000000000A1F /* flames.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A20 /* flames.usdz */; };
+		F101DC0C2026100700000002 /* VFX in Resources */ = {isa = PBXBuildFile; fileRef = F101DC0C2026100700000001 /* VFX */; };
 		100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A24 /* Fire_sheet_baseColor.png */; };
 		100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A26 /* Fire_sheet_emissive.jpg */; };
-		100000000000000000000A40 /* HandLaunchArm.usdz in Resources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A41 /* HandLaunchArm.usdz */; };
 		100000000000000000000A1D /* FireTruckAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 100000000000000000000A1E /* FireTruckAssetLoader.swift */; };
 		10000000000000000000F008 /* RunwayAssetLoader.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10000000000000000000F009 /* RunwayAssetLoader.swift */; };
 		BA1100000000000000000007 /* DroneSceneController+Ballistics.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA1100000000000000000008 /* DroneSceneController+Ballistics.swift */; };
@@ -519,6 +533,8 @@
 		F2000000000000000000000A /* WorkbenchSceneRepresentable.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */; };
 		F2000000000000000000000B /* WorkbenchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000B /* WorkbenchView.swift */; };
 		F2000000000000000000000C /* WorkbenchModelBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000C /* WorkbenchModelBuilder.swift */; };
+		BC2000000000000000000001 /* WorkbenchModelAssetLibrary.swift in Sources */ = {isa = PBXBuildFile; fileRef = BC1000000000000000000001 /* WorkbenchModelAssetLibrary.swift */; };
+		BC2000000000000000000002 /* WorkbenchParts in Resources */ = {isa = PBXBuildFile; fileRef = BC1000000000000000000002 /* WorkbenchParts */; };
 		F2000000000000000000000D /* WorkbenchPartPreview.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1000000000000000000000D /* WorkbenchPartPreview.swift */; };
 		1D2BF0DD638C9799A4CC2F9C /* GeoCoordinate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45510383520E4C68073B1E77 /* GeoCoordinate.swift */; };
 		C4DE9518A3B1FACF50B8FF04 /* GeoOrigin.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE359B21C7278EA48792544F /* GeoOrigin.swift */; };
@@ -584,6 +600,12 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		979D225B4D06B2DB8F5D678C /* InstructorSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstructorSettingsView.swift; sourceTree = "<group>"; };
+		63458084B9AC60F7BD88AE32 /* InstructorOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstructorOverlayView.swift; sourceTree = "<group>"; };
+		0E072402FB0BC1EA4E87296E /* FlightTrainingSceneLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightTrainingSceneLayer.swift; sourceTree = "<group>"; };
+		91FB9068EF8A83509ACDBB6B /* InstructorProgressStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstructorProgressStore.swift; sourceTree = "<group>"; };
+		4863CAE62DF0A53D9F9D7650 /* InstructorTour.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstructorTour.swift; sourceTree = "<group>"; };
+		25CC5CD0BE0A72FAB646B93A /* FlightTrainingSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightTrainingSession.swift; sourceTree = "<group>"; };
 		CFD100000000000000000003 /* WorkbenchAerodynamicsViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchAerodynamicsViews.swift; sourceTree = "<group>"; };
 		CFD100000000000000000002 /* WorkbenchAerodynamics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchAerodynamics.swift; sourceTree = "<group>"; };
 		CFD100000000000000000001 /* EngineeringAeroTable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineeringAeroTable.swift; sourceTree = "<group>"; };
@@ -694,6 +716,10 @@
 		B5A0000000000000000000E1 /* CanisterAssetLoader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CanisterAssetLoader.swift; sourceTree = "<group>"; };
 		B5A0000000000000000000F1 /* CanisterLaunchers */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/CanisterLaunchers"; sourceTree = "<group>"; };
 		B5A000000000000000000101 /* Vehicles */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/Vehicles"; sourceTree = "<group>"; };
+		B5A000000000000000000111 /* UAVLaunchPad.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVLaunchPad.swift; sourceTree = "<group>"; };
+		B5A000000000000000000131 /* AdaptiveHandLaunchRig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdaptiveHandLaunchRig.swift; sourceTree = "<group>"; };
+		B5A000000000000000000121 /* LaunchPads */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/LaunchPads"; sourceTree = "<group>"; };
+		B5A000000000000000000141 /* HandLaunchHands */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/HandLaunchHands"; sourceTree = "<group>"; };
 		10000000000000000000FE40 /* FlightEnvelope.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightEnvelope.swift; sourceTree = "<group>"; };
 		10000000000000000000FF22 /* AeroTableCodec.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AeroTableCodec.swift; sourceTree = "<group>"; };
 		10000000000000000000FF12 /* MachCoefficientDatabase.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MachCoefficientDatabase.swift; sourceTree = "<group>"; };
@@ -734,6 +760,10 @@
 		100000000000000000000131 /* UAVProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVProfile.swift; sourceTree = "<group>"; };
 		100000000000000000000132 /* UAVReferenceCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVReferenceCatalog.swift; sourceTree = "<group>"; };
 		E61000000000000000000002 /* UAVExpansionCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVExpansionCatalog.swift; sourceTree = "<group>"; };
+		E61000000000000000000004 /* AircraftMechanization.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AircraftMechanization.swift; sourceTree = "<group>"; };
+		E61000000000000000000006 /* AircraftMechanizationCharacteristics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AircraftMechanizationCharacteristics.swift; sourceTree = "<group>"; };
+		E61000000000000000000008 /* AirframePerformanceEstimate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirframePerformanceEstimate.swift; sourceTree = "<group>"; };
+		E6100000000000000000000A /* AirframeFlightCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AirframeFlightCard.swift; sourceTree = "<group>"; };
 		10000000000000000000039F /* RuntimePerformancePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RuntimePerformancePolicy.swift; sourceTree = "<group>"; };
 		100000000000000000000133 /* UAVVisualPreset.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualPreset.swift; sourceTree = "<group>"; };
 		100000000000000000000134 /* UAVVisualFactory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UAVVisualFactory.swift; sourceTree = "<group>"; };
@@ -1044,9 +1074,9 @@
 		10000000000000000000FF10 /* C130.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Carriers/C130.usdz"; sourceTree = "<group>"; };
 		10000000000000000000FF20 /* B52_Stratofortress.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Carriers/B52_Stratofortress.usdz"; sourceTree = "<group>"; };
 		100000000000000000000A20 /* flames.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/flames.usdz"; sourceTree = "<group>"; };
+		F101DC0C2026100700000001 /* VFX */ = {isa = PBXFileReference; lastKnownFileType = folder; path = VFX; sourceTree = "<group>"; };
 		100000000000000000000A24 /* Fire_sheet_baseColor.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = "Models/Scenario/Fire_sheet_baseColor.png"; sourceTree = "<group>"; };
 		100000000000000000000A26 /* Fire_sheet_emissive.jpg */ = {isa = PBXFileReference; lastKnownFileType = image.jpeg; path = "Models/Scenario/Fire_sheet_emissive.jpg"; sourceTree = "<group>"; };
-		100000000000000000000A41 /* HandLaunchArm.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Scenario/HandLaunchArm.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040B /* Generic_grass.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Terrain/Generic_grass.usdz"; sourceTree = "<group>"; };
 		10000000000000000000040D /* ThirdPartyAssets.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = "Credits/ThirdPartyAssets.json"; sourceTree = "<group>"; };
 		C0DE10000000000000000002 /* Workbench.usdz */ = {isa = PBXFileReference; lastKnownFileType = file; path = "Models/Environment/Workshop/Workbench.usdz"; sourceTree = "<group>"; };
@@ -1109,6 +1139,8 @@
 		F1000000000000000000000A /* WorkbenchSceneRepresentable.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchSceneRepresentable.swift; sourceTree = "<group>"; };
 		F1000000000000000000000B /* WorkbenchView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchView.swift; sourceTree = "<group>"; };
 		F1000000000000000000000C /* WorkbenchModelBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchModelBuilder.swift; sourceTree = "<group>"; };
+		BC1000000000000000000001 /* WorkbenchModelAssetLibrary.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchModelAssetLibrary.swift; sourceTree = "<group>"; };
+		BC1000000000000000000002 /* WorkbenchParts */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/WorkbenchParts"; sourceTree = "<group>"; };
 		F1000000000000000000000D /* WorkbenchPartPreview.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WorkbenchPartPreview.swift; sourceTree = "<group>"; };
 		45510383520E4C68073B1E77 /* GeoCoordinate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoCoordinate.swift; sourceTree = "<group>"; };
 		DE359B21C7278EA48792544F /* GeoOrigin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GeoOrigin.swift; sourceTree = "<group>"; };
@@ -1222,6 +1254,8 @@
 		100000000000000000000011 /* Domain */ = {
 			isa = PBXGroup;
 			children = (
+				4863CAE62DF0A53D9F9D7650 /* InstructorTour.swift */,
+				25CC5CD0BE0A72FAB646B93A /* FlightTrainingSession.swift */,
 				1F5647743B6CA6F1C48A5E0E /* GroundVehicle.swift */,
 				9B1CFDBC9054C9459201686A /* InterceptMission.swift */,
 				A9A000000000000000000001 /* FPV */,
@@ -1336,6 +1370,9 @@
 				100000000000000000000131 /* UAVProfile.swift */,
 				100000000000000000000132 /* UAVReferenceCatalog.swift */,
 				E61000000000000000000002 /* UAVExpansionCatalog.swift */,
+				E61000000000000000000004 /* AircraftMechanization.swift */,
+				E61000000000000000000006 /* AircraftMechanizationCharacteristics.swift */,
+				E61000000000000000000008 /* AirframePerformanceEstimate.swift */,
 				10000000000000000000FD30 /* PropellerModel.swift */,
 				BA1100000000000000000002 /* BallisticDescriptor.swift */,
 				10000000000000000000FC10 /* AtmosphereModel.swift */,
@@ -1455,6 +1492,7 @@
 				10000000000000000000FB20 /* HybridVTOLRouteCursor.swift */,
 				1000000000000000000002A9 /* FixedWingRouteBuilder.swift */,
 				100000000000000000000149 /* FlightBaselineResolver.swift */,
+				E6100000000000000000000A /* AirframeFlightCard.swift */,
 				10000000000000000000016B /* MissionDraftBuilder.swift */,
 				10000000000000000000016C /* MissionDraftValidator.swift */,
 				10000000000000000000017D /* MissionAutopilotAdapter.swift */,
@@ -1501,11 +1539,13 @@
 		100000000000000000000013 /* Scene */ = {
 			isa = PBXGroup;
 			children = (
+				0E072402FB0BC1EA4E87296E /* FlightTrainingSceneLayer.swift */,
 				A6EC5970147E1C4116D284F4 /* GroundVehicleVisual.swift */,
 				A6EC5970147E1C4116D28501 /* WorldDamageEffectVisual.swift */,
 				C7C33AB02D697CECF2A89B4F /* InterceptMissionScene.swift */,
 				3536A3A22D175347C0EBA163 /* World */,
 				F1000000000000000000000C /* WorkbenchModelBuilder.swift */,
+				BC1000000000000000000001 /* WorkbenchModelAssetLibrary.swift */,
 				10000000000000000000010E /* DroneModelBuilder.swift */,
 				10000000000000000000F003 /* DroneVisualGeometrySample.swift */,
 				10000000000000000000010F /* DroneSceneController.swift */,
@@ -1557,6 +1597,8 @@
 				B5A0000000000000000000B1 /* UAVModelAssetLibrary.swift */,
 				B5A0000000000000000000C1 /* CatapultAssetLoader.swift */,
 				B5A0000000000000000000E1 /* CanisterAssetLoader.swift */,
+				B5A000000000000000000111 /* UAVLaunchPad.swift */,
+				B5A000000000000000000131 /* AdaptiveHandLaunchRig.swift */,
 				10000000000000000000FE90 /* CarrierAircraftLoader.swift */,
 				100000000000000000000389 /* OnlineTrialVehiclePlaceholderNodeFactory.swift */,
 				1000000000000000000002DE /* MissionReplaySceneController.swift */,
@@ -1599,6 +1641,8 @@
 		100000000000000000000015 /* Views */ = {
 			isa = PBXGroup;
 			children = (
+				979D225B4D06B2DB8F5D678C /* InstructorSettingsView.swift */,
+				63458084B9AC60F7BD88AE32 /* InstructorOverlayView.swift */,
 				C743C7005012B9478A8D58D1 /* GroundVehiclePreviewView.swift */,
 				AC3BEC8221A9ED64268C0D14 /* LidarModuleView.swift */,
 				7D8D1E626A72AF9F180DAD8B /* World */,
@@ -1720,6 +1764,7 @@
 		100000000000000000000018 /* Services */ = {
 			isa = PBXGroup;
 			children = (
+				91FB9068EF8A83509ACDBB6B /* InstructorProgressStore.swift */,
 				1B40C5E52ED7C5C71E5C4E65 /* LidarRawStreamWriter.swift */,
 				9235F9D6D84F0D14A4063490 /* World */,
 				10000000000000000000011B /* TelemetryExportService.swift */,
@@ -1762,9 +1807,12 @@
 				10000000000000000000040D /* ThirdPartyAssets.json */,
 				A0D1000000000000000000A5 /* Audio */,
 				B5A0000000000000000000A1 /* UAVModels */,
+				BC1000000000000000000002 /* WorkbenchParts */,
 				B5A0000000000000000000D1 /* Launchers */,
 				B5A0000000000000000000F1 /* CanisterLaunchers */,
 				B5A000000000000000000101 /* Vehicles */,
+				B5A000000000000000000121 /* LaunchPads */,
+				B5A000000000000000000141 /* HandLaunchHands */,
 				C0DE10000000000000000002 /* Workbench.usdz */,
 				C0DE10000000000000000004 /* Brick_Material.usdz */,
 				100000000000000000000409 /* Pine_Tree.usdz */,
@@ -1794,8 +1842,8 @@
 				10000000000000000000FF20 /* B52_Stratofortress.usdz */,
 				100000000000000000000A20 /* flames.usdz */,
 				100000000000000000000A24 /* Fire_sheet_baseColor.png */,
+				F101DC0C2026100700000001 /* VFX */,
 				100000000000000000000A26 /* Fire_sheet_emissive.jpg */,
-				100000000000000000000A41 /* HandLaunchArm.usdz */,
 				10000000000000000000040B /* Generic_grass.usdz */,
 				100000000000000000000416 /* Snow04.usdz */,
 				B20400000000000000000003 /* Asphalt13.usdz */,
@@ -2066,9 +2114,12 @@
 				10000000000000000000040C /* ThirdPartyAssets.json in Resources */,
 				A0D1000000000000000000A6 /* Audio in Resources */,
 				B5A0000000000000000000A2 /* UAVModels in Resources */,
+				BC2000000000000000000002 /* WorkbenchParts in Resources */,
 				B5A0000000000000000000D2 /* Launchers in Resources */,
 				B5A0000000000000000000F2 /* CanisterLaunchers in Resources */,
 				B5A000000000000000000102 /* Vehicles in Resources */,
+				B5A000000000000000000122 /* LaunchPads in Resources */,
+				B5A000000000000000000142 /* HandLaunchHands in Resources */,
 				C0DE10000000000000000001 /* Workbench.usdz in Resources */,
 				C0DE10000000000000000003 /* Brick_Material.usdz in Resources */,
 				100000000000000000000408 /* Pine_Tree.usdz in Resources */,
@@ -2098,8 +2149,8 @@
 				10000000000000000000FF21 /* B52_Stratofortress.usdz in Resources */,
 				100000000000000000000A1F /* flames.usdz in Resources */,
 				100000000000000000000A23 /* Fire_sheet_baseColor.png in Resources */,
+				F101DC0C2026100700000002 /* VFX in Resources */,
 				100000000000000000000A25 /* Fire_sheet_emissive.jpg in Resources */,
-				100000000000000000000A40 /* HandLaunchArm.usdz in Resources */,
 				10000000000000000000040A /* Generic_grass.usdz in Resources */,
 				100000000000000000000417 /* Snow04.usdz in Resources */,
 				100000000000000000000419 /* Patch_of_Old_Snow.usdz in Resources */,
@@ -2133,6 +2184,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CD9A28D2AAC62B1FAE3554FD /* InstructorSettingsView.swift in Sources */,
+				9742ACC2B79EE77F0305FC55 /* InstructorOverlayView.swift in Sources */,
+				38029451243063A5666C9368 /* FlightTrainingSceneLayer.swift in Sources */,
+				E9DA86637B40E470553F1692 /* InstructorProgressStore.swift in Sources */,
+				967FFEE20AF3FD65539E8D14 /* InstructorTour.swift in Sources */,
+				47DC81E14E6048C95CC0F69C /* FlightTrainingSession.swift in Sources */,
 				07480A23BF1668459010F9A0 /* GroundVehiclePreviewView.swift in Sources */,
 				E22D8548AD100F628EE4A982 /* GroundVehicleVisual.swift in Sources */,
 				A6EC5970147E1C4116D28502 /* WorldDamageEffectVisual.swift in Sources */,
@@ -2244,6 +2301,7 @@
 				F2000000000000000000000A /* WorkbenchSceneRepresentable.swift in Sources */,
 				F2000000000000000000000B /* WorkbenchView.swift in Sources */,
 				F2000000000000000000000C /* WorkbenchModelBuilder.swift in Sources */,
+				BC2000000000000000000001 /* WorkbenchModelAssetLibrary.swift in Sources */,
 				F2000000000000000000000D /* WorkbenchPartPreview.swift in Sources */,
 				100000000000000000000200 /* DroneUAVDemoApp.swift in Sources */,
 				100000000000000000000201 /* ContentView.swift in Sources */,
@@ -2436,12 +2494,18 @@
 				10000000000000000000022E /* UAVProfile.swift in Sources */,
 				10000000000000000000022F /* UAVReferenceCatalog.swift in Sources */,
 				E61000000000000000000001 /* UAVExpansionCatalog.swift in Sources */,
+				E61000000000000000000003 /* AircraftMechanization.swift in Sources */,
+				E61000000000000000000005 /* AircraftMechanizationCharacteristics.swift in Sources */,
+				E61000000000000000000007 /* AirframePerformanceEstimate.swift in Sources */,
+				E61000000000000000000009 /* AirframeFlightCard.swift in Sources */,
 				1000000000000000000003A0 /* RuntimePerformancePolicy.swift in Sources */,
 				100000000000000000000230 /* UAVVisualPreset.swift in Sources */,
 				100000000000000000000231 /* UAVVisualFactory.swift in Sources */,
 				B5A0000000000000000000B2 /* UAVModelAssetLibrary.swift in Sources */,
 				B5A0000000000000000000C2 /* CatapultAssetLoader.swift in Sources */,
 				B5A0000000000000000000E2 /* CanisterAssetLoader.swift in Sources */,
+				B5A000000000000000000112 /* UAVLaunchPad.swift in Sources */,
+				B5A000000000000000000132 /* AdaptiveHandLaunchRig.swift in Sources */,
 				100000000000000000000232 /* UAVFilterState.swift in Sources */,
 				100000000000000000000233 /* UAVCatalog.swift in Sources */,
 				100000000000000000000234 /* UAVSelectionState.swift in Sources */,

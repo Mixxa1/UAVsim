@@ -179,6 +179,12 @@ final class ScenePopulationService {
         EnvironmentObjectFactory.printDiagnostics()
     }
 
+    /// A damaged tree now belongs to the persistent damage layer, including through weather
+    /// refreshes. Rebuilding ordinary vegetation must not grow a healthy duplicate over it.
+    func removeDamagedTrees(_ ids: Set<UUID>) {
+        storedTreeDescriptors.removeAll { ids.contains($0.id) }
+    }
+
     private func cappedCollidableDescriptors(
         _ descriptors: [EnvironmentObjectDescriptor],
         for terrain: TerrainConfiguration

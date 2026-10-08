@@ -3,6 +3,10 @@ import Foundation
 enum UAVFlightTuningSource: String, Hashable {
     case estimated
     case custom
+    /// Worked out from the airframe's own drag and its own engine and propeller. The class
+    /// floors that keep an estimated figure inside a plausible band do not apply: an AR5 holds
+    /// its cruise on a lever no class figure would have dared to quote.
+    case derived
 }
 
 struct UAVFlightTuningProfile: Hashable {
@@ -46,6 +50,10 @@ struct UAVFlightTuningProfile: Hashable {
         let glideThrottleFactor: Float
         let stallProtectionBias: Float
         let payloadCruisePenaltyFactor: Float
+        /// The class's minimum-safe figure, kept for the landing and ground references when
+        /// the one above has been replaced by a derived lever. Those references were set and
+        /// flown against the class figure; deriving a cruise is not a reason to move them.
+        var landingThrottleBaseline: Float? = nil
     }
 
     struct HybridVTOLTuning: Hashable {
@@ -618,6 +626,7 @@ struct UAVFlightTuningProfile: Hashable {
         glideThrottleFactor: Float,
         stallProtectionBias: Float,
         payloadCruisePenaltyFactor: Float,
+        landingThrottleBaseline: Float? = nil,
         source: UAVFlightTuningSource
     ) -> UAVFlightTuningProfile {
         UAVFlightTuningProfile(
@@ -632,7 +641,8 @@ struct UAVFlightTuningProfile: Hashable {
                 climbThrottleBaseline: climbThrottleBaseline,
                 glideThrottleFactor: glideThrottleFactor,
                 stallProtectionBias: stallProtectionBias,
-                payloadCruisePenaltyFactor: payloadCruisePenaltyFactor
+                payloadCruisePenaltyFactor: payloadCruisePenaltyFactor,
+                landingThrottleBaseline: landingThrottleBaseline
             ),
             hybridVTOL: nil,
             custom: nil

@@ -29,6 +29,7 @@ for profile in profiles {
         guard extent > 0 else { fatalError("Empty model: \(id)") }
         let animation = profile["animation"] as! [String: Any]
         let cycle = animation["duration_seconds"] as! Double
+        let hasRetractableGear = ((profile["mechanics"] as? [String: Any])?["retractable_gear"] as? Bool) == true
         let isTailsitter = (profile["transition"] as? [String:Any])?["mechanism"] as? String == "tailsitter"
         let baseTime = isTailsitter ? 6.0 : 0.0
         var count = 0
@@ -94,6 +95,25 @@ for profile in profiles {
             frame(direction,up,1100.0/800.0)
             try writePNG(snapshot(baseTime,1100,800),suffix)
         }
+        if hasRetractableGear {
+            frame(SIMD3<Float>(1.1,-0.85,1.2),SIMD3<Float>(0,1,0),1100.0/800.0)
+            for (suffix,time) in [("-gear-down",0.0),("-gear-transit",cycle*0.23),("-gear-up",cycle*0.55)] {
+                try writePNG(snapshot(time,1100,800),suffix)
+            }
+            let gearURL=output.appendingPathComponent(id+"-gear-cycle.gif")
+            let frames=64
+            guard let destination=CGImageDestinationCreateWithURL(gearURL as CFURL,UTType.gif.identifier as CFString,frames,nil)
+            else { fatalError("Gear GIF destination") }
+            CGImageDestinationSetProperties(destination,[kCGImagePropertyGIFDictionary:[kCGImagePropertyGIFLoopCount:0]] as CFDictionary)
+            frame(SIMD3<Float>(1.1,-0.85,1.2),SIMD3<Float>(0,1,0),800.0/600.0)
+            for frameIndex in 0..<frames {
+                let im=snapshot(cycle*Double(frameIndex)/Double(frames),800,600)
+                var rect=CGRect(x:0,y:0,width:800,height:600)
+                guard let cg=im.cgImage(forProposedRect:&rect,context:nil,hints:nil) else { fatalError("Gear GIF frame") }
+                CGImageDestinationAddImage(destination,cg,[kCGImagePropertyGIFDictionary:[kCGImagePropertyGIFDelayTime:0.08]] as CFDictionary)
+            }
+            guard CGImageDestinationFinalize(destination) else { fatalError("Gear GIF finalize") }
+        }
         frame(SIMD3<Float>(1.1,0.90,1.5),SIMD3<Float>(0,1,0),1100.0/800.0,wide:isTailsitter)
         var poses:[[String:Any]]=[]
         let times = cycle > 2 ? [0.0,0.037,1.0,3.5,6.0,12.0] : [0.0,0.037,0.5,1.0,2.0]
@@ -130,6 +150,12 @@ for profile in profiles {
         print("Rendered \(id): \(count) meshes, \(animatedNodes.count) animated nodes, \(cycle)s cycle")
         fflush(stdout)
     }
+}
+if args.count > 2, let data = try? Data(contentsOf: output.appendingPathComponent("scenekit-validation.json")),
+   let existing = (try? JSONSerialization.jsonObject(with: data)) as? [[String: Any]] {
+    let updated = Set(reports.compactMap { $0["id"] as? String })
+    reports += existing.filter { !updated.contains($0["id"] as? String ?? "") }
+    reports.sort { ($0["id"] as? String ?? "") < ($1["id"] as? String ?? "") }
 }
 try JSONSerialization.data(withJSONObject:reports,options:[.prettyPrinted,.sortedKeys])
     .write(to:output.appendingPathComponent("scenekit-validation.json"))

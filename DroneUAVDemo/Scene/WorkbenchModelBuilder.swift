@@ -3,8 +3,8 @@ import SceneKit
 import simd
 
 /// Shared 3D factory for the assembled drone and every catalog thumbnail.
-/// Built-in parts are deliberately recognizable procedural models; CADNext
-/// imports use their exact triangle mesh (or the explicit legacy proxy).
+/// Built-in parts load the original detailed USDZ library, with procedural
+/// geometry as a fallback. CADNext imports retain their exact triangle mesh.
 enum WorkbenchModelBuilder {
     static let slotNodePrefix = "workbench.slot."
     static let hotspotNodePrefix = "workbench.hotspot."
@@ -924,6 +924,9 @@ enum WorkbenchModelBuilder {
     // MARK: Frame
 
     static func frameNode(_ frame: WorkbenchResolvedFrame) -> SCNNode {
+        if let authored = WorkbenchModelAssetLibrary.shared.frameNode(for: frame) {
+            return authored
+        }
         let root = SCNNode()
         if let mesh = frame.importedMesh, let geometry = geometry(from: mesh, convertsCADCoordinates: true) {
             let importedMaterial = material("#7E8895", metalness: 0.45, roughness: 0.38)
@@ -1421,6 +1424,9 @@ enum WorkbenchModelBuilder {
     // MARK: Components
 
     static func componentNode(_ spec: WorkbenchComponentSpec) -> SCNNode {
+        if let authored = WorkbenchModelAssetLibrary.shared.componentNode(for: spec) {
+            return authored
+        }
         if let mesh = spec.importedMesh,
            let geometry = geometry(from: mesh, convertsCADCoordinates: true) {
             let importedMaterial = material(spec.proxy.colorHex, metalness: 0.35, roughness: 0.38)

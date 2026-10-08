@@ -36,7 +36,9 @@ enum RFCompatibilityPreset {
             videoLinkPreset: profile.defaultVideoLinkPreset,
             fallbackControlFrequencyHz: 2_400_000_000,
             fallbackLegacyRangeM: Double(profile.operationalProfile.nominalLinkRangeM),
-            controlLink: controlLink
+            controlLink: controlLink,
+            // A tailsitter stands on its tail to hover and lies flat to cruise. See the element.
+            flownInTwoAttitudes: profile.airframeStyle == .tailsitterVTOL
         )
     }
 
@@ -47,7 +49,8 @@ enum RFCompatibilityPreset {
         videoLinkPreset: RFVideoLinkPreset? = nil,
         fallbackControlFrequencyHz: Double = 2_400_000_000,
         fallbackLegacyRangeM: Double = 12_000,
-        controlLink: ELRSConfiguration? = nil
+        controlLink: ELRSConfiguration? = nil,
+        flownInTwoAttitudes: Bool = false
     ) -> RFSystemConfiguration {
         let resolvedVideoLinkPreset = videoLinkPreset ?? .fallback(for: videoMode)
         let receiverFrequencyMHz = receiver?.param(
@@ -128,7 +131,8 @@ enum RFCompatibilityPreset {
             deviceID: String,
             frequencyHz: Double,
             polarization: RFPolarization,
-            mount: RFVector3D
+            mount: RFVector3D,
+            orientation: RFOrientation = .identity
         ) -> RFAntennaInstance {
             RFAntennaInstance(
                 id: id,
@@ -143,7 +147,7 @@ enum RFCompatibilityPreset {
                     connectorLossDB: 0.2
                 ),
                 mountPositionM: mount,
-                orientation: .identity,
+                orientation: orientation,
                 cableLengthM: 0.15,
                 cableLossDBPerM: 0.45,
                 damageFraction: 0,
@@ -155,6 +159,26 @@ enum RFCompatibilityPreset {
             devices.append(device)
             antennas.append(antenna)
             connections.append(RFAntennaConnection(deviceID: device.id, antennaID: antenna.id))
+        }
+
+        // ⚠️ One whip, upright in level flight, is the wrong installation for an aircraft that
+        // hovers on its tail. Pitched ninety degrees the whip lies along the ground: its null
+        // points down the heading and its polarisation crosses the ground station's. Measured on
+        // a WingtraRAY 790 m out over Manhattan, the moment it stood up to stop at a waypoint:
+        // −78 dBm in cruise, −115 to −129 dBm in the hover, from the same place — forty to fifty
+        // decibels for a change of attitude, a lost control link, and a return home in place of
+        // the next leg. Such an airframe carries a second element along the fuselage, upright
+        // when the first is not, and its radios take whichever is stronger.
+        func fuselageElement(of primary: RFAntennaInstance) -> RFAntennaInstance? {
+            guard flownInTwoAttitudes else { return nil }
+            var element = primary
+            element.id = primary.id + ".fuselage"
+            element.orientation = RFOrientation(yawDegrees: 0, pitchDegrees: 90, rollDegrees: 0)
+            element.mountPositionM = RFVector3D(
+                x: primary.mountPositionM.x, y: primary.mountPositionM.y, z: primary.mountPositionM.z - 0.12)
+            antennas.append(element)
+            connections.append(RFAntennaConnection(deviceID: primary.deviceID, antennaID: element.id))
+            return element
         }
 
         // ⚠️ A sub-GHz control link carries its telemetry on the *same* radio, in slots the
@@ -213,6 +237,7 @@ enum RFCompatibilityPreset {
         )
         install(controlGround, antenna: controlGroundAntenna)
         install(controlAir, antenna: controlAirAntenna)
+        let controlAirFuselageElement = fuselageElement(of: controlAirAntenna)
 
         let telemetryFrequencyHz = 915_000_000.0
         let telemetryBandwidthHz = 250_000.0
@@ -252,9 +277,11 @@ enum RFCompatibilityPreset {
             polarization: .linearVertical,
             mount: RFVector3D(x: 0.15, y: 1.5, z: 0)
         )
+        var telemetryAirFuselageElement: RFAntennaInstance?
         if !telemetrySharesControlRadio {
             install(telemetryAir, antenna: telemetryAirAntenna)
             install(telemetryGround, antenna: telemetryGroundAntenna)
+            telemetryAirFuselageElement = fuselageElement(of: telemetryAirAntenna)
         }
 
         let controlLink = RFLinkConfiguration(
@@ -274,7 +301,8 @@ enum RFCompatibilityPreset {
                 // sticks: the command-latency experiment in this system was reverted for
                 // breaking the aircraft, and nothing here re-opens that.
                 baseLatencyMS: elrsMode?.slotLatencyMS ?? 8
-            )
+            ),
+            receiverDiversityAntennaIDs: controlAirFuselageElement.map { [$0.id] }
         )
         // Shared radio: the downlink runs between the very same two transceivers as control, which
         // is what stops the propagation engine counting it as an aggressor against itself — its
@@ -298,7 +326,10 @@ enum RFCompatibilityPreset {
                 requiredSINRDB: 4,
                 nominalBitrateBps: 64_000,
                 baseLatencyMS: 18
-            )
+            ),
+            transmitterDiversityAntennaIDs: (telemetrySharesControlRadio
+                ? controlAirFuselageElement
+                : telemetryAirFuselageElement).map { [$0.id] }
         )
 
         var videoLink: RFLinkConfiguration?
@@ -349,6 +380,7 @@ enum RFCompatibilityPreset {
             )
             install(videoAir, antenna: videoAirAntenna)
             install(videoGround, antenna: videoGroundAntenna)
+            let videoAirFuselageElement = fuselageElement(of: videoAirAntenna)
             videoLink = RFLinkConfiguration(
                 id: "compat.link.video",
                 kind: .video,
@@ -369,7 +401,8 @@ enum RFCompatibilityPreset {
                         : (videoMode == .fiber ? 2 : 28)
                 ),
                 videoMode: videoMode,
-                videoLinkPreset: resolvedVideoLinkPreset
+                videoLinkPreset: resolvedVideoLinkPreset,
+                transmitterDiversityAntennaIDs: videoAirFuselageElement.map { [$0.id] }
             )
         }
 

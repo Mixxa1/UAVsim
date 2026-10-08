@@ -46,6 +46,7 @@ enum UAVExpansionCatalog {
         let publishedDimensions: String
         let flight: Flight
         let rotors: [Rotor]
+        let mechanics: AircraftMechanizationConfiguration?
 
         var isMulticopter: Bool { category == "multicopter" }
         var isVTOL: Bool { category == "vtol" }
@@ -93,7 +94,7 @@ enum UAVExpansionCatalog {
             if isMulticopter { return "Compact digital quadcopter with an integrated imaging camera." }
             if isTailsitter { return "Twin-propeller mapping aircraft with tailsitter vertical takeoff and landing." }
             if isVTOL { return "Fixed-wing aircraft with separate vertical-lift rotors and a cruise propeller." }
-            if isJet { return "Jet-powered unmanned aircraft with canards and twin canted fins." }
+            if isJet { return "Jet-powered unmanned aircraft." }
             if isFlyingWing { return "Electric or fuel-powered flying-wing aircraft for mapping and observation." }
             return "Fixed-wing unmanned aircraft for survey, observation and long-range flight."
         }
@@ -114,7 +115,7 @@ enum UAVExpansionCatalog {
             // Approximate shaft speed constrained by a subsonic propeller tip;
             // engine and fuel ratings are explicitly estimated in these baselines.
             let rpm: Float = isJet ? 30_000 : min(7_000, max(900, 210 / radius * 60 / (2 * .pi)))
-            let placement: UAVPropellerPlacement = ["puma", "jump", "ar5", "akinci"].contains(layout) ? .tractor : .pusher
+            let placement: UAVPropellerPlacement = ["puma", "jump", "ar5"].contains(layout) ? .tractor : .pusher
             return UAVPowerplantSpec(
                 engineType: engine, engineDesignation: "Representative simulation installation",
                 engineCount: flight.engineCount, ratedShaftPowerKW: flight.ratedPowerKw,
@@ -144,6 +145,31 @@ enum UAVExpansionCatalog {
         var profile: UAVProfile {
             let f = flight
             let dryMass = max(0.01, f.massKg - f.payloadMassKg - f.batteryMassKg - f.fuelMassKg)
+            // A fuel fixed wing flies on its own two throttle figures where they can be worked
+            // out; everything else about its tuning stays the class's. Same climb speed and turn
+            // authority as its runtime tuning asks the estimate with, so both read one result.
+            var tuning: UAVFlightTuningProfile?
+            if !isMulticopter, !isVTOL, !isJet,
+               let performance = AirframePerformanceEstimate.cached(
+                for: self, climbSpeedMps: max(f.minSpeedMps * 1.15, f.cruiseSpeedMps * 0.85), turnAuthority: 0.62),
+               let cruiseLever = performance.cruiseLever, let minimumLever = performance.minimumLever {
+                let classFigures = UAVFlightTuningProfile.catalogDefault(
+                    vehicleType: .fixedWing, specConfidence: .partial, baseMass: dryMass, batteryMass: nil,
+                    estimatedBatteryMass: f.batteryMassKg, maxPayloadMass: nil, estimatedMaxPayloadMass: f.payloadMassKg,
+                    maxTakeoffMass: nil, estimatedMaxTakeoffMass: f.massKg, visualPreset: visualPreset)
+                if let fixedWing = classFigures.fixedWing {
+                    tuning = .fixedWing(
+                        referenceMass: classFigures.referenceMass,
+                        cruiseThrottleBaseline: cruiseLever,
+                        minimumSafeFlightThrottle: min(minimumLever, cruiseLever),
+                        climbThrottleBaseline: fixedWing.climbThrottleBaseline,
+                        glideThrottleFactor: fixedWing.glideThrottleFactor,
+                        stallProtectionBias: fixedWing.stallProtectionBias,
+                        payloadCruisePenaltyFactor: fixedWing.payloadCruisePenaltyFactor,
+                        landingThrottleBaseline: fixedWing.minimumSafeFlightThrottle,
+                        source: .derived)
+                }
+            }
             return UAVProfile(
                 id: id, displayName: name, manufacturer: f.manufacturer, countryOfOrigin: f.country,
                 vehicleType: isMulticopter ? .multicopter : isVTOL ? .hybridVTOL : .fixedWing,
@@ -160,6 +186,7 @@ enum UAVExpansionCatalog {
                 visualPreset: visualPreset, shortDescription: description,
                 notes: "Exterior and published dimensions: \(publishedDimensions). Source: \(sourceURL?.absoluteString ?? "manufacturer reference"). Flight limits, empty mass, payload budget, battery/fuel installation and aerodynamic tuning are representative estimates, not a flight-test-certified model.",
                 missionRole: isMulticopter ? "Aerial imaging and observation" : "Mapping, observation and flight training",
+                flightTuningProfile: tuning,
                 nominalFlightTimeSec: f.flightMinutes * 60,
                 nominalCruiseSpeedMps: f.cruiseSpeedMps,
                 minSafeAirspeedMps: isMulticopter ? nil : f.minSpeedMps,
@@ -179,6 +206,7 @@ enum UAVExpansionCatalog {
         let publishedDimensions: String?
         let runtimeProfile: Flight?
         let rotors: [Rotor]?
+        let mechanics: AircraftMechanizationConfiguration?
     }
     private struct Document: Decodable { let models: [Row] }
 
@@ -199,7 +227,8 @@ enum UAVExpansionCatalog {
                   let category = row.category, let layout = row.layout else { return nil }
             return Definition(id: row.id, name: row.name, category: category, layout: layout,
                 sourceURL: row.sourceUrl.flatMap(URL.init(string:)), boundsMin: row.staticBoundsMinM ?? [],
-                publishedDimensions: row.publishedDimensions ?? "", flight: flight, rotors: row.rotors ?? [])
+                publishedDimensions: row.publishedDimensions ?? "", flight: flight, rotors: row.rotors ?? [],
+                mechanics: row.mechanics)
         }
     }()
     static let profiles = definitions.map(\.profile)

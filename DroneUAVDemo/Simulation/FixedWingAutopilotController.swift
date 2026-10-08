@@ -262,6 +262,7 @@ final class FixedWingAutopilotController {
         let missionMinAirspeedActive: Float? = isLaunchProtected ? nil : missionMinAirspeed
         let missionMaxAirspeedActive: Float? = isLaunchProtected ? nil : missionMaxAirspeed
 
+        let derivedLevers = context.flightBaseline.tuningSource == .derived
         let input = FixedWingAutopilotInput(
             aircraftPosition: context.state.position,
             aircraftVelocity: context.state.velocity,
@@ -270,7 +271,9 @@ final class FixedWingAutopilotController {
             aircraftRollRadians: context.state.orientation.x,
             aircraftAirspeed: airspeed,
             deltaTime: max(0.001, context.deltaTime),
-            heightAboveSurfaceMeters: context.heightAboveSurfaceMeters
+            heightAboveSurfaceMeters: context.heightAboveSurfaceMeters,
+            cruiseLever: derivedLevers ? context.flightBaseline.cruiseReferenceThrottle : nil,
+            minimumLever: derivedLevers ? context.flightBaseline.effectiveMinimumSafeFlightThrottle : nil
         )
 
         guard let result = autopilot.update(

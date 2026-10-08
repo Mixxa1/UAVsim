@@ -65,7 +65,13 @@ struct PropellerModel: Hashable {
         let revsPerSecond = ratedRPM / 60.0
         // Design advance ratio, floored so a very slow aircraft still gets a
         // sensible curve rather than a degenerate one at J = 0.
-        let designJ = max(0.12, cruiseSpeedMps / (revsPerSecond * diameter))
+        //
+        // A disc declared as pitched for a top speed is designed at that speed over 1.3, which
+        // with the zero-thrust ratio below leaves it pulling a third of its design thrust at the
+        // top speed and nothing 11 % beyond it.
+        let pitchedForSpeed = powerplant.hasConstantSpeedPropeller ? nil : powerplant.fixedPitchTopSpeedMps
+        let designSpeedMps = pitchedForSpeed.map { $0 / 1.3 } ?? cruiseSpeedMps
+        let designJ = max(0.12, designSpeedMps / (revsPerSecond * diameter))
         // Power balance at the design point: P = Cp · rho · n^3 · D^5.
         let denominator = referenceDensity
             * pow(revsPerSecond, 3.0)
@@ -85,7 +91,7 @@ struct PropellerModel: Hashable {
         // then fixes the induced velocity, and what is left over is the fraction of
         // shaft power that never reached the air.
         let discArea = Float.pi * diameter * diameter * 0.25
-        let designSpeed = max(1.0, cruiseSpeedMps)
+        let designSpeed = max(1.0, designSpeedMps)
         let designThrust = designEfficiency * (ratedPowerKW * 1000.0) / designSpeed
         let inducedAtDesign = 0.5 * (
             -designSpeed

@@ -1,0 +1,1065 @@
+{
+  "method": "55-micron AABB adjacency: broad-phase review aid, not proof of physical contact",
+  "models": [
+    {
+      "id": "frame-5inch-freestyle",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-5inch-race",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-5inch-deadcat",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-6inch-longrange",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-7inch-lr",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-8inch-expedition",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-tinywhoop",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "frame-whoop75",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "frame-cinewhoop-25",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-35inch-ultralight",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-cine",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-10inch-utility",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SlottedCarbonPlate_02",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "frame-fixedwing-survey-s1",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "frame-vtol-lift-cruise-v1",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-0802-19000kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-1002-22000kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-1103-8000kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-1404-3800kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-1505-3600kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-1804-2450kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-2004-3000kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-2207-2450kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-2207-1900kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-2306-1750kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-2507-1500kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-2806-1300kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-3110-900kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-3520-620kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "motor-5010-360kv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-1.6x1.6",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-1.9x1.9",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-2.5x2.3",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-3x2",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-3.5x2.8",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-4x2.5",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-5.1x3.6-bi",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-5x4.3",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-5.1x3.5-cine",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-6x3.5",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-7x4",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-8x4",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-10x4.5",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-10x3.8-tri",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "prop-12x6-folding",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "battery-1s-300",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-1s-550",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-2s-450",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-2s-850",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-3s-850",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-4s-850",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-4s-1500",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-4s-2200",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-liion-4s-3000",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-6s-1100",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-6s-1300",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-6s-2200",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-6s-5000",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "battery-8s-6000",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "HeatShrinkEnvelope_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "esc-aio-5a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-4in1-12a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-4in1-20a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-4in1-25a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-4in1-35a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-4in1-45a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-4in1-55a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-4in1-65a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-wing-80a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-powerhub-4x80a",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "esc-powerhub-5x80a-vtol",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "servo-2g-linear",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "servo-9g",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "ServoShell_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "servo-17g-metal",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "ServoShell_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "servo-25g-lowprofile",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "ServoShell_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "servo-40g-hv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "ServoShell_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "fc-f411-whoop-aio",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "fc-f4-mini",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "fc-f405",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "fc-f7",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "fc-h7-dual",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "fc-autopilot-h7",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "rx-elrs",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "RFShield_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "rx-elrs-915",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "RFShield_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "rx-crossfire",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "RFShield_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "rx-redundant-868",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "RFShield_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "gps-m8-nano",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "gps-m10",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "gps-m10-compass",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "Radome_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "gps-rtk-dual",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "camera-fpv-micro",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "camera-fpv",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "camera-fpv-lowlight",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "camera-hd-mini",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "camera-hd",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "camera-action-mini",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "camera-action",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "camera-mapping-24mp",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "CameraHousing_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "sensor-range-mini",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SealedSensorCase_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "sensor-optical-flow",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SealedSensorCase_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "sensor-lidar-200",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SensorCap_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "sensor-radar-altimeter",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SealedSensorCase_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "sensor-obstacle-array",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SensorCap_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "sensor-air-quality",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SealedSensorCase_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "payload-camera-gimbal",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "payload-thermal-gimbal",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "payload-lidar-survey",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "ScannerCap_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "payload-multispectral",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "SpectralCameraCase_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "payload-cargo-release",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "LockActuatorCase_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "payload-delivery-pod",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": [
+        {
+          "mesh": "IdentificationLabel_01",
+          "host": "ContainerLid_01",
+          "clearance_m": 1.5e-05
+        }
+      ]
+    },
+    {
+      "id": "payload-sprayer-1l",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "payload-searchlight",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "gear-micro-guards",
+      "candidate_clusters": 1,
+      "isolated_clusters": [],
+      "attached_labels": []
+    },
+    {
+      "id": "gear-skid",
+      "candidate_clusters": 2,
+      "isolated_clusters": [
+        [
+          "CarbonStrut_03",
+          "UpperStrutCollar_03",
+          "FootCollar_03",
+          "CarbonStrut_04",
+          "UpperStrutCollar_04",
+          "FootCollar_04",
+          "SkidTube_02",
+          "RubberEndCap_03",
+          "RubberEndCap_04"
+        ]
+      ],
+      "attached_labels": []
+    },
+    {
+      "id": "gear-cine-bumpers",
+      "candidate_clusters": 4,
+      "isolated_clusters": [
+        [
+          "TPUFoot_02",
+          "TPURoundedFoot_02",
+          "PrintedTPULayer_06",
+          "PrintedTPULayer_07",
+          "PrintedTPULayer_08",
+          "PrintedTPULayer_09",
+          "PrintedTPULayer_10"
+        ],
+        [
+          "TPUFoot_03",
+          "TPURoundedFoot_03",
+          "PrintedTPULayer_11",
+          "PrintedTPULayer_12",
+          "PrintedTPULayer_13",
+          "PrintedTPULayer_14",
+          "PrintedTPULayer_15"
+        ],
+        [
+          "TPUFoot_04",
+          "TPURoundedFoot_04",
+          "PrintedTPULayer_16",
+          "PrintedTPULayer_17",
+          "PrintedTPULayer_18",
+          "PrintedTPULayer_19",
+          "PrintedTPULayer_20"
+        ]
+      ],
+      "attached_labels": []
+    },
+    {
+      "id": "gear-tall-carbon",
+      "candidate_clusters": 2,
+      "isolated_clusters": [
+        [
+          "CarbonStrut_03",
+          "UpperStrutCollar_03",
+          "FootCollar_03",
+          "CarbonStrut_04",
+          "UpperStrutCollar_04",
+          "FootCollar_04",
+          "SkidTube_02",
+          "RubberEndCap_03",
+          "RubberEndCap_04"
+        ]
+      ],
+      "attached_labels": []
+    },
+    {
+      "id": "gear-retractable",
+      "candidate_clusters": 2,
+      "isolated_clusters": [
+        [
+          "RetractActuator_02",
+          "FastenerHead_02",
+          "HexSocket_02",
+          "LegHingeLink_02",
+          "CarbonLeg_02",
+          "TrunnionMount_02",
+          "Skid_02",
+          "ActuatorLinkBoss_02",
+          "ActuatorPushrod_02"
+        ]
+      ],
+      "attached_labels": []
+    }
+  ]
+}

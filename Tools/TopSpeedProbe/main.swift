@@ -56,6 +56,9 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
         mode: .autoPath
     )
     state.armState = .armed
+    // Flown clean. The figure being measured is quoted with the undercarriage up, and the
+    // lever is the operator's — nothing raises it on the probe's behalf.
+    state.mechanization.gearExtension = 0
     if let backend {
         var warm = EngineRuntimeState.cold(ambientTemperatureC: 15.0)
         warm.runState = .ready
@@ -74,7 +77,8 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
             throttle: 1.0,
             isArmed: true,
             mode: .autoPath,
-            controlMode: .stabilized
+            controlMode: .stabilized,
+            landingGearDownCommand: false
         )
         state = engine.step(
             state: state,

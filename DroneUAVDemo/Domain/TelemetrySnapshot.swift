@@ -168,6 +168,19 @@ struct TelemetrySnapshot {
     var activePhysicsBodyCount: Int
     var activeParticleCount: Int
 
+    /// Flaps and undercarriage, for airframes that have them.
+    var mechanization: MechanizationReadout? = nil
+
+    struct MechanizationReadout: Equatable {
+        /// `nil` for an airframe with fixed legs.
+        var gearStatusKey: String?
+        /// `nil` for an airframe without flaps.
+        var flapDegrees: Float?
+        /// Largest air load over its limit load on anything deployed.
+        var loadRatio: Float
+        var hasFailure: Bool
+    }
+
     static let zero = TelemetrySnapshot(
         timestampISO8601: ISO8601DateFormatter().string(from: Date()),
         droneModelID: "n/a",

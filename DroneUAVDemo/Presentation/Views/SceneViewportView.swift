@@ -228,6 +228,7 @@ struct SceneViewportView: View {
                     telemetry: viewModel.telemetry,
                     warningKeys: viewModel.warnings
                 )
+                .instructorTarget("simulation.instruments")
                 .padding(.leading, overlayInset)
                 .padding(.top, overlayInset)
             } else {

@@ -15,6 +15,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
     private var startupDiagnosticsFrames = Tuning.startupDiagnosticsFrames
     private var warnedAboutStartupLateralForce = false
+
+    /// `logsStartup: false` is for the solvers a flight card flies in the background: a card is
+    /// several short flights, and the first frames of each would bury the console's own flight.
+    init(logsStartup: Bool = true) {
+        if !logsStartup { startupDiagnosticsFrames = 0 }
+    }
     private var verticalDebugCooldown: Float = 0.0
 
     /// Near-ground turbulence gust state (Dryden low-altitude model,
@@ -68,6 +74,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         var next = state
         next.groundApproach = nil
+        // Flaps and undercarriage are resolved here, once, and carried into every substep.
+        let mechanization = context.profile.airframeClass == .multirotor ? nil
+            : (context.mechanization
+                ?? AircraftMechanizationModel.shared(for: context.profile, uav: context.activeUAVProfile))
+        let actuatorAuthority = mechanization == nil ? 0 : resolvedControlAuthority(context: context)
+        // The contact profile changes only when a leg locks, unlocks or fails. The caller's
+        // profile already matches the state it passed in, so nothing is rebuilt in steady
+        // flight; a change inside this step is rebuilt on the substep it happens and reused.
+        var gearContacts: VehicleContactProfile?
+        var gearContactsMask = context.neutralContactProfile == nil ? 0 : state.mechanization.gearUnsupportedMask
         var remaining = clampedDelta
         while remaining > 0.0 {
             let dt = min(Tuning.fixedStep, remaining)
@@ -77,6 +93,25 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             // from `context`; an aircraft with no fuel propulsion never enters here
             // and its context is passed through untouched.
             var substepContext = context
+            if let mechanization {
+                next.mechanization = mechanization.advance(
+                    next.mechanization, control: control,
+                    condition: AircraftMechanizationFlightCondition(
+                        dynamicPressurePa: next.dynamicPressurePa,
+                        airspeedMps: next.forwardAirspeed,
+                        yawRateRadPerSec: next.bodyAngularVelocity.z,
+                        heightAboveGroundM: next.position.y - context.groundHeight),
+                    actuatorAuthority: actuatorAuthority,
+                    isDestroyed: next.damageCondition == .destroyed, dt: dt)
+                if next.mechanization.gearUnsupportedMask != gearContactsMask {
+                    gearContactsMask = next.mechanization.gearUnsupportedMask
+                    gearContacts = mechanization.contacts(
+                        context.neutralContactProfile ?? context.contactProfile,
+                        unsupportedMask: gearContactsMask)
+                }
+                if let gearContacts { substepContext.contactProfile = gearContacts }
+                substepContext.mechanization = mechanization
+            }
             if let backend = context.fuelPropulsion {
                 next.engineRuntime = advanceEngine(
                     state: &next,
@@ -573,7 +608,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             let inertiaRates = resolvedRateOrderedInertia(
                 context: context,
                 fallback: estimatedMultirotorInertia(context: context),
-                minimum: 0.0005
+                minimum: 0.0005,
+                declared: profile.multirotorGyrationRadiiMeters != nil
             )
             let maxTotalThrust = rotorBorneThrustMagnitude(
                 motorThrottle: 1.0,
@@ -628,7 +664,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             let inertiaRates = resolvedRateOrderedInertia(
                 context: context,
                 fallback: estimatedMultirotorInertia(context: context),
-                minimum: 0.0005
+                minimum: 0.0005,
+                declared: profile.multirotorGyrationRadiiMeters != nil
             )
             let desiredTorque = commandedAngularAccel * inertiaRates
 
@@ -915,7 +952,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                     inertiaRateOrdered: resolvedRateOrderedInertia(
                         context: context,
                         fallback: estimatedMultirotorInertia(context: context),
-                        minimum: 0.0005
+                        minimum: 0.0005,
+                        declared: context.profile.multirotorGyrationRadiiMeters != nil
                     )
                 )
             } else if next.velocity.y < 0.0 {
@@ -1148,9 +1186,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // zero. This is a shape, not a measurement: no profile in the catalogue publishes a
         // propeller diagram.
         let propellerEfficiency: (Float) -> Float = { speed in
-            let ratio = speed / max(1.0, cruiseSpeed)
-            let offset = ratio - 1.0
-            return (1.0 - 1.2 * offset * offset).clamped(to: 0.35...1.0)
+            FixedPitchPropellerShape.efficiency(speed: speed, cruiseSpeed: cruiseSpeed)
         }
         // Shaft power the airframe has at full throttle, from the climb it is required to deliver —
         // corrected for the efficiency the propeller actually achieves at climb speed.
@@ -1346,6 +1382,11 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     /// physical even when no component graph exists.
     private func estimatedMultirotorInertia(context: DroneSimulationContext) -> SIMD3<Float> {
         let mass = max(0.05, context.vehicleMassModel.resolvedCurrentTotalMass)
+        // An airframe that knows its own radii is flown on them; the call sites then pass
+        // `declared`, so the component graph — built from the picture — does not overrule them.
+        if let radii = context.profile.multirotorGyrationRadiiMeters {
+            return simd_max(mass * radii * radii, SIMD3<Float>(repeating: 0.0005))
+        }
         // ⚠️ `DroneDimensionsMM` is width/length/HEIGHT — its `z` is how tall the aircraft is, not
         // how deep its footprint is. The engine's body frame uses z for the longitudinal axis, and
         // taking the plan dimensions from `x`/`z` therefore measured a 250 mm quad as 250 x 62.
@@ -1638,6 +1679,55 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         return held
     }
 
+    /// `hoverHoldingControl` for an aircraft that hovers with its wing on.
+    ///
+    /// The same hold, with the nose-up lean it brakes with limited to the angle at which the wing
+    /// lifts the aircraft's weight and no more. Leaned the full eighteen degrees at cruise speed a
+    /// wing that stalls at 7.5 m/s lifts two and a half times the weight, and the stop is a
+    /// zoom; held at that limit the aircraft decelerates level on its own drag until the wing
+    /// lets go, and the rotors finish the stop.
+    private func wingedHoverHoldingControl(
+        control: DroneControlInput,
+        state: DroneState,
+        step s: VTOLAeroTransitionStep,
+        airDensity: Float
+    ) -> DroneControlInput {
+        guard control.mode == .hover else { return control }
+        // The point to hold is where the aircraft stops, not where the mode was asked for. The
+        // app latches the latter, and an aircraft that arrives at cruise speed is a hundred and
+        // more metres past it by the time it has stopped: held to that point it backed up the
+        // whole way tail-first at 5–9 m/s. Within five metres it is brought back; beyond, it is
+        // only stopped.
+        var anchored = control
+        let offset = SIMD2<Float>(control.targetPosition.x - state.position.x, control.targetPosition.z - state.position.z)
+        if simd_length(offset) > 5.0 {
+            anchored.targetPosition.x = state.position.x
+            anchored.targetPosition.z = state.position.z
+        }
+        var held = hoverHoldingControl(control: anchored, state: state, authority: s.authority)
+        guard held.targetOrientation.y > 0 else { return held }
+
+        let forwardSpeed = max(0.0, state.forwardAirspeed)
+        let liftPerUnitCoefficient = 0.5 * airDensity * forwardSpeed * forwardSpeed * s.aero.wingArea
+        let weight = s.mass * Tuning.gravity
+        // Six halvings of the lean range: a quarter of a degree, on a polar that rises all the
+        // way to its stall.
+        var low: Float = 0.0
+        var high = min(held.targetOrientation.y, s.aero.stallAlphaRad)
+        if liftPerUnitCoefficient * s.aero.liftDrag(alphaRad: high).cl > weight {
+            for _ in 0..<6 {
+                let middle = (low + high) * 0.5
+                if liftPerUnitCoefficient * s.aero.liftDrag(alphaRad: middle).cl > weight {
+                    high = middle
+                } else {
+                    low = middle
+                }
+            }
+            held.targetOrientation.y = low
+        }
+        return held
+    }
+
     private func stepFixedWingAerodynamic(
         state: DroneState,
         control: DroneControlInput,
@@ -1684,7 +1774,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         } else {
             let throttleFloor: Float
             switch baseline.vehicleType {
-            case .fixedWing:
+            // ⚠️ `.custom` is every aeroplane built in the Workbench: its tuning carries no type.
+            // It was held to the rule for rotorcraft at the bottom of this switch — never below
+            // its cruise throttle in the air, in any mode — and for an aeroplane the cruise
+            // throttle is level flight at cruise by construction of the thrust map. Such a build
+            // could not be slowed below its cruise by any guidance, flew its landing at cruise
+            // power, and in its pilot's hand could not be throttled back at all.
+            case .fixedWing, .custom:
                 switch control.mode {
                 case .takeoff:
                     throttleFloor = baseline.takeoffThrottleReference
@@ -1721,7 +1817,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                         ? max(baseline.cruiseReferenceThrottle, baseline.effectiveMinimumSafeFlightThrottle)
                         : 0.0
                 }
-            case .multicopter, .helicopter, .custom:
+            case .multicopter, .helicopter:
                 throttleFloor = state.position.y > 0.15 ? baseline.cruiseReferenceThrottle : 0.0
             }
             throttleCommand = max(throttleCommand, throttleFloor)
@@ -1776,8 +1872,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
             designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass },
             profileID: profile.id,
-            engineering: profile.engineeringAerodynamics
+            engineering: profile.engineeringAerodynamics,
+            tailArmM: wing.tailArmMeters,
+            inertiaRadii: wing.inertiaRadii,
+            wingAreaM2: wing.wingAreaM2,
+            gyrationRadiiMeters: wing.gyrationRadiiMeters
         ).applyingDamage(context.aeroDamage)
+            .applyingMechanization(context.mechanization, state: state.mechanization)
 
         // --- Airflow state.
         //
@@ -1987,6 +2088,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.elevatorDeflection = elevatorFraction
         next.aileronDeflection = aileronFraction
         next.rudderDeflection = rudderFraction
+        next.controlSurfaceAnglesRad = SIMD3<Float>(aileronFraction*aero.maxAileronRad,
+            elevatorFraction*aero.maxElevatorRad, rudderFraction*aero.maxRudderRad)
 
         // --- Aerodynamics: real angle-of-attack/sideslip-driven forces and moments.
         // `alpha`, `beta`, `airspeed` and `bodyAirflow` are computed above, before the control
@@ -2193,7 +2296,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let inertiaRates = resolvedRateOrderedInertia(
             context: context,
             fallback: aero.inertiaTensor,
-            minimum: 0.001
+            minimum: 0.001,
+            declared: aero.inertiaIsDeclared
         )
         momentBody += rotationalDragMoment(
             context: context,
@@ -2302,6 +2406,10 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let verticalAeroForce = simd_act(next.attitudeQuat, aeroForceBody).y
         let weightNewtons = max(1.0, mass * Tuning.gravity)
         let inGroundContact = next.position.y <= groundClearance + 0.05
+        if inGroundContact, let mechanization = context.mechanization {
+            // A leg caught between the aircraft and the ground before it has locked.
+            next.mechanization = mechanization.touchingGround(next.mechanization)
+        }
         let supportedByGear = hasLoadBearingGroundSupport(context: context, orientation: next.attitudeQuat)
         let wheelLoad = inGroundContact && supportedByGear && state.physicalState != .crashed
             ? (1.0 - verticalAeroForce / weightNewtons).clamped(to: 0.0...1.0)
@@ -2345,7 +2453,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             // Rolling resistance. Wheels on a prepared surface are cheap; a belly
             // or a skid dragging through grass is not, and that difference is most
             // of what stops an aircraft after a wheels-up landing.
-            let rollingFriction: Float = wing.hasWheeledUndercarriage ? 0.035 : 0.38
+            let wheelsDown = state.mechanization.gearDownAndLocked
+            let rollingFriction: Float = wing.hasWheeledUndercarriage && wheelsDown ? 0.035 : 0.38
             let groundSpeed = simd_length(horizontal)
             if groundSpeed > 0.05 {
                 let decelerated = max(
@@ -2554,6 +2663,9 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
 
         let wingLiftRatio: Float
         let wingborneBlend: Float
+        /// The share of the weight the propulsion treats as carried by the wing. The same as
+        /// `wingborneBlend` until the transition is complete; see where it is set.
+        let propulsionBlend: Float
 
         let units: [PropulsionUnit]
         let vtolTransitionProgress: Float
@@ -2632,8 +2744,13 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
             designMassKg: context.activeUAVProfile.flatMap { $0.maxTakeoffMass ?? $0.estimatedMaxTakeoffMass },
             profileID: profile.id,
-            engineering: profile.engineeringAerodynamics
+            engineering: profile.engineeringAerodynamics,
+            tailArmM: wing.tailArmMeters,
+            inertiaRadii: wing.inertiaRadii,
+            wingAreaM2: wing.wingAreaM2,
+            gyrationRadiiMeters: wing.gyrationRadiiMeters
         ).applyingDamage(context.aeroDamage)
+            .applyingMechanization(context.mechanization, state: state.mechanization)
 
         // --- 2. Airflow state, ahead of the surfaces for the same reason as
         // stepFixedWingAerodynamic: the rudder coordinator closes a loop on
@@ -2897,6 +3014,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             vtolTransitionProgress = (meanTiltAngleRad / (Float.pi / 2)).clamped(to: 0.0...1.0)
         }
 
+        var propulsionBlend = wingborneBlend
+
         // --- 6. Throttle: continuous hover<->cruise floor blend, driven by
         // how much of the weight the wing actually carries.
         var throttleCommand = control.throttle.clamped(to: 0.0...1.0)
@@ -2913,9 +3032,20 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             // handed a waypoint through hover. Opening the floor below is not enough — the floor
             // cannot lower a command that is already above it. The multirotor step has always
             // closed this loop; the VTOL step never did.
+            // ⚠️ An aircraft with its own lift rotors is on them as soon as the pusher is off,
+            // whatever its wing happens to be carrying.
+            //
+            // "Rotor-borne" was read off the wing — less than a quarter of the weight on it — and
+            // a wing sized to a 15–20 m/s stall never carried more than that at the speeds a hover
+            // is entered at. A wing drawn for the aircraft does: a Workbench build asked to hover
+            // at its 12 m/s cruise was three-quarters wing-borne, so this loop stayed off, the
+            // rotors stood by at the fraction of hover thrust the wing left them, and the "hover"
+            // was a glide — 1.3 m/s down at 12 m/s for twenty seconds, into the field.
+            let rotorsHoldTheHover = wingborneBlend < 0.25 ||
+                (units.contains { $0.role == .liftRotor } && !leverForward)
             let holdsAltitudeInHover = (control.mode == .hover || control.controlMode == .hoverAssist) &&
                 state.vtolTransitionProgress < 0.25 &&
-                wingborneBlend < 0.25 &&
+                rotorsHoldTheHover &&
                 control.targetPosition.y.isFinite
             if holdsAltitudeInHover {
                 let altitudeError = control.targetPosition.y - state.position.y
@@ -2956,6 +3086,25 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             let flyingSpeedMargin = ((airspeed - wing.minSustainableSpeedMps)
                 / (cruiseSpeedReference - wing.minSustainableSpeedMps)).clamped(to: 0.0...1.0)
             let cruiseFloor = baseline.effectiveMinimumSafeFlightThrottle * (1.0 - flyingSpeedMargin)
+            // ⚠️ In aeroplane mode the lift system is released by airspeed, not by how loaded the
+            // wing happens to be this instant.
+            //
+            // The blend is wing lift over weight, and it was also what switched the lift rotors
+            // back on and brought the hover floor back under the lever. That is a loop that feeds
+            // itself: the wing unloads for a moment, the rotors take the weight, the height loop
+            // lowers the nose because the aircraft is now over-lifted, the wing unloads further.
+            // A CW-20E at its maximum weight dipped to 17.9 m/s in a turn of the speed loop and
+            // never came back onto its wing — blend 0.00, nose 3° down, the lever held at 0.76
+            // against a command of zero, 37 m/s against a cruise of 20. A real lift-and-cruise
+            // autopilot gates its assist on airspeed for exactly this reason.
+            //
+            // The margin is the one the floor above already fades on: nothing from the rotors at
+            // cruise speed and beyond, everything they are asked for at the stall. Only once the
+            // transition is complete — on the way in and on the way out the rotors are doing
+            // their job. A tailsitter has no separate lift system and keeps its own blend.
+            if vtolTransitionProgress >= 0.999, profile.airframeStyle != .tailsitterVTOL {
+                propulsionBlend = max(wingborneBlend, flyingSpeedMargin)
+            }
             let allowGroundTakeoffFloor = profile.airframeStyle == .tailsitterVTOL && control.mode == .takeoff
             let manualTailsitterThrottle = profile.airframeStyle == .tailsitterVTOL && control.mode == .manual
             // An autopilot altitude hold must be allowed to command *below*
@@ -2974,7 +3123,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 state.position.y > targetAltitude + 0.15
             let rotorBorneAltitudeControl = control.mode != .manual &&
                 state.vtolTransitionProgress < 0.25 &&
-                wingborneBlend < 0.25 &&
+                rotorsHoldTheHover &&
                 (holdOrDescentRequested || aboveAltitudeTarget)
             let throttleFloor: Float
             if manualTailsitterThrottle {
@@ -2982,7 +3131,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             } else if rotorBorneAltitudeControl {
                 throttleFloor = 0.0
             } else if state.position.y > 0.15 || allowGroundTakeoffFloor {
-                throttleFloor = hoverPhaseFloor * (1.0 - wingborneBlend) + cruiseFloor * wingborneBlend
+                throttleFloor = hoverPhaseFloor * (1.0 - propulsionBlend) + cruiseFloor * propulsionBlend
             } else {
                 throttleFloor = 0.0
             }
@@ -3017,6 +3166,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             rudderFraction: rudderFraction,
             wingLiftRatio: wingLiftRatio,
             wingborneBlend: wingborneBlend,
+            propulsionBlend: propulsionBlend,
             units: units,
             vtolTransitionProgress: vtolTransitionProgress,
             vtolTransitionBlocked: vtolTransitionBlocked,
@@ -3208,6 +3358,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.elevatorDeflection = s.elevatorFraction
         next.aileronDeflection = s.aileronFraction
         next.rudderDeflection = s.rudderFraction
+        next.controlSurfaceAnglesRad = SIMD3<Float>(s.aileronFraction*s.aero.maxAileronRad,
+            s.elevatorFraction*s.aero.maxElevatorRad, s.rudderFraction*s.aero.maxRudderRad)
         next.vtolWingLiftRatio = s.wingLiftRatio
         next.vtolWingborneBlend = s.wingborneBlend
         next.vtolTransitionProgress = s.vtolTransitionProgress
@@ -3262,10 +3414,30 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 .clamped(to: 0.15...1.15),
             usesThrustCurve: true
         )
-        let totalLiftCapableThrustMagnitude = hoverSizedThrustMagnitude * (1.0 - s.wingborneBlend) + cruiseSizedThrustMagnitude * s.wingborneBlend
+        let totalLiftCapableThrustMagnitude = hoverSizedThrustMagnitude * (1.0 - s.propulsionBlend) + cruiseSizedThrustMagnitude * s.propulsionBlend
         let perLiftUnitThrustMagnitude = liftCapableUnits.isEmpty ? 0.0 : totalLiftCapableThrustMagnitude / Float(liftCapableUnits.count)
 
-        let perCruiseUnitThrustMagnitude = cruiseUnits.isEmpty ? 0.0 : cruiseSizedThrustMagnitude / Float(cruiseUnits.count)
+        // ⚠️ A pusher beside its own lift rotors is engaged by the transition, not by the throttle.
+        //
+        // The one lever feeds both, and the pusher took its full cruise-sized thrust from it in
+        // every regime — so a lift-and-cruise aircraft holding a hover at hover throttle was being
+        // pushed forward with nothing to stop it. Recorded on a Workbench build: `hover`, stick
+        // centred, nose level, 9 m/s to 28 m/s in forty seconds, half a kilometre, into the ground.
+        // The same from rest on the bench for every airframe of the scheme, CW-20E, DeltaQuad Evo
+        // and JUMP 20 included: 23–31 m/s after thirty seconds of "hover". On a route flown
+        // rotor-borne the autopilot was holding ten metres a second by leaning back against it.
+        //
+        // It runs while the lever asks for forward flight, whatever the transition's own progress:
+        // that progress is rolled back on a stall or a sink, which is right for a rotor that tilts
+        // and wrong for a pusher — taking the thrust away from a wing that has stalled for want of
+        // speed leaves it there (a JUMP 20 sat at 10 m/s, progress cycling at 0.26). With the lever
+        // released or pulled back it follows the transition down and is stopped by the time the
+        // aircraft is back on its rotors. A tailsitter's propellers are its lift and are not touched.
+        let hasSeparateLiftSystem = units.contains { $0.role == .liftRotor }
+        let pusherEngagement: Float = !hasSeparateLiftSystem || s.leverForward
+            ? 1.0 : (s.vtolTransitionProgress / 0.5).clamped(to: 0.0...1.0)
+        let perCruiseUnitThrustMagnitude = cruiseUnits.isEmpty ? 0.0
+            : cruiseSizedThrustMagnitude * pusherEngagement / Float(cruiseUnits.count)
 
         var thrustForceBody = SIMD3<Float>(repeating: 0.0)
         for index in units.indices {
@@ -3275,7 +3447,7 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
                 // Fixed vertical rotors shed lift as the wing takes the load.
                 // Cruise-sized forward thrust only belongs to tilting rotors.
                 magnitude = liftCapableUnits.isEmpty ? 0
-                    : hoverSizedThrustMagnitude * (1.0 - s.wingborneBlend) / Float(liftCapableUnits.count)
+                    : hoverSizedThrustMagnitude * (1.0 - s.propulsionBlend) / Float(liftCapableUnits.count)
             case .tiltRotor:
                 magnitude = perLiftUnitThrustMagnitude
             case .cruiseProp:
@@ -3289,14 +3461,16 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
             )
             thrustForceBody += units[index].thrustDirectionBody * (magnitude * damageFactor)
             let liftSpinFraction: Float = units[index].role == .liftRotor
-                ? sqrt(max(0, 1.0 - s.wingborneBlend)) : 1
+                ? sqrt(max(0, 1.0 - s.propulsionBlend)) : 1
             if units[index].role == .cruiseProp, let propulsion = context.propulsionOutput {
                 units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
                     ? 0 : propulsion.shaftRPM * .pi / 30
             } else {
+                // A pusher that is not engaged stands still, as the lift rotors do on the wing.
+                let pusherSpinFraction: Float = units[index].role == .cruiseProp ? sqrt(pusherEngagement) : 1
                 units[index].rotationalSpeedRadPerSec = (s.crashOrDisarmed || damageFactor <= 0.01)
                     ? 0.0
-                    : (120.0 + s.motorThrottle * 640.0) * (0.4 + 0.6 * damageFactor) * liftSpinFraction
+                    : (120.0 + s.motorThrottle * 640.0) * (0.4 + 0.6 * damageFactor) * liftSpinFraction * pusherSpinFraction
             }
         }
 
@@ -3307,7 +3481,15 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         // weight the rotors still carry, so it fades out exactly as real
         // aero authority (dynamic pressure) fades in. On stall the blend
         // collapses fast and rotor-style control returns automatically.
-        let desiredRates = s.crashOrDisarmed ? SIMD3<Float>(repeating: 0.0) : desiredMultirotorRates(control: control, state: state, authority: s.authority, baseline: s.baseline)
+        // ⚠️ A hover holds its point. The multirotor step has always closed that loop
+        // (`hoverHoldingControl`); this one never did, so "hover" on an aircraft with a wing and
+        // lift rotors was a level attitude and whatever speed it arrived with — 10 m/s into the
+        // mode, 10 m/s forty seconds and four hundred metres later, the wing's own nose-down
+        // moment leaning the rotors two degrees forward against what little drag there was.
+        let hoverControl = hasSeparateLiftSystem && !s.leverForward
+            ? wingedHoverHoldingControl(control: control, state: state, step: s, airDensity: airDensity)
+            : control
+        let desiredRates = s.crashOrDisarmed ? SIMD3<Float>(repeating: 0.0) : desiredMultirotorRates(control: hoverControl, state: state, authority: s.authority, baseline: s.baseline)
         let hoverRateGain = SIMD3<Float>(7.2 * s.authority, 7.2 * s.authority, 4.8 * s.authority)
         let hoverAngularDamping = SIMD3<Float>(2.8, 2.8, 2.2)
         // The hover authority is made by the lift rotors. With them stopped — disarmed, crashed —
@@ -3318,7 +3500,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let inertiaRates = resolvedRateOrderedInertia(
             context: context,
             fallback: s.aero.inertiaTensor,
-            minimum: 0.001
+            minimum: 0.001,
+            declared: s.aero.inertiaIsDeclared
         )
         let aeroAngularAccel = rotationalAcceleration(
             momentBody: s.aeroMomentBody,
@@ -3392,6 +3575,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         next.elevatorDeflection = s.elevatorFraction
         next.aileronDeflection = s.aileronFraction
         next.rudderDeflection = s.rudderFraction
+        next.controlSurfaceAnglesRad = SIMD3<Float>(s.aileronFraction*s.aero.maxAileronRad,
+            s.elevatorFraction*s.aero.maxElevatorRad, s.rudderFraction*s.aero.maxRudderRad)
         next.vtolWingLiftRatio = s.wingLiftRatio
         next.vtolWingborneBlend = s.wingborneBlend
         next.vtolTransitionProgress = s.vtolTransitionProgress
@@ -3593,7 +3778,8 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
         let inertiaRates = resolvedRateOrderedInertia(
             context: context,
             fallback: s.aero.inertiaTensor,
-            minimum: 0.001
+            minimum: 0.001,
+            declared: s.aero.inertiaIsDeclared
         )
         let aeroAngularAccel = rotationalAcceleration(
             momentBody: s.aeroMomentBody,
@@ -4173,9 +4359,12 @@ final class SimpleDronePhysicsEngine: DronePhysicsEngine {
     private func resolvedRateOrderedInertia(
         context: DroneSimulationContext,
         fallback: SIMD3<Float>,
-        minimum: Float
+        minimum: Float,
+        declared: Bool = false
     ) -> SIMD3<Float> {
-        guard let properties = resolvedGraphMassProperties(context: context) else {
+        // An airframe that declares its own radii of gyration is flown on them. The graph
+        // spreads mass evenly over the visual, which is the assumption a declaration replaces.
+        guard !declared, let properties = resolvedGraphMassProperties(context: context) else {
             // The fixed-wing fallback tensor is built from the already
             // fuel-adjusted mass, so it tracks a burning tank on its own.
             return simd_max(fallback, SIMD3<Float>(repeating: minimum))

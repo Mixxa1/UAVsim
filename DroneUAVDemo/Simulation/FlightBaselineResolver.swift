@@ -31,6 +31,10 @@ struct ResolvedFlightBaseline: Hashable {
     /// airframe whose tuning does not state its own.
     var acroRateLimitsRadPerSec: SIMD3<Float> = SIMD3<Float>(5.236, 5.236, 2.618)
 
+    /// The class minimum-safe figure the landing and ground references are taken from when
+    /// the flight one has been derived per airframe. `nil` everywhere else.
+    var landingMinimumThrottle: Float? = nil
+
     var hoverCapable: Bool {
         switch vehicleType {
         case .multicopter, .helicopter, .hybridVTOL, .custom:
@@ -74,7 +78,7 @@ struct ResolvedFlightBaseline: Hashable {
     var landingThrottleReference: Float {
         switch vehicleType {
         case .fixedWing:
-            return (effectiveMinimumSafeFlightThrottle * glideThrottleFactor).clamped(to: 0.18...0.70)
+            return ((landingMinimumThrottle ?? effectiveMinimumSafeFlightThrottle) * glideThrottleFactor).clamped(to: 0.18...0.70)
         case .hybridVTOL:
             return (effectiveTransitionThrottle * 0.92).clamped(to: 0.22...0.78)
         case .multicopter, .helicopter, .custom:
@@ -91,7 +95,7 @@ struct ResolvedFlightBaseline: Hashable {
     var groundedIdleThreshold: Float {
         hoverCapable
             ? max(0.16, hoverLockThrottle * 0.55)
-            : max(0.18, effectiveMinimumSafeFlightThrottle * 0.55)
+            : max(0.18, (landingMinimumThrottle ?? effectiveMinimumSafeFlightThrottle) * 0.55)
     }
 }
 
@@ -160,14 +164,18 @@ enum FlightBaselineResolver {
 
             let loadDelta = max(0.0, normalizedLoadFactor - 1.0)
             let payloadPenalty = payloadRatio * fixedWing.payloadCruisePenaltyFactor
-            let effectiveCruiseThrottle = (fixedWing.cruiseThrottleBaseline * (1.0 + loadDelta * 0.28 + payloadPenalty * 0.22)).clamped(to: 0.28...0.86)
-            let effectiveMinimumSafeFlightThrottle = (fixedWing.minimumSafeFlightThrottle * (1.0 + loadDelta * 0.24 + payloadPenalty * 0.18)).clamped(to: 0.24...0.80)
+            // The lower bounds keep an estimated class figure inside a plausible band. A figure
+            // worked out from the airframe's own engine is not an estimate of that kind, and the
+            // band would put back exactly the power it was derived to take away.
+            let derived = tuning.source == .derived
+            let effectiveCruiseThrottle = (fixedWing.cruiseThrottleBaseline * (1.0 + loadDelta * 0.28 + payloadPenalty * 0.22)).clamped(to: (derived ? 0.0 : 0.28)...0.86)
+            let effectiveMinimumSafeFlightThrottle = (fixedWing.minimumSafeFlightThrottle * (1.0 + loadDelta * 0.24 + payloadPenalty * 0.18)).clamped(to: (derived ? 0.0 : 0.24)...0.80)
             let effectiveClimbThrottle = (fixedWing.climbThrottleBaseline * (1.0 + loadDelta * 0.32 + payloadPenalty * 0.26)).clamped(to: 0.35...0.92)
             let stallProtectionBias = (fixedWing.stallProtectionBias + loadDelta * 0.14 + payloadPenalty * 0.12).clamped(to: 0.10...0.55)
             let glideThrottleFactor = fixedWing.glideThrottleFactor.clamped(to: 0.48...0.82)
             let payloadCruisePenaltyMultiplier = (1.0 - payloadPenalty * 0.24).clamped(to: 0.72...1.00)
 
-            return ResolvedFlightBaseline(
+            var resolved = ResolvedFlightBaseline(
                 vehicleType: .fixedWing,
                 tuningSource: tuning.source,
                 massSourceQuality: vehicleMassModel.massSourceQuality,
@@ -190,6 +198,11 @@ enum FlightBaselineResolver {
                 glideThrottleFactor: glideThrottleFactor,
                 payloadCruisePenaltyMultiplier: payloadCruisePenaltyMultiplier
             )
+            // Same load scaling and the same band the class figure has always had.
+            resolved.landingMinimumThrottle = fixedWing.landingThrottleBaseline.map {
+                ($0 * (1.0 + loadDelta * 0.24 + payloadPenalty * 0.18)).clamped(to: 0.24...0.80)
+            }
+            return resolved
         case .hybridVTOL:
             guard let hybrid = tuning.hybridVTOL else {
                 return fallbackResolvedBaseline(tuning: tuning, totalMass: totalMass, normalizedLoadFactor: normalizedLoadFactor, payloadRatio: payloadRatio, massSourceQuality: vehicleMassModel.massSourceQuality)

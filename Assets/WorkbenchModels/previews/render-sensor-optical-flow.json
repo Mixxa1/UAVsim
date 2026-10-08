@@ -1,0 +1,19 @@
+[
+  {
+    "bounds_max_m" : [
+      0.0091080004349350929,
+      0.0051262723281979561,
+      0.0091080013662576675
+    ],
+    "bounds_min_m" : [
+      -0.0091080004349350929,
+      -0.0063200006261467934,
+      -0.009850500151515007
+    ],
+    "id" : "sensor-optical-flow",
+    "imported_triangles" : 14900,
+    "meshes" : 49,
+    "scene_kit_import" : "passed",
+    "textured_materials" : 35
+  }
+]

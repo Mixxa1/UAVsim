@@ -26,6 +26,8 @@ struct UAVProfileExtraSpecsView: View {
             infoRow(localized("uav.card.role"), entry.profile.localizedMissionRole ?? localized("common.not_specified"))
             infoRow(localized("uav.card.status"), entry.profile.specConfidence.catalogTitle)
 
+            UAVFlightCardSection(profile: entry.runtimeProfile)
+
             if let armamentCapabilityNote = entry.profile.localizedArmamentCapabilityNote {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("uav.card.armament_note")
@@ -66,5 +68,57 @@ struct UAVProfileExtraSpecsView: View {
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+}
+
+/// The airframe's flight card inside its catalogue card: each figure the entry declares beside
+/// the one the solver produces when the aircraft is flown for it.
+///
+/// Flown when the card is opened, off the main thread, and once: a card takes a tenth of a second
+/// in a release build and a second or two in a debug one, and eighty of them at launch is not a
+/// cost a list of airframes should have.
+struct UAVFlightCardSection: View {
+    let profile: DroneModelProfile
+    @State private var card: AirframeFlightCard?
+    @State private var isFlown = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(L10n.s("uav.card.flight_card"))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                Spacer(minLength: 4)
+                if !isFlown { ProgressView().controlSize(.mini) }
+            }
+            if let card {
+                ForEach(card.lines, id: \.quantity) { line in
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text(WorkbenchFlightPassportText.name(line.quantity, airframeClass: card.airframeClass))
+                            .font(.caption2)
+                            .foregroundStyle(GroundControlPalette.textSecondary)
+                        Spacer(minLength: 6)
+                        Text(WorkbenchFlightPassportText.pair(line))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(GroundControlPalette.textPrimary)
+                        Circle()
+                            .fill(WorkbenchFlightPassportText.color(line.verdict))
+                            .frame(width: 6, height: 6)
+                    }
+                    .help(WorkbenchFlightPassportText.band(line.quantity))
+                }
+            } else if isFlown {
+                Text(L10n.s("uav.card.flight_card.none"))
+                    .font(.caption2)
+                    .foregroundStyle(GroundControlPalette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.top, 4)
+        .task(id: profile.id) {
+            isFlown = false
+            card = await AirframeFlightCardCache.shared.card(for: profile)
+            isFlown = true
+        }
     }
 }

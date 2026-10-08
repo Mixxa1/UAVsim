@@ -222,8 +222,9 @@ final class FuelBurnService {
                 if let measured = input.shaftPowerKW {
                     // Real delivered power from the engine model. An idling engine
                     // still burns, so there is a floor rather than a hard zero.
+                    // `measured` is one engine's shaft; every engine burns.
                     let ratedPowerKW = input.powerplant.totalRatedShaftPowerKW ?? 0.0
-                    shaftPowerKW = max(measured, ratedPowerKW * 0.04)
+                    shaftPowerKW = max(measured * Float(input.powerplant.engineCount), ratedPowerKW * 0.04)
                 } else {
                     let ratedPowerKW = input.powerplant.totalRatedShaftPowerKW ?? 0.0
                     // A naturally aspirated piston engine loses power with density

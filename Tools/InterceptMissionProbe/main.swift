@@ -179,9 +179,17 @@ var attackerSource = InterceptObservationSource(vehicleID: InterceptCallsign.att
     orientation: simd_quatf(angle: 0, axis: SIMD3<Float>(0, 1, 0)), video: clean,
     hasLineOfSight: true, cameraFunctional: true)
 let observerSource = InterceptObservationSource(vehicleID: InterceptCallsign.observer, role: .observer, position: SIMD3<Float>(24, 35, -35),
-    orientation: attackerSource.orientation, video: clean, hasLineOfSight: true, cameraFunctional: true)
+    orientation: attackerSource.orientation, video: clean, hasLineOfSight: true, cameraFunctional: true,
+    nominalVideoBitrateBPS: 1_000_000, videoLinkPreset: .genericDigital)
 observation.register(attackerSource)
 observation.register(observerSource)
+var decoderHandoff = observation
+check(decoderHandoff.select(InterceptCallsign.observer), "a receiving observer can supply the decoder")
+let selectedDecoder = decoderHandoff.active!
+let observerParameters = DigitalVideoRFMapper().parameters(for: selectedDecoder.video,
+    nominalBitrateBPS: selectedDecoder.nominalVideoBitrateBPS!, linkPreset: selectedDecoder.videoLinkPreset!)
+check(!observerParameters.requiresPostProcessing,
+      "a clean observer is decoded against its own bitrate rather than a different carrier's bitrate")
 attackerSource.video.health = .degraded
 observation.register(attackerSource)
 _ = observation.step(now: 0, noSignalHold: 1)

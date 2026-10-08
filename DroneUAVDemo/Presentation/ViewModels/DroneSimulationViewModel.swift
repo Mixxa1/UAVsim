@@ -69,7 +69,9 @@ private struct DroneControlInputBuilder {
             isArmed: isArmed,
             mode: mode,
             controlMode: controlMode,
-            vtolTransitionLever: Float(controls.vtolTransitionLever)
+            vtolTransitionLever: Float(controls.vtolTransitionLever),
+            flapCommand: controls.flapCommand.map(Float.init),
+            landingGearDownCommand: controls.landingGearDownCommand
         )
     }
 
@@ -598,6 +600,17 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     @Published private(set) var mode: DroneFlightMode
     @Published private(set) var flightControlMode: FlightControlMode
     @Published private(set) var isSimulationRunning: Bool
+    @Published private(set) var flightTrainingProgress: FlightTrainingProgress?
+    /// True while a lesson transition is assembling an airframe or its shared training pad.
+    /// The instructor presents this state immediately so a synchronous SceneKit build never looks
+    /// like a dead button.
+    @Published private(set) var isPreparingFlightTraining = false
+    private var flightTrainingSession: FlightTrainingSession?
+    private let flightTrainingScene = FlightTrainingSceneLayer()
+    private var preparingTrainingAircraft = false
+    private var flightTrainingEnvironmentReady = false
+    private var flightTrainingPreparationTask: Task<Void, Never>?
+    private let instructorProgressDefaults: UserDefaults
     /// `HH:MM` in the world's own time. Published separately from `worldClock` so the HUD
     /// redraws once a displayed minute changes rather than on every tick.
     @Published private(set) var worldClockText: String = "12:00"
@@ -977,6 +990,10 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     /// Render-only projection of the physical VIDEO link. Reading it cannot mutate or feed back
     /// into RF Core; the view observes `rfLinkEvaluations` and receives a fresh NTSC control set.
     var analogNTSCParameters: AnalogNTSCParameters {
+        if isObservingRemoteInterceptFeed {
+            guard let evaluation = interceptSession?.observation.active?.videoEvaluation else { return .clean }
+            return AnalogVideoRFMapper().parameters(for: evaluation)
+        }
         guard let evaluation = rfLinkEvaluations[.video] else { return .clean }
         return AnalogVideoRFMapper().parameters(for: evaluation)
     }
@@ -1375,7 +1392,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         // Online trials and mission scenarios are transient runs, not saveable projects — exiting
         // them should return to the menu directly, without the "save your project?" prompt (which
         // otherwise made the mission Exit button appear to do nothing useful).
-        !simulationRunMode.isOnlineTrial && !hasMissionScenario
+        !simulationRunMode.isOnlineTrial && !hasMissionScenario && flightTrainingSession == nil
     }
 
     /// Which cameras the selected airframe actually carries. Falls back to a pilot-view aircraft
@@ -1454,7 +1471,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         // FPV needs a camera to fly from. A survey VTOL flown from a tablet, or a target drone,
         // has none — offering the mode would show a feed from a device that is not fitted.
         var modes: [CameraMode] = [.free, .follow, .orbit, .top]
-        if activeCameraFitment.hasPilotView {
+        if isObservingRemoteInterceptFeed || activeCameraFitment.hasPilotView {
             modes.insert(.fpv, at: 3)
         }
         if payloadCameraOpticsState.isAvailable || rangefinderOpticsState.isAvailable || lidarOpticsState.isAvailable || hoseOpticsState.isAvailable || capsuleState.isAvailable || cameraConfiguration.mode == .payloadOptics {
@@ -1650,11 +1667,17 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     var activeVideoNominalBitrateBPS: Double {
-        (rfSystemManager?.configuration ?? resolvedRFConfiguration())
+        if isObservingRemoteInterceptFeed, let bitrate = interceptSession?.observation.active?.nominalVideoBitrateBPS {
+            return bitrate
+        }
+        return (rfSystemManager?.configuration ?? resolvedRFConfiguration())
             .logicalLinks.video?.qualityProfile.nominalBitrateBps ?? 25_000_000
     }
 
     var activeVideoLinkPreset: RFVideoLinkPreset {
+        if isObservingRemoteInterceptFeed, let preset = interceptSession?.observation.active?.videoLinkPreset {
+            return preset
+        }
         let configuration = rfSystemManager?.configuration ?? resolvedRFConfiguration()
         let mode = configuration.logicalLinks.video?.videoMode ?? .digital
         return configuration.logicalLinks.video?.videoLinkPreset
@@ -1902,6 +1925,13 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     /// of this graph.
     private(set) var componentGraph: VehicleComponentGraph = .empty
     private(set) var vehicleContactProfile: VehicleContactProfile = .empty
+    private var neutralVehicleContactProfile: VehicleContactProfile = .empty
+    private var cachedMechanizationModel: (profileID: String, model: AircraftMechanizationModel?)?
+    /// Approach guidance for a landing flown with flaps down, and the power it is asking for.
+    private var flapLandingGuidance = FixedWingFlapLandingGuidance()
+    private var flapLandingThrottle: Float?
+    /// The undercarriage state `vehicleContactProfile` was last built for.
+    private var appliedGearUnsupportedMask: UInt8 = 0
     private var pristineVehicleContactProfile: VehicleContactProfile = .empty
     private var vehicleMassProperties: VehicleMassProperties = .fallback
     /// Pristine rotor layout from the builder; `vehicleRotorModel` is the
@@ -2010,9 +2040,9 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     private let missionEventMapper = MissionEventMapper()
     private let missionPersistenceAdapter = MissionPersistenceAdapter()
     private let payloadProximityEffectModel = PayloadProximityEffectModel()
-    private let missionReplayRecorder = MissionReplayRecorder()
+    private let missionReplayRecorder = MissionReplayRecorder(archivesVisualAssetsInBackground: true)
     private let missionReportBuilder = MissionReportBuilder()
-    let replayLibraryViewModel = ReplayLibraryViewModel()
+    let replayLibraryViewModel: ReplayLibraryViewModel
 
     private var vtolAutopilotPhase: VTOLAutopilotPhase = .idleGrounded
     private var state: DroneState
@@ -3216,8 +3246,13 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         onlineRuntimeContext: OnlineTrialRuntimeContext? = nil,
         onlineSnapshotTransport: OnlineTrialSnapshotTransport? = nil,
         onlineSharedEventTransport: OnlineSharedEventTransport? = nil,
-        missionScenarioContext: MissionScenarioConfiguration? = nil
+        missionScenarioContext: MissionScenarioConfiguration? = nil,
+        replayLibraryViewModel: ReplayLibraryViewModel? = nil,
+        instructorProgressDefaults: UserDefaults = .standard,
+        deferInitialEnvironmentPreparation: Bool = false
     ) {
+        self.replayLibraryViewModel = replayLibraryViewModel ?? ReplayLibraryViewModel()
+        self.instructorProgressDefaults = instructorProgressDefaults
         self.missionScenarioConfiguration = missionScenarioContext
         self.physicsEngine = physicsEngine
         self.keyboardInputService = keyboardInputService
@@ -3447,7 +3482,13 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         self.sceneController.navigationCameraModuleProvider = { [weak self] in
             self?.activeFPVCameraModule
         }
-        sceneController.regenerateEnvironment(terrain)
+        // The instructor mounts the view model before it starts its course. Defer the first
+        // environment build there so Settings can immediately show the preparation overlay and
+        // the expensive SceneKit population does not make the launch click look frozen. Other
+        // entry points retain the eager environment contract used by normal free flight.
+        if !deferInitialEnvironmentPreparation {
+            sceneController.regenerateEnvironment(terrain)
+        }
         sceneController.setWorldBoundsVisible(isBoundaryBarrierVisible)
         rebuildVehicleComponentGraph()
         let initialLaunchDraft = defaultLaunchConfiguredDraft()
@@ -3499,12 +3540,16 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     deinit {
+        flightTrainingPreparationTask?.cancel()
         simulationTimer?.invalidate()
         keyboardInputService.stop()
         telemetryExporter.finalizeSession()
     }
 
     func stopRuntimeForExit() {
+        flightTrainingPreparationTask?.cancel()
+        flightTrainingPreparationTask = nil
+        isPreparingFlightTraining = false
         finishMissionReplayRecording()
         clearInterceptMission()
         simulationTimer?.invalidate()
@@ -3868,6 +3913,54 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     func setThrottle(_ value: Double) {
         guard canControlLocalVehicle else { return }
         updateControlValues({ $0.throttle = value }, markManual: true, fixedWingManualOverrideAxes: .altitude)
+    }
+
+    /// What the airframe's model declares. Present for every airframe with articulated
+    /// control surfaces, including those with neither flaps nor a retractable undercarriage.
+    var aircraftMechanizationConfiguration: AircraftMechanizationConfiguration? {
+        AircraftMechanizationConfiguration.forProfile(selectedDroneProfile.id)
+    }
+    /// Flaps and retractable undercarriage of the selected airframe; `nil` when it has neither.
+    var aircraftMechanizationModel: AircraftMechanizationModel? {
+        if let cached = cachedMechanizationModel, cached.profileID == selectedDroneProfile.id {
+            return cached.model
+        }
+        let model = AircraftMechanizationModel.shared(for: selectedDroneProfile, uav: activeUAVProfile)
+        cachedMechanizationModel = (selectedDroneProfile.id, model)
+        return model
+    }
+    var aircraftMechanizationState: AircraftMechanizationState { state.mechanization }
+    var controlSurfaceAnglesDegrees: SIMD3<Float> { state.controlSurfaceAnglesRad * (180 / .pi) }
+    var canAdjustMechanization: Bool { canControlLocalVehicle }
+    var equivalentAirspeedMps: Float { state.equivalentAirspeedMps }
+    /// Where the undercarriage selector stands, whoever put it there.
+    var landingGearLeverDown: Bool { state.mechanization.gearSelectedDown }
+    /// Where the flap selector stands, as a share of full travel.
+    var flapLeverPosition: Double { Double(state.mechanization.flapSelection) }
+    /// A lever in AUTO is worked by the autopilot in its own modes and by nobody in manual flight.
+    var isLandingGearLeverAutomatic: Bool { controlValues.landingGearDownCommand == nil }
+    var isFlapLeverAutomatic: Bool { controlValues.flapCommand == nil }
+
+    /// `nil` returns the lever to AUTO. A position is the operator's from then on: the
+    /// autopilot does not move a lever it has been given a position for.
+    func setFlapCommand(_ fraction: Double?) {
+        guard canControlLocalVehicle, aircraftMechanizationConfiguration?.hasFlaps == true else { return }
+        updateControlValues({ $0.flapCommand = fraction.map { $0.isFinite ? min(1, max(0, $0)) : 0 } }, markManual: false)
+    }
+
+    /// One press, one position: up → takeoff → landing → up, from wherever the selector stands.
+    /// The press takes the lever from the autopilot; AUTO is given back from the panel.
+    func stepFlapLever() {
+        let takeoff = Double(AircraftMechanizationCharacteristics.takeoffFlapSetting)
+        let current = flapLeverPosition
+        setFlapCommand(current < takeoff - 0.05 ? takeoff : current < 0.95 ? 1 : 0)
+    }
+
+    /// `nil` returns the lever to AUTO. A selected position is obeyed as it stands: no height,
+    /// speed or weight-on-wheels condition comes between the operator's lever and the legs.
+    func setLandingGearCommand(_ down: Bool?) {
+        guard canControlLocalVehicle, aircraftMechanizationConfiguration?.retractableGear == true else { return }
+        updateControlValues({ $0.landingGearDownCommand = down }, markManual: false)
     }
 
     func setPayloadType(_ type: PayloadType) {
@@ -4516,6 +4609,10 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     func reset() {
+        if flightTrainingSession != nil, !preparingTrainingAircraft {
+            restartFlightTrainingLesson()
+            return
+        }
         finishMissionReplayRecording()
         // An interception run belongs to the aircraft being respawned: its actors, effects and
         // event ledger go with it. `restartInterceptMission()` puts a fresh one back afterwards
@@ -4813,6 +4910,11 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 values.throttle = max(values.throttle, Double(baseline.takeoffThrottleReference))
                 values.vtolTransitionLever = 0.0
             }, markManual: false)
+        }
+        if let training = flightTrainingProgress, training.phase == .flying {
+            // A visible sidebar puts the gamepad into UI navigation. After pressing Takeoff the
+            // learner needs the sticks back to climb, including on the independent final course.
+            setActiveControlModule(nil)
         }
     }
 
@@ -5803,6 +5905,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
 
     func selectDroneModel(id: String) {
         guard canControlLocalVehicle else { return }
+        guard flightTrainingSession == nil || preparingTrainingAircraft else { return }
         let canonicalID = LIPODroneModelRepository.canonicalModelID(id)
         guard let profile = availableDroneProfiles.first(where: { $0.id == canonicalID }) else {
             return
@@ -5826,7 +5929,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         fuelState = Self.initialFuelState(for: activeUAVProfile)
         rebuildFuelPropulsionBackend()
         reset()
-        if didChangeTerrain {
+        if didChangeTerrain && flightTrainingSession == nil {
             regenerateEnvironment()
         }
     }
@@ -5898,7 +6001,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         // Guarded here rather than only in `availableCameraModes`, because the keyboard reaches
         // this directly: pressing the FPV key on an airframe with no pilot camera would otherwise
         // open a feed from a device that is not fitted.
-        if mode == .fpv, !activeCameraFitment.hasPilotView {
+        if mode == .fpv, !isObservingRemoteInterceptFeed, !activeCameraFitment.hasPilotView {
             return
         }
 
@@ -6309,17 +6412,23 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         bindingsViewModel.endCapture()
     }
 
-    func setBindingsPanelVisible(_ visible: Bool) {
+    func setBindingsPanelVisible(_ visible: Bool, showKeys: Bool = false) {
         guard bindingsViewModel.isPresented != visible else {
             return
         }
 
         if visible {
-            bindingsViewModel.present()
+            bindingsViewModel.present(startWithKeys: showKeys)
             setControllerHubVisible(false)
             controllerUIBridge.clearSurfaceTargets("simulation-workspace")
         } else {
             bindingsViewModel.dismiss()
+            if isInstructorFlight {
+                keyboardInputService.resetTransientState()
+                inputManager.reset()
+                resetFlightControlRouting()
+                objectWillChange.send()
+            }
             controllerUIBridge.clearSurfaceTargets("keybindings-sheet")
             controllerUIBridge.invalidateSurfaceLayout("simulation-workspace", resetCursor: true)
         }
@@ -7057,6 +7166,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     func performAutosaveIfNeeded() {
+        guard flightTrainingSession == nil else { return }
         let snapshot = buildProjectSnapshot()
         try? projectStorage.autosave(projectID: currentProjectID, snapshot: snapshot)
     }
@@ -7512,11 +7622,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         }
         let targetCourse = isTransitingTarget || isDelivery ? SIMD3<Float>(0, 0, 1) : SIMD3<Float>(0, 0, -1)
 
-        let target = settings.targetsGroundVehicle ? adapter.makeGroundActor(
-            id: InterceptCallsign.target, model: settings.groundVehicleModel ?? .cabover,
-            position: groundVehicleSpawn(dock: dock, offset: SIMD2<Float>(0, -65)),
-            adapterProfile: targetProfile, seed: config.parameters.seed &+ 101
-        ) : adapter.makeActor(
+        let target = adapter.makeActor(
             id: InterceptCallsign.target,
             role: .target,
             profile: targetProfile,
@@ -7922,6 +8028,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     /// the physics step so everything it reads has already been resolved.
     private func updateInterceptMission(deltaTime: Float) {
         guard let session = interceptSession else { return }
+        sceneController.updateChargeEnvironmentDamage(deltaTime: deltaTime)
         // The scene needs the same ground sampler the session flies against, so wreckage lands on
         // the terrain rather than on the y = 0 plane its old parabola assumed, and the same wind
         // the aircraft feel.
@@ -7962,7 +8069,10 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 hasLineOfSight: interceptLineOfSight[actor.id] ?? false,
                 cameraFunctional: InterceptRFDamageAdapter.cameraFactor(graph: actor.graph, failures: actor.failures) > 0.05,
                 controlRSSIDBm: actor.controlEvaluation?.rf.receivedPowerDBm,
-                controlLQ: actor.controlEvaluation.map { linkQualityPercent(for: $0) }
+                controlLQ: actor.controlEvaluation.map { linkQualityPercent(for: $0) },
+                nominalVideoBitrateBPS: actor.nominalVideoBitrateBPS,
+                videoLinkPreset: actor.videoLinkPreset,
+                videoEvaluation: actor.videoEvaluation
             ))
         }
         let playerControl = rfLinkEvaluations[.control]
@@ -8032,6 +8142,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         let records = events.compactMap { event -> MissionEvent? in
             guard interceptEventGate?.accept(event) == true else { return nil }
             if case .effect(let effect) = event.kind, effect.kind == .explosion {
+                sceneController.applyChargeEnvironmentImpact(effect)
                 simulationAudio.playOneShot(.chargeDetonation, at: effect.position,
                     delaySeconds: simulationAudio.propagationDelay(from: effect.position))
             }
@@ -8835,6 +8946,32 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     private func tick() {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
+        if isPreparingFlightTraining {
+            // Keep the world frozen while a deferred lesson transition is assembling its SceneKit
+            // graph. The preparation flag is published before the work starts, so this branch also
+            // prevents an old aircraft from consuming the new lesson's first input.
+            lastTimestamp = now
+            return
+        }
+        if flightTrainingProgress?.pausesFlight == true || (isInstructorFlight && bindingsViewModel.isPresented) {
+            lastTimestamp = now
+            if !bindingsViewModel.isPresented {
+                // Briefings freeze flight, but their interface shortcuts still need to work.
+                // Flight commands are discarded until the learner starts the objective.
+                var interfaceInput = updateInputPipeline(deltaTime: 0)
+                interfaceInput.actions = interfaceInput.actions.filter { action in
+                    switch action {
+                    case .openFlightPanel, .openCameraPanel, .toggleMissionMap, .toggleTelemetryHUD,
+                         .toggleControlPanel, .toggleToolPanel, .selectFreeCamera, .selectChaseCamera,
+                         .selectOrbitCamera, .selectFPVCamera, .selectTopCamera, .cycleCameraMode, .toggleFPV:
+                        return true
+                    default: return false
+                    }
+                }
+                processInputActions(using: interfaceInput)
+            }
+            return
+        }
 
         // v1.4.6: drive interacting → activeIdle transition (key window, no input for 1 s).
         // The reverse (activeIdle → interacting) is triggered immediately by noteUserInteraction().
@@ -9675,6 +9812,9 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         #endif
 
         let control = buildControlInput(from: controlValues)
+        // The state can be replaced outside the step (a reset, a restored project); the
+        // profile handed to the engine must be the one for the undercarriage it is given.
+        refreshMechanizationContacts()
         var context = DroneSimulationContext(
             profile: selectedDroneProfile,
             activeUAVProfile: activeUAVProfile,
@@ -9686,7 +9826,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             vehicleMassModel: vehicleMassModel,
             fixedWingLaunchDynamics: activeFixedWingLaunchDynamics,
             fixedWingThrottleCeiling: selectedDroneProfile.airframeClass == .fixedWing
-                ? fixedWingAirspeedLimitedThrottleCeiling()
+                ? fixedWingThrottleCeilingWithLandingGuidance()
                 : nil,
             vehicleMassProperties: vehicleMassProperties,
             contactProfile: vehicleContactProfile,
@@ -9702,6 +9842,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             fuelPropulsion: fuelPropulsionBackend
         )
         context.rotationalDragElements = vehicleRotationalDragElements
+        context.neutralContactProfile = neutralVehicleContactProfile
+        context.mechanization = aircraftMechanizationModel
 
         let previousState = state
         let physicsStart = CACurrentMediaTime()
@@ -9715,6 +9857,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             deltaTime: dt
         )
         enforceRuntimeSafetyAndBounds(context: "tick.physics")
+        refreshMechanizationContacts()
+        recordMechanizationFailures(previous: previousState.mechanization)
         applySupportSurfaceConstraint(previousState: previousState)
         applyWaterImmersionIfNeeded(deltaTime: dt)
         applyPayloadSelfInteractionIfNeeded(deltaTime: dt)
@@ -10043,7 +10187,11 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 verticalSpeedMps: abs(state.velocity.y),
                 throttle: state.throttle,
                 maneuverAggressiveness: maneuverAggressiveness,
-                propulsionDrawsFromBattery: fuelPropulsionBackend == nil
+                propulsionDrawsFromBattery: fuelPropulsionBackend == nil,
+                rotorBorneFraction: selectedDroneProfile.airframeClass == .hybridVTOL
+                    && !physicalState.isGroundRestState
+                    ? 1.0 - state.vtolWingborneBlend : 0.0,
+                cruiseReferenceThrottle: resolvedFlightBaseline().cruiseReferenceThrottle
             ),
             deltaTime: dt
         )
@@ -10274,6 +10422,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
 
         refreshMissionStatus()
         flushDamageEventAdapters()
+        updateFlightTraining(deltaTime: dt)
         recordMissionReplayFrameIfNeeded()
         recordMissionReplayWarningsIfNeeded()
         checkpointCompletedMissionIfNeeded()
@@ -12950,6 +13099,11 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 hover()
             case .requestReset:
                 reset()
+            case .toggleLandingGear:
+                // Takes the lever from the autopilot and puts it in the other position.
+                setLandingGearCommand(!landingGearLeverDown)
+            case .stepFlaps:
+                stepFlapLever()
             case .dropPayload:
                 // The same key does the same thing: it lets go of what the aircraft is carrying.
                 // On the delivery side that is the mission's one command, so it goes there first.
@@ -12962,6 +13116,20 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 arm()
             case .disarmAircraft:
                 disarm()
+            case .requestTakeoff:
+                takeoff()
+            case .requestLanding:
+                land()
+            case .activateAutoPath:
+                activateAutoPath()
+            case .takeManualControl:
+                takeManualControl()
+            case .activateAltitudeHold:
+                activateFixedWingAssist(.altitudeHold)
+            case .openFlightPanel:
+                setActiveControlModule(.flightOps)
+            case .openCameraPanel:
+                setActiveControlModule(.camera)
             case .toggleFPVLens:
                 toggleFPVLens()
             case let .selectCameraStation(index):
@@ -13484,6 +13652,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 updateFixedWingLaunchSequence(deltaTime: deltaTime)
             } else if mode == .landing {
                 updateHybridVTOLLandingCommand(deltaTime: deltaTime)
+                updateFixedWingFlapLanding(deltaTime: deltaTime)
             }
         }
     }
@@ -14872,9 +15041,23 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         let defaultSafeTravelAltitude = min(terrain.maxFlightAltitude - 2.0, max(homePosition.y + 6.0, state.position.y + 2.5))
         let safeTravelAltitude: Float = {
             if selectedDroneProfile.airframeClass == .hybridVTOL {
-                return hybridVTOLRouteAltitude(
+                // Latched on the way in, like the fixed wing's below — and for a harder reason.
+                //
+                // Read from the aircraft's altitude every tick, this was a target that moved with
+                // the aircraft. The route home is certified at one altitude and identified by it,
+                // so a new altitude each tick was a new route each tick: the cursor reset before
+                // it could take a step, and the escape ladder then stacked its storeys on a base
+                // that rose as fast as the aircraft climbed to meet it. A WingtraRAY sent home
+                // 790 m out held its position exactly and climbed at 1.85 m/s — 55 m to 119 m in
+                // one recording, 96 m to 230 m in the next — until the operator took it back.
+                if let fixedWingReturnHomeTravelAltitude {
+                    return fixedWingReturnHomeTravelAltitude
+                }
+                let entryAltitude = hybridVTOLRouteAltitude(
                     defaultAltitude: max(10.0, homePosition.y + 8.0, state.position.y)
                 )
+                fixedWingReturnHomeTravelAltitude = entryAltitude
+                return entryAltitude
             }
             if selectedDroneProfile.airframeClass == .fixedWing {
                 if let fixedWingReturnHomeTravelAltitude {
@@ -20238,7 +20421,10 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         if shouldSampleAim {
             aimedIndex = sceneController.updateHoseAimAndSpray(
                 fireTreeNodes: sceneController.fireTreeNodes,
-                isSpraying: isSpraying
+                isSpraying: isSpraying,
+                burningIndices: fireResponseRuntime.map { runtime in
+                    Set(runtime.treeStatuses.indices.filter { if case .burning = runtime.treeStatuses[$0] { return true }; return false })
+                }
             )
         } else {
             aimedIndex = nil
@@ -20326,7 +20512,9 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 roll: controlValues.roll,
                 pitch: controlValues.pitch,
                 yaw: controlValues.yaw,
-                throttle: controlValues.throttle
+                throttle: controlValues.throttle,
+                flapCommand: controlValues.flapCommand,
+                landingGearDownCommand: controlValues.landingGearDownCommand
             ),
             abstractParameters: ProjectSnapshot.AbstractParameters(
                 massKg: abstractParameters.massKg,
@@ -20552,7 +20740,9 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             roll: snapshot.controlValues.roll,
             pitch: snapshot.controlValues.pitch,
             yaw: snapshot.controlValues.yaw,
-            throttle: snapshot.controlValues.throttle
+            throttle: snapshot.controlValues.throttle,
+            flapCommand: snapshot.controlValues.flapCommand,
+            landingGearDownCommand: snapshot.controlValues.landingGearDownCommand
         )
 
         if let weatherPreset = WeatherPreset(rawValue: snapshot.weather.presetRaw) {
@@ -20844,6 +21034,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         vehicleContactProfile = pristineVehicleContactProfile
             .applyingDeformations(from: graph)
             .removing(componentIDs: detachedIDs)
+        neutralVehicleContactProfile = vehicleContactProfile
+        refreshMechanizationContacts(force: true)
         vehicleMassProperties = graph.massProperties
         pristineRotorModel = output.rotorModel
         refreshDamagePhysicsModels()
@@ -20861,6 +21053,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         vehicleContactProfile = pristineVehicleContactProfile
             .applyingDeformations(from: componentGraph)
             .removing(componentIDs: detachedIDs)
+        neutralVehicleContactProfile = vehicleContactProfile
+        refreshMechanizationContacts(force: true)
         var model = pristineRotorModel
         let escFactor = VehicleRotorModel.motorThrustFactor(
             integrity: componentGraph.integrity(id: "esc")
@@ -21432,7 +21626,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             pathfindingTimeMs: cachedDiagnostics.pathfindingTimeMs,
             activeObjectCount: cachedDiagnostics.activeObjectCount,
             activePhysicsBodyCount: cachedDiagnostics.activePhysicsBodyCount,
-            activeParticleCount: cachedDiagnostics.activeParticleCount
+            activeParticleCount: cachedDiagnostics.activeParticleCount,
+            mechanization: mechanizationReadout()
         )
     }
 
@@ -31198,7 +31393,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             if continueMissionOnFiberLoss {
                 controlLinkFailsafeStage = .missionContinued
             } else {
-                setFlightMode(.returnHome, reason: trigger == .fiberBroken ? "fiber_link_broken" : "radio_link_lost")
+                activateReturnHome(reason: trigger == .fiberBroken ? "fiber_link_broken" : "radio_link_lost")
                 controlLinkFailsafeStage = .returnedHome
             }
             return
@@ -31208,10 +31403,12 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             // The control link—not a video decoder freeze—is authoritative for RTH. Aircraft
             // equipped with a return-home policy enter the existing autopilot immediately even
             // outside a mission; video-only packet loss never calls this function.
-            setFlightMode(
-                .returnHome,
-                reason: trigger == .fiberBroken ? "fiber_link_broken" : "radio_link_lost"
-            )
+            //
+            // Through the same door the operator's own command uses. Setting the mode alone left
+            // everything that command resets — the route the aircraft had been flying, the
+            // planner's path to its last goal, the altitude ladder that leg had climbed — in
+            // place under a return that had never been told about any of it.
+            activateReturnHome(reason: trigger == .fiberBroken ? "fiber_link_broken" : "radio_link_lost")
             controlLinkFailsafeStage = .returnedHome
             return
         }
@@ -32079,8 +32276,108 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             roll: 0.0,
             pitch: 0.0,
             yaw: Double(state.orientation.z.radiansToDegrees),
-            throttle: isArmed && state.position.y > 0.10 ? Double(airborneThrottle) : 0.0
+            throttle: isArmed && state.position.y > 0.10 ? Double(airborneThrottle) : 0.0,
+            flapCommand: controlValues.flapCommand,
+            landingGearDownCommand: controlValues.landingGearDownCommand
         )
+    }
+
+    /// With flaps down the landing is flown on speed and path instead of a fixed attitude and
+    /// power setting. With the flaps up, and for every aircraft without them, nothing here
+    /// touches the stock landing.
+    private func updateFixedWingFlapLanding(deltaTime: Float) {
+        guard selectedDroneProfile.airframeClass == .fixedWing,
+              let model = aircraftMechanizationModel, model.configuration.hasFlaps,
+              !physicalState.isGroundRestState else {
+            flapLandingGuidance.reset()
+            flapLandingThrottle = nil
+            return
+        }
+        guard let command = flapLandingGuidance.command(
+            state: state,
+            heightAboveGroundM: state.position.y - currentGroundHeight(),
+            characteristics: model.characteristics,
+            // A dirty, heavy aircraft holds a three-degree path on close to cruise power.
+            maximumThrottle: 1.0,
+            dt: deltaTime
+        ) else {
+            flapLandingThrottle = nil
+            return
+        }
+        flapLandingThrottle = command.throttle
+        updateControlValues({ values in
+            values.pitch = Double(command.pitchRad.radiansToDegrees)
+            values.throttle = Double(command.throttle)
+        }, markManual: false)
+    }
+
+    /// The landing guidance's power is passed as a ceiling as well as a command: in the
+    /// landing mode the solver floors the throttle at the stock setting, and a flapped
+    /// approach needs less than that.
+    private func fixedWingThrottleCeilingWithLandingGuidance() -> Float? {
+        let speedLimited = fixedWingAirspeedLimitedThrottleCeiling()
+        guard mode == .landing, let landing = flapLandingThrottle else {
+            if mode != .landing, flapLandingGuidance.isActive {
+                flapLandingGuidance.reset()
+                flapLandingThrottle = nil
+            }
+            return speedLimited
+        }
+        return min(speedLimited ?? 1, landing)
+    }
+
+    private func mechanizationReadout() -> TelemetrySnapshot.MechanizationReadout? {
+        guard let model = aircraftMechanizationModel else { return nil }
+        let mechanization = state.mechanization
+        let gearKey: String? = !model.configuration.retractableGear ? nil
+            : mechanization.gearInTransit ? "mechanics.gear_moving"
+            : mechanization.gearExtension > 0.5 ? "mechanics.gear_locked_down" : "mechanics.gear_locked_up"
+        return TelemetrySnapshot.MechanizationReadout(
+            gearStatusKey: gearKey,
+            flapDegrees: model.configuration.hasFlaps ? mechanization.flapAngleRadians * 180 / .pi : nil,
+            loadRatio: max(mechanization.flapLoadRatio, mechanization.gearLoadRatio),
+            hasFailure: mechanization.hasFailure)
+    }
+
+    /// Rebuilds the contact profile for the legs that can carry the aircraft — on the tick a
+    /// leg locks, unlocks or fails, and when the profile underneath it changes. Every other
+    /// tick this is one comparison.
+    private func refreshMechanizationContacts(force: Bool = false) {
+        let mask = state.mechanization.gearUnsupportedMask
+        guard force || mask != appliedGearUnsupportedMask else { return }
+        appliedGearUnsupportedMask = mask
+        guard let model = aircraftMechanizationModel else { return }
+        vehicleContactProfile = model.contacts(neutralVehicleContactProfile, unsupportedMask: mask)
+    }
+
+    /// Flap panels, undercarriage doors and legs that failed during the step just taken.
+    /// They go into the same event stream as every other structural failure.
+    private func recordMechanizationFailures(previous: AircraftMechanizationState) {
+        let current = state.mechanization
+        guard current.hasFailure, current != previous else { return }
+        func record(_ type: UAVDamageEventType, component: String, reason: String) {
+            damageEventRecorder.record(timestamp: TimeInterval(simulationTime), type: type,
+                                       componentID: component, worldPoint: state.position, reason: reason)
+            #if DEBUG
+            print("[Mechanization] \(reason) EAS=\(String(format: "%.1f", state.equivalentAirspeedMps)) m/s")
+            #endif
+        }
+        if previous.flapPanelHealth.x > 0.5, current.flapPanelHealth.x <= 0.5 {
+            record(.componentDetached, component: "flap.left", reason: "flap_overspeed_separation_left")
+        }
+        if previous.flapPanelHealth.y > 0.5, current.flapPanelHealth.y <= 0.5 {
+            record(.componentDetached, component: "flap.right", reason: "flap_overspeed_separation_right")
+        }
+        if !previous.gearDoorsLost, current.gearDoorsLost {
+            record(.componentDetached, component: "gear.doors", reason: "gear_doors_overspeed_separation")
+        }
+        if !previous.gearCrushedOnGround, current.gearCrushedOnGround {
+            record(.componentFailed, component: "gear.main", reason: "gear_unlocked_ground_contact")
+        } else {
+            for leg in 0..<4 where previous.gearLegHealth[leg] > 0.5 && current.gearLegHealth[leg] <= 0.5 {
+                record(.componentFailed, component: "gear.main", reason: "gear_leg_overspeed_failure_\(leg)")
+            }
+        }
     }
 
     /// `collisionService.analyze()` / `resolveObstaclePenetration`'s "nearest obstacle distance"
@@ -32742,19 +33039,24 @@ private extension DroneSimulationViewModel {
         isMissionReplayRecording = true
     }
 
-    func saveMissionReplayCheckpoint() {
+    func saveMissionReplayCheckpoint(inBackground: Bool = false) {
         guard missionReplayRecorder.isRecording else { return }
         recordMissionReplayFrameIfNeeded(force: true)
         missionReplayRecorder.updateRFArtifacts(makeMissionReplayRFArtifacts())
         guard let session = missionReplayRecorder.checkpoint() else { return }
         let report = missionReportBuilder.buildReport(from: session)
-        replayLibraryViewModel.saveAndEnforce(session: session, report: report)
+        let archives = missionReplayRecorder.visualAssetArchives
+        if inBackground {
+            replayLibraryViewModel.saveAndEnforceInBackground(session: session, report: report, assetArchives: archives)
+        } else {
+            replayLibraryViewModel.saveAndEnforce(session: session, report: report, assetArchives: archives)
+        }
     }
 
     func checkpointCompletedMissionIfNeeded() {
         guard !didCheckpointMissionResult, missionReplayRecorder.isRecording else { return }
         guard hasCompletedRecordedMission else { return }
-        saveMissionReplayCheckpoint()
+        saveMissionReplayCheckpoint(inBackground: true)
         didCheckpointMissionResult = true
     }
 
@@ -32769,12 +33071,13 @@ private extension DroneSimulationViewModel {
         if missionReplayRecorder.isRecording {
             recordMissionReplayFrameIfNeeded(force: true)
             missionReplayRecorder.updateRFArtifacts(makeMissionReplayRFArtifacts())
+            let archives = missionReplayRecorder.visualAssetArchives
             missionReplayRecorder.stopSession(timestamp: missionReplayTimestamp())
-            lastMissionReplaySession = missionReplayRecorder.lastCompletedSession
             if let session = missionReplayRecorder.lastCompletedSession {
                 let report = missionReportBuilder.buildReport(from: session)
                 lastMissionReport = report
-                replayLibraryViewModel.saveAndEnforce(session: session, report: report)
+                lastMissionReplaySession = replayLibraryViewModel.saveAndEnforce(session: session, report: report,
+                    assetArchives: archives)
             }
         }
         isMissionReplayRecording = false
@@ -32813,6 +33116,7 @@ private extension DroneSimulationViewModel {
            !(interceptScene?.hasReplayAftermath ?? false),
            !(groundVehicleScene?.hasReplayAftermath ?? false),
            !sceneController.hasReplayDebris,
+           !sceneController.hasChargeEnvironmentAftermath,
            !(interceptSession?.actors.contains {
                !$0.snapshot.functionalState.canAttempt &&
                ![.grounded, .settled, .sliding, .rolling].contains($0.state.motionState)
@@ -32833,6 +33137,13 @@ private extension DroneSimulationViewModel {
 
     func recordMissionReplayFrameIfNeeded(force: Bool = false) {
         guard missionReplayRecorder.isRecording, force || missionReplayRecorder.needsFrame else { return }
+        #if DEBUG
+        let captureStartedAt = CACurrentMediaTime()
+        defer {
+            let milliseconds = (CACurrentMediaTime() - captureStartedAt) * 1000
+            if milliseconds > 20 { print("[ReplayCapture] world frame took \(milliseconds) ms") }
+        }
+        #endif
         let isAutopilotActive = missionExecutionState.status == .running || autoNavigationController.isActive
         let autopilotDescription: String? = isAutopilotActive ? mode.rawValue : nil
         let frame = MissionReplayFrame(
@@ -32887,7 +33198,9 @@ private extension DroneSimulationViewModel {
                     scale: $0.scale, wind: finiteVector(weather.windVector, fallback: .zero))
             }
         }
-        return MissionReplayWorldSnapshot(nodes: nodes, effects: effects)
+        effects += sceneController.chargeEnvironmentReplayEffects
+        let tracks = (interceptScene?.wheelTracks ?? []) + (groundVehicleScene?.wheelTracks ?? [])
+        return MissionReplayWorldSnapshot(nodes: nodes, effects: effects, wheelTracks: tracks.isEmpty ? nil : tracks)
     }
 
     func makeMissionReplayRFSnapshot() -> MissionReplayRFSnapshot {
@@ -32981,6 +33294,234 @@ private extension DroneSimulationViewModel {
                 MissionReplayImportedWorldReference(kind: .openData, identifier: $0.packageIdentifier)
             }
         )
+    }
+}
+
+extension DroneSimulationViewModel {
+    var isInstructorFlight: Bool { flightTrainingSession != nil }
+    var instructorPressedCommands: Set<KeyboardCommand> {
+        keyboardInputService.currentInputSnapshot().activeContinuousCommands
+    }
+
+    #if DEBUG
+    /// Headless integration probes run the same ticks without a timer, window or desktop input.
+    /// Keeping private storage access here also avoids cross-module Swift field-offset bugs.
+    @discardableResult
+    func advanceFlightTrainingForTesting(steps: Int, deltaTime: Float = 1.0 / 60.0) -> DroneState {
+        precondition(isInstructorFlight && steps >= 0 && deltaTime > 0)
+        simulationTimer?.invalidate()
+        simulationTimer = nil
+        let previousDelta = forcedDeltaTime
+        forcedDeltaTime = deltaTime
+        defer { forcedDeltaTime = previousDelta }
+        for _ in 0..<steps { tick() }
+        simulationAudio.stop()
+        return state
+    }
+    #endif
+
+    func startFlightTraining(deferPreparation: Bool = true) {
+        guard !isPreparingFlightTraining else { return }
+        flightTrainingPreparationTask?.cancel()
+        flightTrainingPreparationTask = nil
+        flightTrainingEnvironmentReady = false
+        flightTrainingSession = FlightTrainingSession()
+        flightTrainingProgress = flightTrainingSession?.progress
+        isSimulationRunning = true
+        setTimeScale(.realtime)
+        isToolPanelVisible = true
+        isCompactTelemetryHUDEnabled = true
+        if deferPreparation {
+            scheduleFlightTrainingPreparation(changeAircraft: true)
+        } else {
+            isPreparingFlightTraining = true
+            prepareFlightTrainingStep(changeAircraft: true)
+            isPreparingFlightTraining = false
+        }
+    }
+
+    func continueFlightTraining(deferPreparation: Bool = true) {
+        guard !isPreparingFlightTraining else { return }
+        guard var session = flightTrainingSession else { return }
+        let oldAircraft = session.progress.step.aircraft
+        guard session.continueCourse() else { return }
+        flightTrainingSession = session
+        flightTrainingProgress = session.progress
+        let changeAircraft = session.progress.step.aircraft != oldAircraft
+        if deferPreparation {
+            scheduleFlightTrainingPreparation(changeAircraft: changeAircraft)
+        } else {
+            isPreparingFlightTraining = true
+            prepareFlightTrainingStep(changeAircraft: changeAircraft)
+            isPreparingFlightTraining = false
+        }
+    }
+
+    func restartFlightTrainingLesson(deferPreparation: Bool = true) {
+        guard !isPreparingFlightTraining else { return }
+        guard var session = flightTrainingSession else { return }
+        session.restartLesson()
+        flightTrainingSession = session
+        flightTrainingProgress = session.progress
+        let changeAircraft = selectedDroneProfile.id != session.progress.step.aircraft.profileID
+        if deferPreparation {
+            scheduleFlightTrainingPreparation(changeAircraft: changeAircraft)
+        } else {
+            isPreparingFlightTraining = true
+            prepareFlightTrainingStep(changeAircraft: changeAircraft)
+            isPreparingFlightTraining = false
+        }
+    }
+
+    /// The instructor only makes the handover explicit. Flight forces and all subsequent input
+    /// are still handled by the ordinary manual-flight pipeline.
+    func takeFlightTrainingManualControl() {
+        takeManualControl()
+    }
+
+    func takeManualControl() {
+        cancelTargetMarkerAutoNavigation()
+        deactivateFixedWingAssist(reason: "pilot_manual_handover")
+        clearMissionPlan()
+        setFlightMode(.manual, reason: "pilot_manual_handover")
+        flightControlMode = .stabilized
+        resetFlightControlRouting()
+        keyboardInputService.resetTransientState()
+    }
+
+    var flightTrainingBindings: [KeyBindingDescriptor] {
+        guard let step = flightTrainingProgress?.step else { return [] }
+        let commands: [KeyboardCommand]
+        switch step {
+        case .copterIntro, .copterTakeoff, .vtolIntro, .vtolTakeoff:
+            commands = [.ascend, .descend]
+        case .copterManual, .airplaneIntro, .airplaneManual, .examinationIntro, .examination:
+            commands = [.moveForward, .moveBackward, .moveLeft, .moveRight, .ascend, .descend, .yawLeft, .yawRight]
+        case .copterHover: commands = [.hover]
+        case .cameraPanel, .cameraView: commands = [.cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop]
+        case .missionMap: commands = [.toggleMissionMap]
+        case .vtolForward: commands = [.vtolTransitionForward, .moveForward, .moveBackward, .ascend, .descend]
+        case .vtolBack: commands = [.vtolTransitionBack, .hover]
+        default: commands = []
+        }
+        let bindings = keyboardInputService.currentBindingProfile().bindings
+        return commands.compactMap { bindings[$0] }
+    }
+
+    private func scheduleFlightTrainingPreparation(changeAircraft: Bool) {
+        flightTrainingPreparationTask?.cancel()
+        isPreparingFlightTraining = true
+        let step = flightTrainingProgress?.step
+        flightTrainingPreparationTask = Task { @MainActor [weak self] in
+            // Publish the new card and let SwiftUI draw the preparation state before SceneKit work.
+            await Task.yield()
+            guard !Task.isCancelled, let self else { return }
+            guard self.flightTrainingProgress?.step == step else {
+                self.isPreparingFlightTraining = false
+                self.flightTrainingPreparationTask = nil
+                return
+            }
+            self.prepareFlightTrainingStep(changeAircraft: changeAircraft)
+            self.isPreparingFlightTraining = false
+            self.flightTrainingPreparationTask = nil
+        }
+    }
+
+    private func prepareFlightTrainingStep(changeAircraft: Bool) {
+        guard let step = flightTrainingProgress?.step else { return }
+        keyboardInputService.resetTransientState()
+        inputManager.reset()
+        // A manual-authority grace period from the preceding task must not cancel the next
+        // task's Hover/Altitude Hold command on its first tick after the paused checkpoint.
+        resetFlightControlRouting()
+        if isMissionMapVisible { toggleMissionMap() }
+        isPayloadPanelVisible = false
+        isCommsLinkPanelVisible = false
+        if changeAircraft {
+            preparingTrainingAircraft = true
+            defer { preparingTrainingAircraft = false }
+            selectDroneModel(id: step.aircraft.profileID)
+            terrain.preset = .gridDemo
+            terrain.mapScale = .x32
+            terrain.density = 0
+            terrain.safeSpawnRadius = 220
+            terrain.seed = 20261008
+            weather = .normal
+            sceneController.applyWeatherVisual(weather)
+            if !flightTrainingEnvironmentReady {
+                regenerateEnvironment()
+                flightTrainingEnvironmentReady = true
+            }
+            reset()
+            setCameraMode(.follow)
+            setActiveControlModule(nil)
+            flightTrainingSession?.configureSpheres(origin: homePosition)
+        }
+        switch step {
+        case .arm, .copterTakeoff, .copterHover, .copterAutopilot, .copterReturn,
+             .airplaneTakeoff, .airplaneAutopilot, .vtolTakeoff, .vtolAutopilot:
+            setActiveControlModule(.flightOps)
+        case .copterManual, .airplaneManual, .vtolForward, .examination:
+            takeFlightTrainingManualControl()
+            setActiveControlModule(nil)
+        case .vtolBack:
+            updateControlValues({ $0.vtolTransitionLever = 0 }, markManual: false)
+            setActiveControlModule(.flightOps)
+        case .cameraView:
+            setCameraMode(.follow)
+        case .instruments, .simulationPanels:
+            setActiveControlModule(nil)
+        default: break
+        }
+        lastTimestamp = nil
+        syncFlightTrainingSpheres()
+    }
+
+    private func updateFlightTraining(deltaTime: Float) {
+        guard var session = flightTrainingSession else { return }
+        guard selectedDroneProfile.id == session.progress.step.aircraft.profileID else { return }
+        let pilotSource = resolvedInputState.dominantSource
+        let manual = mode == .manual && fixedWingAssistState.mode == .manual && flightControlMode != .hoverAssist &&
+            pilotSource != .autopilot && pilotSource != .remote
+        let observation = FlightTrainingObservation(
+            position: state.position,
+            heightAboveGround: heightAboveSupportSurface(for: state.position),
+            airspeed: max(state.forwardAirspeed, simd_length(state.velocity)),
+            verticalSpeed: state.velocity.y,
+            isArmed: isArmed,
+            isAirborne: physicalState == .airborne || physicalState == .takeoffTransition,
+            isManualControl: manual,
+            hasManualInput: abs(resolvedInputState.pitch) + abs(resolvedInputState.roll) +
+                abs(resolvedInputState.yaw) + abs(resolvedInputState.throttle) > 0.02,
+            hoverActive: mode == .hover,
+            autoPathActive: mode == .autoPath,
+            returnHomeActive: mode == .returnHome,
+            altitudeHoldActive: fixedWingAssistState.mode == .altitudeHold,
+            openPanel: isParametersPanelVisible ? activeControlModule?.rawValue : nil,
+            isMapOpen: isMissionMapVisible,
+            cameraChanged: cameraConfiguration.mode != .follow,
+            vtolProgress: state.vtolTransitionProgress,
+            crashed: physicalState == .crashed || state.damageCondition == .destroyed
+        )
+        session.observe(observation, deltaTime: deltaTime)
+        let previous = flightTrainingProgress
+        flightTrainingSession = session
+        if previous != session.progress {
+            flightTrainingProgress = session.progress
+            syncFlightTrainingSpheres()
+            if session.progress.phase == .completed, previous?.phase != .completed {
+                InstructorProgressStore.markFlightCourseCompleted(defaults: instructorProgressDefaults)
+            }
+        }
+    }
+
+    private func syncFlightTrainingSpheres() {
+        guard let session = flightTrainingSession, session.progress.showsSpheres else {
+            flightTrainingScene.clear()
+            return
+        }
+        flightTrainingScene.update(spheres: session.spheres, passed: session.progress.spheresPassed,
+                                  parent: sceneController.scene.rootNode)
     }
 }
 

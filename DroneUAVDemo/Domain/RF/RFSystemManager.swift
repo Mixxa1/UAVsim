@@ -319,6 +319,22 @@ struct RFSystemConfigurationValidator {
                 detail: "The selected RF antennas must be connected to their endpoint devices."
             ))
         }
+        // A diversity element the radio cannot use is ignored at run time, not fatal: the link
+        // still has its own antenna. It is reported, because a silent one is a typing mistake.
+        for (ids, device) in [(link.transmitterDiversityAntennaIDs, transmitter), (link.receiverDiversityAntennaIDs, receiver)] {
+            for id in ids ?? [] {
+                let usable = configuration.antennas.contains { $0.id == id && $0.deviceID == device.id }
+                    && configuration.connections.contains { $0.deviceID == device.id && $0.antennaID == id }
+                if !usable {
+                    issues.append(RFConfigurationIssue(
+                        severity: .warning,
+                        code: "unusable_diversity_antenna",
+                        linkKind: link.kind,
+                        detail: "Diversity antenna \(id) is not connected to \(device.id) and is ignored."
+                    ))
+                }
+            }
+        }
         if !txAntenna.enabled || !rxAntenna.enabled {
             issues.append(RFConfigurationIssue(
                 severity: .error,
@@ -447,27 +463,53 @@ struct RFSystemManager {
 
         let txPose = endpointPosesM[transmitter.id] ?? RFEndpointPose(positionM: .zero)
         let rxPose = endpointPosesM[receiver.id] ?? RFEndpointPose(positionM: .zero)
-        let rf = propagationEngine.evaluate(RFPropagationRequest(
-            linkID: link.id,
-            transmitter: transmitter,
-            receiver: receiver,
-            transmitterAntenna: txAntenna,
-            receiverAntenna: rxAntenna,
-            transmitterPositionM: txPose.phaseCenter(for: txAntenna),
-            receiverPositionM: rxPose.phaseCenter(for: rxAntenna),
-            transmitterOrientation: txPose.orientation,
-            receiverOrientation: rxPose.orientation,
-            qualityProfile: link.qualityProfile,
-            pathContext: pathContext,
-            environment: environment,
-            supplementalLosses: supplementalLosses,
-            interferencePowersDBm: interferencePowersDBm,
-            timestamp: timestamp
-        ))
+        func propagate(_ txAntenna: RFAntennaInstance, _ rxAntenna: RFAntennaInstance) -> RFLinkState {
+            propagationEngine.evaluate(RFPropagationRequest(
+                linkID: link.id,
+                transmitter: transmitter,
+                receiver: receiver,
+                transmitterAntenna: txAntenna,
+                receiverAntenna: rxAntenna,
+                transmitterPositionM: txPose.phaseCenter(for: txAntenna),
+                receiverPositionM: rxPose.phaseCenter(for: rxAntenna),
+                transmitterOrientation: txPose.orientation,
+                receiverOrientation: rxPose.orientation,
+                qualityProfile: link.qualityProfile,
+                pathContext: pathContext,
+                environment: environment,
+                supplementalLosses: supplementalLosses,
+                interferencePowersDBm: interferencePowersDBm,
+                timestamp: timestamp
+            ))
+        }
+        var rf = propagate(txAntenna, rxAntenna)
+        // Selection diversity: the radio uses whichever of its elements gives the strongest
+        // signal. The elements sit centimetres apart, so the path and the interference found for
+        // the first one stand for all of them; only pattern and polarisation differ.
+        let txElements = diversityElements(link.transmitterDiversityAntennaIDs, on: transmitter)
+        let rxElements = diversityElements(link.receiverDiversityAntennaIDs, on: receiver)
+        if !txElements.isEmpty || !rxElements.isEmpty {
+            for txElement in [txAntenna] + txElements {
+                for rxElement in [rxAntenna] + rxElements where txElement.id != txAntenna.id || rxElement.id != rxAntenna.id {
+                    let candidate = propagate(txElement, rxElement)
+                    if candidate.receivedPowerDBm > rf.receivedPowerDBm { rf = candidate }
+                }
+            }
+        }
         return RFLinkEvaluation(
             rf: rf,
             quality: digitalQualityModel.evaluate(rf: rf, profile: link.qualityProfile)
         )
+    }
+
+    /// The usable extra elements of a radio: present, switched on, wired to it and cut for its band.
+    private func diversityElements(_ ids: [String]?, on device: RFDeviceInstance) -> [RFAntennaInstance] {
+        guard let ids, !ids.isEmpty else { return [] }
+        return configuration.antennas.filter { antenna in
+            ids.contains(antenna.id) && antenna.enabled && antenna.deviceID == device.id
+                && antenna.profile.frequencyRange.contains(device.centerFrequencyHz)
+                && configuration.connections.contains { $0.deviceID == device.id && $0.antennaID == antenna.id }
+        }
     }
 
     func evaluateAvailableLinks(

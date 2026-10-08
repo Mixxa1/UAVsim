@@ -89,40 +89,11 @@ final class GroundVehicleRuntime {
     func receive(_ report: ImpactReport) {
         safetyCountdown = 0
         let point = simd_act(state.attitudeQuat.conjugate, report.contactPoint - state.position)
-        damage.impact(energyJ: report.impactEnergyJ, bodyPoint: point, profile: profile)
         let normal = simd_act(state.attitudeQuat.conjugate, report.contactNormal)
+        damage.impact(energyJ: report.impactEnergyJ, bodyPoint: point, profile: profile, normal: normal)
         let tippingEnergy = profile.massKg * 9.81 * profile.trackWidth * 0.5
         if abs(normal.x) > 0.65, point.y > profile.size.y * 0.6, report.impactEnergyJ > tippingEnergy {
             damage.overturn()
-        }
-        syncCondition()
-    }
-
-    func applyModule(_ effect: AttachedPayloadProfile, worldPoint: SIMD3<Float>) {
-        safetyCountdown = 0
-        let point = simd_act(state.attitudeQuat.conjugate, worldPoint - state.position)
-        damage.applyModule(effect, at: point, profile: profile)
-        syncCondition()
-    }
-
-    func receiveDetonation(_ detonation: ChargeDetonation, directHit: Bool) {
-        safetyCountdown = 0
-        let point = simd_act(state.attitudeQuat.conjugate, detonation.position - state.position)
-        let closest = SIMD3<Float>(
-            max(-profile.size.x / 2, min(profile.size.x / 2, point.x)),
-            max(0, min(profile.size.y, point.y)),
-            max(-profile.size.z / 2, min(profile.size.z / 2, point.z)))
-        let surfacePoint = state.position + simd_act(state.attitudeQuat, closest)
-        let exposure = directHit ? Float(1) : detonation.exposure(at: surfacePoint)
-        damage.detonation(exposure: exposure, bodyPoint: point, profile: profile)
-        if exposure > 0.8, !damage.burning {
-            // Short-lived burning residue at a heated strike is distinct from a sustained fuel
-            // fire. An ordinary collision and a weak near miss never create this flame.
-            let outward = simd_act(state.attitudeQuat.conjugate, detonation.normal)
-            let anchor = closest + outward * 0.20
-            let key = "heated-contact-\(damage.sites.count)"
-            emitEffect(key + "-flame", kind: .fire, lifetime: 7, scale: 1.4, anchor: anchor)
-            emitEffect(key + "-smoke", kind: .smoke, lifetime: 12, scale: 1.5, anchor: anchor)
         }
         syncCondition()
     }

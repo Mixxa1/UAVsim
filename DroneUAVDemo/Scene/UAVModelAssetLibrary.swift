@@ -49,6 +49,9 @@ struct UAVModelManifest: Decodable {
         let axis: String
         let role: String
         let amplitudeDegrees: Float
+        let axisVector: [Float]?
+        let mixing: [String: Float]?
+        let travelVectorM: [Float]?
     }
     struct Rotor: Decodable {
         let name: String
@@ -91,6 +94,39 @@ struct UAVArticulatedNode {
     let axis: String
     let role: String
     let maximumDeflectionRadians: Float
+    let axisVector: SIMD3<Float>
+    let travelVector: SIMD3<Float>
+    private let restPosition: SIMD3<Float>
+    /// The manifest's mixing table, resolved once: this runs for every rig on every frame.
+    private let surfaceMix: SIMD3<Float>
+    private let flapMix: Float
+    private let gearMix: Float
+    private let doorMix: Float
+    private let isMixed: Bool
+    /// Which wing a flap panel is on, in the body frame. The visual is yawed half a turn,
+    /// so the asset's +X is the aircraft's left.
+    private let isOnLeftWing: Bool
+    /// The undercarriage leg this rig is, in the manifest's hinge order.
+    private let legIndex: Int
+
+    init(node: SCNNode, axis: String, role: String, maximumDeflectionRadians: Float,
+         axisVector: SIMD3<Float> = SIMD3<Float>(1, 0, 0), mixing: [String: Float] = [:],
+         legIndex: Int = 0, travelVector: SIMD3<Float> = .zero) {
+        self.node = node
+        self.axis = axis
+        self.role = role
+        self.maximumDeflectionRadians = maximumDeflectionRadians
+        self.axisVector = axisVector
+        self.travelVector = travelVector
+        restPosition = node.simdPosition
+        surfaceMix = SIMD3<Float>(mixing["aileron"] ?? 0, mixing["elevator"] ?? 0, mixing["rudder"] ?? 0)
+        flapMix = mixing["flap"] ?? 0
+        gearMix = mixing["gear"] ?? 0
+        doorMix = mixing["door"] ?? 0
+        isMixed = !mixing.isEmpty
+        isOnLeftWing = node.simdPosition.x > 0
+        self.legIndex = min(3, max(0, legIndex))
+    }
 
     func applyCamera(yawDegrees: Double, pitchDegrees: Double) {
         guard role == "camera" else { return }
@@ -106,6 +142,40 @@ struct UAVArticulatedNode {
         guard role == "control_surface", axis == "x" else { return }
         // DroneState publishes a servo fraction, not an angle in radians.
         node.eulerAngles.x = CGFloat(-min(1, max(-1, elevatorDeflection)) * maximumDeflectionRadians)
+    }
+
+    func applyMechanization(state: DroneState) {
+        guard role != "camera" else { return }
+        guard isMixed else {
+            applyControl(elevatorDeflection: state.elevatorDeflection)
+            return
+        }
+        let mechanization = state.mechanization
+        var angle = simd_dot(surfaceMix, state.controlSurfaceAnglesRad)
+        var departed = false
+        if flapMix != 0 {
+            angle += flapMix * mechanization.flapAngleRadians
+            departed = (isOnLeftWing ? mechanization.flapPanelHealth.x : mechanization.flapPanelHealth.y) <= 0.5
+        }
+        if gearMix != 0 {
+            // A leg that no longer locks is drawn folded: blown back in the air, or collapsed under the aircraft.
+            let extended = mechanization.gearLegHealth[legIndex] <= 0.5 ? 0 : mechanization.gearExtension
+            angle += gearMix * (1 - extended) * maximumDeflectionRadians
+        }
+        if doorMix != 0 {
+            angle += doorMix * mechanization.gearDoorOpening * maximumDeflectionRadians
+            departed = mechanization.gearDoorsLost
+        }
+        let limited = angle.isFinite ? min(maximumDeflectionRadians, max(-maximumDeflectionRadians, angle)) : 0
+        let orientation = simd_quatf(angle: limited, axis: axisVector)
+        let position = restPosition + travelVector * (flapMix != 0 ? mechanization.flapDeployment : 0)
+        if simd_length_squared(node.simdPosition-position) > 1e-12 { node.simdPosition = position }
+        // Write the scene graph only when something moved: a mutation waits for the render
+        // thread, and most rigs are still on most frames.
+        if simd_reduce_max(simd_abs(node.simdOrientation.vector - orientation.vector)) > 1e-6 {
+            node.simdOrientation = orientation
+        }
+        if node.isHidden != departed { node.isHidden = departed }
     }
 }
 
@@ -205,11 +275,26 @@ final class UAVModelAssetLibrary {
         let modelNode = template.clone()
         UAVModelAssetLibrary.giveInstanceItsOwnMaterials(modelNode)
         let rigDefinitions: [UAVModelManifest.Rig] = entry.rigs ?? []
+        let gearHinges = UAVExpansionCatalog.definition(for: profileID)?.mechanics?.gearHinges ?? []
         let articulatedNodes: [UAVArticulatedNode] = rigDefinitions.compactMap { rig -> UAVArticulatedNode? in
             guard let node = modelNode.childNode(withName: rig.name, recursively: true) else { return nil }
             node.name = "uavRig.\(rig.role).\(rig.name)"
+            // A leg rig pivots on its own hinge, so the nearest hinge is its own.
+            let pivot = node.simdPosition
+            let leg = gearHinges.indices.min { first, second in
+                func distance(_ index: Int) -> Float {
+                    let c = gearHinges[index].center
+                    return c.count == 3 ? simd_distance(pivot, SIMD3<Float>(c[0], c[1], c[2])) : .greatestFiniteMagnitude
+                }
+                return distance(first) < distance(second)
+            } ?? 0
             return UAVArticulatedNode(node: node, axis: rig.axis, role: rig.role,
-                                      maximumDeflectionRadians: rig.amplitudeDegrees * .pi / 180)
+                maximumDeflectionRadians: rig.amplitudeDegrees * .pi / 180,
+                axisVector: UAVModelAssetLibrary.rigAxis(rig), mixing: rig.mixing ?? [:], legIndex: leg,
+                travelVector: rig.travelVectorM.flatMap { values in
+                    guard values.count == 3, values.allSatisfy(\.isFinite) else { return nil }
+                    return SIMD3<Float>(values[0],values[1],values[2])
+                } ?? .zero)
         }
         if let center = entry.jetExhaustCenter, center.count == 3 {
             let exhaust = SCNNode();exhaust.name = "jetExhaustAnchor"
@@ -294,6 +379,16 @@ final class UAVModelAssetLibrary {
             tiltPivotNodes: tiltPivots,
             articulatedNodes: articulatedNodes
         )
+    }
+
+    private static func rigAxis(_ rig: UAVModelManifest.Rig) -> SIMD3<Float> {
+        if let values = rig.axisVector, values.count == 3 {
+            let axis = SIMD3<Float>(values[0], values[1], values[2])
+            if axis.x.isFinite && axis.y.isFinite && axis.z.isFinite && simd_length(axis) > 0.0001 {
+                return simd_normalize(axis)
+            }
+        }
+        return rig.axis == "y" ? SIMD3<Float>(0, 1, 0) : rig.axis == "z" ? SIMD3<Float>(0, 0, 1) : SIMD3<Float>(1, 0, 0)
     }
 
     // MARK: - Template loading
@@ -639,7 +734,13 @@ final class UAVModelAssetLibrary {
         var ancestor = node.parent
         while let parent = ancestor {
             if parent.name?.hasPrefix("uavRig.camera.") == true { return .frontCameraGimbal }
-            if parent.name?.hasPrefix("uavRig.control_surface.") == true { return left ? .armRL : .armRR }
+            if parent.name?.hasPrefix("uavRig.control_surface.") == true {
+                return parent.name?.contains("MainWing") == true
+                    ? (left ? .armFL : .armFR) : (left ? .armRL : .armRR)
+            }
+            if parent.name?.hasPrefix("uavRig.landing_gear.") == true || parent.name?.hasPrefix("uavRig.gear_door.") == true {
+                return nil
+            }
             ancestor = parent.parent
         }
 
@@ -654,7 +755,7 @@ final class UAVModelAssetLibrary {
         // from the canard's leading edge to the wing's trailing edge: on the X-10 it
         // turned a 10.8 m chord into 14.3 m. Canards go with the other control surfaces
         // below, whose boxes the graph does not read.
-        if contains(["forwardwing", "winglet", "wingfoldhinge", "liftboomwingclamp"]) {
+        if contains(["forwardwing", "winglet", "liftboomwingclamp"]) {
             return left ? .armRL : .armRR
         }
         if contains(["wing"]) {

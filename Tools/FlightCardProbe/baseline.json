@@ -1,0 +1,896 @@
+[
+  {
+    "airframeID" : "abstract-uav",
+    "displayName" : "Abstract UAV",
+    "measured" : {
+      "climbRate" : 6.7808576,
+      "endurance" : 0.49255624,
+      "hoverLever" : 0.57650673,
+      "maximumSpeed" : 15.832748
+    }
+  },
+  {
+    "airframeID" : "aeronautics-aerostar",
+    "displayName" : "Aeronautics Aerostar",
+    "measured" : {
+      "climbRate" : 11.550887,
+      "cruiseSpeed" : 34.002594,
+      "endurance" : 11.458168,
+      "glideRatio" : 8.724014,
+      "maximumSpeed" : 48.29806,
+      "stallSpeed" : 22.6052
+    }
+  },
+  {
+    "airframeID" : "aeronautics-orbiter-3",
+    "displayName" : "Aeronautics Orbiter 3",
+    "measured" : {
+      "climbRate" : 3.1914425,
+      "cruiseSpeed" : 25.00939,
+      "endurance" : 10.085531,
+      "glideRatio" : 16.676601,
+      "maximumSpeed" : 36.17977,
+      "stallSpeed" : 16.632792
+    }
+  },
+  {
+    "airframeID" : "aeronautics-orbiter-4",
+    "displayName" : "Aeronautics Orbiter 4",
+    "measured" : {
+      "climbRate" : 5.186134,
+      "cruiseSpeed" : 27.010178,
+      "endurance" : 23.493809,
+      "glideRatio" : 10.915668,
+      "maximumSpeed" : 37.178505,
+      "stallSpeed" : 18.570765
+    }
+  },
+  {
+    "airframeID" : "aerosonde-mk-4-7",
+    "displayName" : "Aerosonde Mk 4.7",
+    "measured" : {
+      "climbRate" : 4.949635,
+      "cruiseSpeed" : 27.998632,
+      "endurance" : 17.87419,
+      "glideRatio" : 10.092818,
+      "maximumSpeed" : 37.956028,
+      "stallSpeed" : 18.28751
+    }
+  },
+  {
+    "airframeID" : "aerovironment-jump-20",
+    "displayName" : "AeroVironment JUMP 20",
+    "measured" : {
+      "climbRate" : 8.635952,
+      "cruiseSpeed" : 28.000917,
+      "endurance" : 17.666992,
+      "glideRatio" : 9.312193,
+      "maximumSpeed" : 39.875793
+    }
+  },
+  {
+    "airframeID" : "aerovironment-puma-3-ae",
+    "displayName" : "AeroVironment Puma 3 AE",
+    "measured" : {
+      "climbRate" : 2.1862822,
+      "cruiseSpeed" : 16.85762,
+      "endurance" : 2.9841,
+      "glideRatio" : 18.982979,
+      "maximumSpeed" : 25.371723,
+      "stallSpeed" : 12.272427
+    }
+  },
+  {
+    "airframeID" : "aerovironment-puma-le",
+    "displayName" : "AeroVironment Puma LE",
+    "measured" : {
+      "climbRate" : 2.2538404,
+      "cruiseSpeed" : 16.713686,
+      "endurance" : 6.531565,
+      "glideRatio" : 23.933443,
+      "maximumSpeed" : 25.862093,
+      "stallSpeed" : 13.492648
+    }
+  },
+  {
+    "airframeID" : "aerovironment-raven-b",
+    "displayName" : "AeroVironment Raven B",
+    "measured" : {
+      "climbRate" : 4.424963,
+      "cruiseSpeed" : 15.085275,
+      "endurance" : 1.5222238,
+      "glideRatio" : 15.622136,
+      "maximumSpeed" : 24.704395,
+      "stallSpeed" : 10.257746
+    }
+  },
+  {
+    "airframeID" : "ageagle-ebee-x",
+    "displayName" : "AgEagle eBee X",
+    "measured" : {
+      "climbRate" : 4.735636,
+      "cruiseSpeed" : 16.020405,
+      "endurance" : 1.5396965,
+      "glideRatio" : 15.177077,
+      "maximumSpeed" : 26.551487,
+      "stallSpeed" : 11.168253
+    }
+  },
+  {
+    "airframeID" : "agrowing-titan-at40",
+    "displayName" : "AgroWing Titan AT-40",
+    "measured" : {
+      "climbRate" : 3.0914729,
+      "endurance" : 0.20914933,
+      "hoverLever" : 0.6269692,
+      "maximumSpeed" : 12.317019
+    }
+  },
+  {
+    "airframeID" : "autel-evo-max-4t-v2",
+    "displayName" : "Autel EVO Max 4T V2",
+    "measured" : {
+      "climbRate" : 8.723473,
+      "endurance" : 0.62636274,
+      "hoverLever" : 0.5562846,
+      "maximumSpeed" : 20.237352
+    }
+  },
+  {
+    "airframeID" : "avidrone-490tl",
+    "displayName" : "Avidrone 490TL",
+    "measured" : {
+      "climbRate" : 4.0671034,
+      "endurance" : 0.4021928,
+      "hoverLever" : 0.59382683,
+      "maximumSpeed" : 16.712519
+    }
+  },
+  {
+    "airframeID" : "brinc-lemur-2",
+    "displayName" : "BRINC Lemur 2",
+    "measured" : {
+      "climbRate" : 2.912627,
+      "endurance" : 0.32564637,
+      "hoverLever" : 0.5448387,
+      "maximumSpeed" : 8.793837
+    }
+  },
+  {
+    "airframeID" : "c-astral-bramor-c4eye",
+    "displayName" : "C-Astral Bramor C4EYE",
+    "measured" : {
+      "climbRate" : 1.9379088,
+      "cruiseSpeed" : 15.708085,
+      "endurance" : 3.0323098,
+      "glideRatio" : 19.575153,
+      "maximumSpeed" : 24.143457,
+      "stallSpeed" : 12.182438
+    }
+  },
+  {
+    "airframeID" : "colossus-ca12-atlas",
+    "displayName" : "Colossus Aerial CA-12 Atlas",
+    "measured" : {
+      "climbRate" : 2.505938,
+      "endurance" : 0.1419757,
+      "hoverLever" : 0.65316373,
+      "maximumSpeed" : 11.803329
+    }
+  },
+  {
+    "airframeID" : "colossus-ca8-vulcan",
+    "displayName" : "Colossus Aerial CA-8 Vulcan",
+    "measured" : {
+      "climbRate" : 2.8958287,
+      "endurance" : 0.17419437,
+      "hoverLever" : 0.63718086,
+      "maximumSpeed" : 13.197005
+    }
+  },
+  {
+    "airframeID" : "delair-dt26-open-payload",
+    "displayName" : "Delair DT26 Open Payload",
+    "measured" : {
+      "climbRate" : 4.0500193,
+      "cruiseSpeed" : 16.762518,
+      "endurance" : 2.8810494,
+      "glideRatio" : 16.686876,
+      "maximumSpeed" : 28.19253,
+      "stallSpeed" : 14.324179
+    }
+  },
+  {
+    "airframeID" : "delair-ux11",
+    "displayName" : "Delair UX11",
+    "measured" : {
+      "climbRate" : 2.5479627,
+      "cruiseSpeed" : 15.089351,
+      "endurance" : 0.98722905,
+      "glideRatio" : 15.115362,
+      "maximumSpeed" : 22.951164,
+      "stallSpeed" : 10.174553
+    }
+  },
+  {
+    "airframeID" : "deltaquad-evo",
+    "displayName" : "DeltaQuad Evo",
+    "measured" : {
+      "climbRate" : 5.088743,
+      "cruiseSpeed" : 16.302292,
+      "endurance" : 4.5687056,
+      "glideRatio" : 14.440795,
+      "maximumSpeed" : 27.080257
+    }
+  },
+  {
+    "airframeID" : "dji-avata-2",
+    "displayName" : "DJI Avata 2",
+    "measured" : {
+      "climbRate" : 8.722558,
+      "endurance" : 0.34300497,
+      "hoverLever" : 0.5562947,
+      "maximumSpeed" : 23.748238
+    }
+  },
+  {
+    "airframeID" : "dji-flycart-30",
+    "displayName" : "DJI FlyCart 30",
+    "measured" : {
+      "climbRate" : 3.8674984,
+      "endurance" : 0.2696567,
+      "hoverLever" : 0.61711276,
+      "maximumSpeed" : 17.597992
+    }
+  },
+  {
+    "airframeID" : "dji-matrice-30t",
+    "displayName" : "DJI Matrice 30T",
+    "measured" : {
+      "climbRate" : 5.8126054,
+      "endurance" : 0.5942101,
+      "hoverLever" : 0.5807404,
+      "maximumSpeed" : 20.235466
+    }
+  },
+  {
+    "airframeID" : "dji-matrice-350-rtk",
+    "displayName" : "DJI Matrice 350 RTK",
+    "measured" : {
+      "climbRate" : 5.812656,
+      "endurance" : 0.7262581,
+      "hoverLever" : 0.58073825,
+      "maximumSpeed" : 20.233362
+    }
+  },
+  {
+    "airframeID" : "dji-matrice-400",
+    "displayName" : "DJI Matrice 400",
+    "measured" : {
+      "climbRate" : 9.673301,
+      "endurance" : 0.89067805,
+      "hoverLever" : 0.5807456,
+      "maximumSpeed" : 21.99544
+    }
+  },
+  {
+    "airframeID" : "dji-matrice-4t",
+    "displayName" : "DJI Matrice 4T",
+    "measured" : {
+      "climbRate" : 9.687284,
+      "endurance" : 0.6766606,
+      "hoverLever" : 0.5562945,
+      "maximumSpeed" : 18.47463
+    }
+  },
+  {
+    "airframeID" : "dji-matrice-4td-dock-3",
+    "displayName" : "DJI Matrice 4TD + Dock 3",
+    "measured" : {
+      "climbRate" : 5.820357,
+      "endurance" : 0.77160794,
+      "hoverLever" : 0.55629414,
+      "maximumSpeed" : 13.192695
+    }
+  },
+  {
+    "airframeID" : "dji-mavic-3t",
+    "displayName" : "DJI Mavic 3T",
+    "measured" : {
+      "climbRate" : 7.75604,
+      "endurance" : 0.61803466,
+      "hoverLever" : 0.5562948,
+      "maximumSpeed" : 18.471796
+    }
+  },
+  {
+    "airframeID" : "dji-mavic-4-pro",
+    "displayName" : "DJI Mavic 4 Pro",
+    "measured" : {
+      "climbRate" : 5.820959,
+      "endurance" : 0.7318868,
+      "hoverLever" : 0.5562893,
+      "maximumSpeed" : 15.831976
+    }
+  },
+  {
+    "airframeID" : "dji-mini-5-pro",
+    "displayName" : "DJI Mini 5 Pro",
+    "measured" : {
+      "climbRate" : 9.69003,
+      "endurance" : 0.53688985,
+      "hoverLever" : 0.5562692,
+      "maximumSpeed" : 15.835294
+    }
+  },
+  {
+    "airframeID" : "dji-neo",
+    "displayName" : "DJI Neo",
+    "measured" : {
+      "climbRate" : 2.9127305,
+      "endurance" : 0.2875109,
+      "hoverLever" : 0.54483986,
+      "maximumSpeed" : 14.0711155
+    }
+  },
+  {
+    "airframeID" : "dji-phantom-3-standard",
+    "displayName" : "DJI Phantom 3 Standard",
+    "measured" : {
+      "climbRate" : 4.848369,
+      "endurance" : 0.35725975,
+      "hoverLever" : 0.5682335,
+      "maximumSpeed" : 14.068446
+    }
+  },
+  {
+    "airframeID" : "elbit-hermes-450",
+    "displayName" : "Elbit Hermes 450",
+    "measured" : {
+      "climbRate" : 3.890037,
+      "cruiseSpeed" : 36.006428,
+      "endurance" : 15.175359,
+      "glideRatio" : 11.496321,
+      "maximumSpeed" : 46.72596,
+      "stallSpeed" : 24.30399
+    }
+  },
+  {
+    "airframeID" : "epfl-delta-wing-uav",
+    "displayName" : "EPFL Delta-Wing UAV",
+    "measured" : {
+      "climbRate" : 2.3545315,
+      "cruiseSpeed" : 17.949299,
+      "endurance" : 0.65725386,
+      "glideRatio" : 11.526056,
+      "maximumSpeed" : 25.478073,
+      "stallSpeed" : 12.408765
+    }
+  },
+  {
+    "airframeID" : "everdrone-first-on-scene",
+    "displayName" : "Everdrone First on Scene",
+    "measured" : {
+      "climbRate" : 4.857289,
+      "endurance" : 0.3475524,
+      "hoverLever" : 0.53449523,
+      "maximumSpeed" : 13.195651
+    }
+  },
+  {
+    "airframeID" : "fotokite-sigma",
+    "displayName" : "Fotokite Sigma",
+    "measured" : {
+      "climbRate" : 1.161365,
+      "hoverLever" : 0.5441655,
+      "maximumSpeed" : 2.1841502
+    }
+  },
+  {
+    "airframeID" : "fpv-cinewhoop-3",
+    "displayName" : "Cinewhoop 3-inch",
+    "measured" : {
+      "climbRate" : 7.814001,
+      "endurance" : 0.087251626,
+      "hoverLever" : 0.36747566,
+      "maximumSpeed" : 16.709312
+    }
+  },
+  {
+    "airframeID" : "fpv-long-range-7",
+    "displayName" : "Long Range 7-inch",
+    "measured" : {
+      "climbRate" : 9.762102,
+      "endurance" : 0.31450248,
+      "hoverLever" : 0.36747348,
+      "maximumSpeed" : 26.39632
+    }
+  },
+  {
+    "airframeID" : "fpv-micro-racer-25",
+    "displayName" : "Micro Racer 2.5\"",
+    "measured" : {
+      "climbRate" : 11.706284,
+      "endurance" : 0.076510295,
+      "hoverLever" : 0.36747336,
+      "maximumSpeed" : 22.87395
+    }
+  },
+  {
+    "airframeID" : "fpv-open-class",
+    "displayName" : "Open Class 10-inch",
+    "measured" : {
+      "climbRate" : 17.52323,
+      "endurance" : 0.11100075,
+      "hoverLever" : 0.3674744,
+      "maximumSpeed" : 40.641907
+    }
+  },
+  {
+    "airframeID" : "fpv-racer-5",
+    "displayName" : "Racer 5-inch",
+    "measured" : {
+      "climbRate" : 15.587058,
+      "endurance" : 0.076641664,
+      "hoverLever" : 0.36747438,
+      "maximumSpeed" : 33.435642
+    }
+  },
+  {
+    "airframeID" : "fpv-spec-5",
+    "displayName" : "Spec 5-inch",
+    "measured" : {
+      "climbRate" : 12.677474,
+      "endurance" : 0.073966056,
+      "hoverLever" : 0.3674746,
+      "maximumSpeed" : 28.154892
+    }
+  },
+  {
+    "airframeID" : "fpv-tiny-whoop-65",
+    "displayName" : "Tiny Whoop 65",
+    "measured" : {
+      "climbRate" : 5.863368,
+      "endurance" : 0.06660022,
+      "hoverLever" : 0.36747748,
+      "maximumSpeed" : 11.434585
+    }
+  },
+  {
+    "airframeID" : "freefly-alta-x",
+    "displayName" : "Freefly Alta X",
+    "measured" : {
+      "climbRate" : 4.3553095,
+      "endurance" : 0.41560093,
+      "hoverLever" : 0.60290354,
+      "maximumSpeed" : 17.598267
+    }
+  },
+  {
+    "airframeID" : "ft5-los",
+    "displayName" : "FT5 Łoś",
+    "measured" : {
+      "climbRate" : 3.6047177,
+      "cruiseSpeed" : 37.998756,
+      "endurance" : 10.003395,
+      "glideRatio" : 15.67268,
+      "maximumSpeed" : 49.95931,
+      "stallSpeed" : 22.453379
+    }
+  },
+  {
+    "airframeID" : "griff-30",
+    "displayName" : "Griff 30",
+    "measured" : {
+      "climbRate" : 3.8696942,
+      "endurance" : 0.30265057,
+      "hoverLever" : 0.6099088,
+      "maximumSpeed" : 15.837396
+    }
+  },
+  {
+    "airframeID" : "griff-60",
+    "displayName" : "Griff 60",
+    "measured" : {
+      "climbRate" : 3.2850804,
+      "endurance" : 0.20570041,
+      "hoverLever" : 0.62696,
+      "maximumSpeed" : 14.07727
+    }
+  },
+  {
+    "airframeID" : "hermes-900",
+    "displayName" : "Hermes 900",
+    "measured" : {
+      "climbRate" : 4.5684137,
+      "cruiseSpeed" : 50.02357,
+      "endurance" : 36.075356,
+      "glideRatio" : 16.269304,
+      "maximumSpeed" : 66.655235,
+      "stallSpeed" : 30.601795
+    }
+  },
+  {
+    "airframeID" : "hermeus-quarterhorse-mk21",
+    "displayName" : "Hermeus Quarterhorse Mk 2.1",
+    "measured" : {
+      "climbRate" : 96.918495,
+      "cruiseSpeed" : 378.6894,
+      "endurance" : 0.8984932,
+      "maximumSpeed" : 342.0396
+    }
+  },
+  {
+    "airframeID" : "hesa-karrar",
+    "displayName" : "HESA Karrar",
+    "measured" : {
+      "climbRate" : 34.400536,
+      "cruiseSpeed" : 168.67073,
+      "endurance" : 2.2009754,
+      "maximumSpeed" : 234.79524,
+      "stallSpeed" : 62.95126
+    }
+  },
+  {
+    "airframeID" : "iai-harop",
+    "displayName" : "IAI Harop",
+    "measured" : {
+      "climbRate" : 15.327977,
+      "cruiseSpeed" : 47.498547,
+      "endurance" : 4.6793413,
+      "glideRatio" : 5.58469,
+      "maximumSpeed" : 59.100433,
+      "stallSpeed" : 27.578768
+    }
+  },
+  {
+    "airframeID" : "iai-harpy",
+    "displayName" : "IAI Harpy",
+    "measured" : {
+      "climbRate" : 11.718312,
+      "cruiseSpeed" : 44.59587,
+      "endurance" : 3.7305026,
+      "glideRatio" : 5.440977,
+      "maximumSpeed" : 55.31829,
+      "stallSpeed" : 30.11587
+    }
+  },
+  {
+    "airframeID" : "iai-harpy-ng",
+    "displayName" : "IAI Harpy NG",
+    "measured" : {
+      "climbRate" : 13.872957,
+      "cruiseSpeed" : 47.151825,
+      "endurance" : 6.6825213,
+      "glideRatio" : 5.4621887,
+      "maximumSpeed" : 59.738754,
+      "stallSpeed" : 29.72629
+    }
+  },
+  {
+    "airframeID" : "iai-heron-mk-ii",
+    "displayName" : "IAI Heron Mk II",
+    "measured" : {
+      "climbRate" : 4.559997,
+      "cruiseSpeed" : 40.0008,
+      "endurance" : 21.159933,
+      "glideRatio" : 17.76795,
+      "maximumSpeed" : 65.94818,
+      "stallSpeed" : 27.759974
+    }
+  },
+  {
+    "airframeID" : "iai-heron-tp",
+    "displayName" : "IAI Heron TP",
+    "measured" : {
+      "climbRate" : 8.252203,
+      "cruiseSpeed" : 90.107086,
+      "endurance" : 24.832,
+      "glideRatio" : 13.975337,
+      "maximumSpeed" : 116.15676,
+      "stallSpeed" : 45.6907
+    }
+  },
+  {
+    "airframeID" : "insitu-scaneagle",
+    "displayName" : "Insitu ScanEagle",
+    "measured" : {
+      "climbRate" : 2.28634,
+      "cruiseSpeed" : 26.999205,
+      "endurance" : 19.199684,
+      "glideRatio" : 11.1344795,
+      "maximumSpeed" : 37.817234,
+      "stallSpeed" : 19.075575
+    }
+  },
+  {
+    "airframeID" : "jouav-cw-20e",
+    "displayName" : "JOUAV CW-20E",
+    "measured" : {
+      "climbRate" : 4.3554087,
+      "cruiseSpeed" : 20.316042,
+      "endurance" : 2.6280603,
+      "glideRatio" : 14.850904,
+      "maximumSpeed" : 32.233753
+    }
+  },
+  {
+    "airframeID" : "leonardo-falco-evo",
+    "displayName" : "Leonardo Falco EVO",
+    "measured" : {
+      "climbRate" : 5.430569,
+      "cruiseSpeed" : 37.991158,
+      "endurance" : 17.270948,
+      "glideRatio" : 11.618489,
+      "maximumSpeed" : 50.650845,
+      "stallSpeed" : 25.24003
+    }
+  },
+  {
+    "airframeID" : "leonardo-falco-xplorer",
+    "displayName" : "Leonardo Falco Xplorer",
+    "measured" : {
+      "climbRate" : 5.625161,
+      "cruiseSpeed" : 50.008457,
+      "endurance" : 15.71181,
+      "glideRatio" : 12.485716,
+      "maximumSpeed" : 64.22154,
+      "stallSpeed" : 30.622932
+    }
+  },
+  {
+    "airframeID" : "matternet-m2",
+    "displayName" : "Matternet M2",
+    "measured" : {
+      "climbRate" : 4.3567834,
+      "endurance" : 0.49337843,
+      "hoverLever" : 0.59492743,
+      "maximumSpeed" : 12.314915
+    }
+  },
+  {
+    "airframeID" : "mq-9a-reaper",
+    "displayName" : "MQ-9A Reaper",
+    "measured" : {
+      "climbRate" : 5.780047,
+      "cruiseSpeed" : 86.83785,
+      "endurance" : 21.594137,
+      "glideRatio" : 14.614895,
+      "maximumSpeed" : 105.912476,
+      "stallSpeed" : 40.45545
+    }
+  },
+  {
+    "airframeID" : "mq-9b-skyguardian",
+    "displayName" : "MQ-9B SkyGuardian",
+    "measured" : {
+      "climbRate" : 5.0797358,
+      "cruiseSpeed" : 90.79074,
+      "endurance" : 30.401447,
+      "glideRatio" : 12.57723,
+      "maximumSpeed" : 102.64955,
+      "stallSpeed" : 44.811913
+    }
+  },
+  {
+    "airframeID" : "ncstate-bwb-delta",
+    "displayName" : "NC State BWB DELTA",
+    "measured" : {
+      "climbRate" : 5.733401,
+      "cruiseSpeed" : 35.637035,
+      "endurance" : 0.46678624,
+      "glideRatio" : 8.841855,
+      "maximumSpeed" : 58.23641,
+      "stallSpeed" : 13.528536
+    }
+  },
+  {
+    "airframeID" : "north-american-x-10",
+    "displayName" : "North American X-10",
+    "measured" : {
+      "climbRate" : 41.327827,
+      "cruiseSpeed" : 286.76486,
+      "endurance" : 0.87477404,
+      "maximumSpeed" : 156.73865
+    }
+  },
+  {
+    "airframeID" : "northrop-aqm-35a",
+    "displayName" : "Northrop AQM-35A",
+    "measured" : {
+      "climbRate" : 66.1091,
+      "stallSpeed" : 72.22039
+    }
+  },
+  {
+    "airframeID" : "northrop-aqm-35b",
+    "displayName" : "Northrop AQM-35B",
+    "measured" : {
+      "climbRate" : 96.67665,
+      "stallSpeed" : 85.09682
+    }
+  },
+  {
+    "airframeID" : "piaggio-p1hh-hammerhead",
+    "displayName" : "Piaggio P.1HH HammerHead",
+    "measured" : {
+      "climbRate" : 10.517559,
+      "cruiseSpeed" : 110.070786,
+      "endurance" : 15.865991,
+      "glideRatio" : 15.409991,
+      "maximumSpeed" : 154.00923,
+      "stallSpeed" : 62.919678
+    }
+  },
+  {
+    "airframeID" : "pyrolift-talon-60",
+    "displayName" : "Pyrolift Systems Talon 60",
+    "measured" : {
+      "climbRate" : 3.672973,
+      "endurance" : 0.23697266,
+      "hoverLever" : 0.62199676,
+      "maximumSpeed" : 16.717686
+    }
+  },
+  {
+    "airframeID" : "quantum-systems-trinity-pro",
+    "displayName" : "Quantum Systems Trinity Pro",
+    "measured" : {
+      "climbRate" : 4.5871625,
+      "cruiseSpeed" : 16.81411,
+      "endurance" : 1.5296391,
+      "glideRatio" : 18.00741,
+      "maximumSpeed" : 24.435743,
+      "stallSpeed" : 12.897629
+    }
+  },
+  {
+    "airframeID" : "rockwell-himat",
+    "displayName" : "NASA \/ Rockwell HiMAT",
+    "measured" : {
+      "climbRate" : 114.38104,
+      "cruiseSpeed" : 258.1161,
+      "endurance" : 1.4179511,
+      "maximumSpeed" : 312.0132,
+      "stallSpeed" : 72.09981
+    }
+  },
+  {
+    "airframeID" : "rq-21-integrator",
+    "displayName" : "RQ-21 Integrator",
+    "measured" : {
+      "climbRate" : 2.7323363,
+      "cruiseSpeed" : 29.015965,
+      "endurance" : 15.988866,
+      "glideRatio" : 16.071777,
+      "maximumSpeed" : 40.12067,
+      "stallSpeed" : 18.879427
+    }
+  },
+  {
+    "airframeID" : "rq-7b-shadow",
+    "displayName" : "RQ-7B Shadow 200",
+    "measured" : {
+      "climbRate" : 11.168037,
+      "cruiseSpeed" : 37.34271,
+      "endurance" : 5.8403583,
+      "glideRatio" : 6.4709377,
+      "maximumSpeed" : 44.51658,
+      "stallSpeed" : 25.633114
+    }
+  },
+  {
+    "airframeID" : "ryan-bqm-34f-firebee-ii",
+    "displayName" : "Ryan BQM-34F Firebee II",
+    "measured" : {
+      "climbRate" : 67.78571,
+      "cruiseSpeed" : 187.37332,
+      "endurance" : 1.6815059,
+      "stallSpeed" : 74.695816
+    }
+  },
+  {
+    "airframeID" : "sensefly-ebee-tac",
+    "displayName" : "senseFly eBee TAC",
+    "measured" : {
+      "climbRate" : 1.7765363,
+      "cruiseSpeed" : 19.488955,
+      "endurance" : 1.482142,
+      "glideRatio" : 17.658262,
+      "maximumSpeed" : 27.421726,
+      "stallSpeed" : 13.56906
+    }
+  },
+  {
+    "airframeID" : "skydio-x10",
+    "displayName" : "Skydio X10",
+    "measured" : {
+      "climbRate" : 7.7552104,
+      "endurance" : 0.5692389,
+      "hoverLever" : 0.55630153,
+      "maximumSpeed" : 17.680138
+    }
+  },
+  {
+    "airframeID" : "tekever-ar3",
+    "displayName" : "TEKEVER AR3",
+    "measured" : {
+      "climbRate" : 10.213201,
+      "cruiseSpeed" : 23.594046,
+      "endurance" : 10.612588,
+      "glideRatio" : 7.3643355,
+      "maximumSpeed" : 34.44715,
+      "stallSpeed" : 18.09342
+    }
+  },
+  {
+    "airframeID" : "tekever-ar5",
+    "displayName" : "TEKEVER AR5",
+    "measured" : {
+      "climbRate" : 11.78984,
+      "cruiseSpeed" : 27.80303,
+      "endurance" : 17.99625,
+      "glideRatio" : 11.324116,
+      "maximumSpeed" : 53.66746,
+      "stallSpeed" : 22.568226
+    }
+  },
+  {
+    "airframeID" : "wildfire-ember-40",
+    "displayName" : "Wildfire Robotics Ember 40",
+    "measured" : {
+      "climbRate" : 4.0675397,
+      "endurance" : 0.31840718,
+      "hoverLever" : 0.59381074,
+      "maximumSpeed" : 16.717634
+    }
+  },
+  {
+    "airframeID" : "wingcopter-198",
+    "displayName" : "Wingcopter 198",
+    "measured" : {
+      "climbRate" : 7.35834,
+      "cruiseSpeed" : 21.998398,
+      "endurance" : 1.0465376,
+      "glideRatio" : 7.721461,
+      "maximumSpeed" : 29.685614,
+      "stallSpeed" : 12.4869
+    }
+  },
+  {
+    "airframeID" : "wingtra-ray",
+    "displayName" : "WingtraRAY",
+    "measured" : {
+      "climbRate" : 8.362835,
+      "cruiseSpeed" : 19.01443,
+      "endurance" : 1.0020134,
+      "glideRatio" : 7.4743156,
+      "maximumSpeed" : 21.986977,
+      "stallSpeed" : 12.3798895
+    }
+  },
+  {
+    "airframeID" : "wingtraone-gen-ii",
+    "displayName" : "WingtraOne GEN II",
+    "measured" : {
+      "climbRate" : 9.022295,
+      "cruiseSpeed" : 15.699909,
+      "endurance" : 0.98998445,
+      "glideRatio" : 8.198848,
+      "maximumSpeed" : 23.457603,
+      "stallSpeed" : 12.01759
+    }
+  },
+  {
+    "airframeID" : "zipline-platform-1",
+    "displayName" : "Zipline Platform 1",
+    "measured" : {
+      "climbRate" : 2.8349042,
+      "cruiseSpeed" : 28.960361,
+      "endurance" : 2.210947,
+      "glideRatio" : 15.73204,
+      "maximumSpeed" : 38.645283,
+      "stallSpeed" : 17.224306
+    }
+  }
+]

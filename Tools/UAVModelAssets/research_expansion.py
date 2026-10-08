@@ -37,7 +37,7 @@ def research(profile, output):
             text = html.unescape(text).replace('\\/', '/')
             # Product filenames and nearby img alt text help exclude nav/footer art.
             tokens = [t.lower() for t in re.findall(r'[A-Za-z0-9]+', profile['name'])
-                      if len(t) > 2 and t.lower() not in ('aerovironment', 'aeronautics', 'leonardo', 'baykar')]
+                      if len(t) > 2 and t.lower() not in ('aerovironment', 'aeronautics', 'leonardo')]
             candidates = {}
             for match in re.finditer(r'https?://[^\s\"<>;()]+?\.(?:png|jpe?g|webp)', text):
                 url = match.group(0)

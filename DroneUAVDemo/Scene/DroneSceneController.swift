@@ -253,6 +253,7 @@ final class DroneSceneController {
     private let terrainDetailNode = SCNNode()
     private let worldBoundsNode = SCNNode()
     private let dockStationNode = SCNNode()
+    private var launchPadInstance: UAVLaunchPadInstance?
     private let missionDropZoneNode = SCNNode()
     private let missionWaypointCaptureNode = SCNNode()
     private var renderedMissionWaypointCaptureZones: [MissionWaypointCaptureZoneVisual] = []
@@ -283,6 +284,22 @@ final class DroneSceneController {
     /// world was generated (the mission bootstrap does exactly that).
     private var installedEnvironmentNodes: [UUID: SCNNode] = [:]
     private var installedEnvironmentDescriptors: [EnvironmentObjectDescriptor] = []
+    private let chargeEnvironmentRoot = SCNNode()
+    private var chargeEnvironmentNodes: [String: SCNNode] = [:]
+    private struct ChargeTreeDamage {
+        let id: UUID
+        let node: SCNNode
+        let originalOrientation: simd_quatf
+        let axis: SIMD3<Float>
+        let angle: Float
+        let bornAt: TimeInterval
+    }
+    private var chargeDamagedTrees: [UUID: ChargeTreeDamage] = [:]
+    private var chargeEnvironmentTime: TimeInterval = 0
+    private var chargeCollisionRefresh: Float = 0
+    private var chargeEnvironmentEffects: [InterceptWorldEffect] = []
+    private var chargeEnvironmentEffectVisuals: [UUID: WorldDamageEffectVisual] = [:]
+    private var chargeEnvironmentImpactIDs: Set<UUID> = []
     // Fire-response scenario: dedicated tree nodes + real flame/smoke VFX, kept entirely outside
     // ScenePopulationService's ambient forest (see FireResponseScenario plan) so charring a tree
     // never interacts with weather-driven forest visual refreshes.
@@ -628,6 +645,11 @@ final class DroneSceneController {
     private let handLaunchPOVCameraNode = SCNNode()
     private var handLaunchPOVLookAngles = SIMD2<Float>(repeating: 0.0) // yaw, pitch
     private var handLaunchPOVArmBuilt = false
+    private var handLaunchGripPlan: HandLaunchGripPlan?
+    private var handLaunchArms: [AdaptiveHandLaunchArm] = []
+    private let handLaunchArmsNode = SCNNode()
+    private var handLaunchReleaseRequested = false
+    private var handLaunchReleaseBlend: Float = 0
     private(set) var isHandLaunchPOVActive = false
     private var orbitLookAngles = SIMD2<Float>(repeating: 0.0)  // yaw, pitch
     private var fpvLookAngles = SIMD2<Float>(repeating: 0.0)    // yaw, pitch
@@ -776,7 +798,7 @@ final class DroneSceneController {
         // Warm the hand-launch arm rig off the main thread now, so the first
         // time the operator actually enters hand-launch hold doesn't pay for
         // the USDZ parse as a mid-session hitch.
-        HandLaunchArmAssetLoader.shared.preloadInBackground()
+        AdaptiveHandLaunchAssetLoader.shared.preloadInBackground()
 
         onlineTrialPlaceholderRootNode.name = "online_trial_vehicle_placeholders"
         scene.rootNode.addChildNode(onlineTrialPlaceholderRootNode)
@@ -1071,7 +1093,182 @@ final class DroneSceneController {
             .merging(remoteDropNodes, uniquingKeysWith: { first, _ in first }) {
             nodes.append(MissionReplayVisualCapture.snapshot(id: "payload:\(id)", node: node, recorder: recorder))
         }
+        for (id, node) in chargeEnvironmentNodes {
+            nodes.append(MissionReplayVisualCapture.snapshot(id: id, node: node, recorder: recorder,
+                role: id.hasPrefix("environment-tree:") ? "environment" : nil))
+        }
         return nodes.sorted { $0.id < $1.id }
+    }
+
+    var chargeEnvironmentReplayEffects: [MissionReplayEffectSnapshot] {
+        chargeEnvironmentEffects.map {
+            MissionReplayEffectSnapshot(id: $0.id, kind: $0.kind.rawValue, position: $0.position,
+                normal: $0.normal, age: max(0, chargeEnvironmentTime - $0.startedAt), lifetime: $0.lifetime,
+                scale: $0.scale, wind: currentWeather.windVector)
+        }
+    }
+
+    var hasChargeEnvironmentAftermath: Bool {
+        !chargeEnvironmentEffects.isEmpty || chargeDamagedTrees.values.contains { chargeEnvironmentTime - $0.bornAt < 2.4 }
+    }
+
+    /// One local consequence of a published charge event. Ordinary contact/ballast creates
+    /// none of this. The terrain sampler places scorch/soil on the actual surface, including
+    /// imported maps; only explicit scene trees can be fractured individually.
+    func applyChargeEnvironmentImpact(_ effect: InterceptWorldEffect) {
+        guard effect.kind == .explosion, chargeEnvironmentImpactIDs.insert(effect.id).inserted else { return }
+        SCNTransaction.begin(); SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
+        if chargeEnvironmentRoot.parent == nil {
+            chargeEnvironmentRoot.name = "environment.charge-damage"
+            scene.rootNode.addChildNode(chargeEnvironmentRoot)
+        }
+        let blast = ChargeDetonation(position: effect.position, normal: effect.normal)
+        let ground: (SIMD3<Float>, Float) -> Float = { [weak self] point, radius in
+            self?.groundVehicleSurfaceHeight(at: SIMD2<Float>(point.x, point.z), clearanceRadius: radius,
+                maximumHeight: point.y + 0.4) ?? .nan
+        }
+        let height = ground(effect.position, 0.1)
+        if height.isFinite && effect.position.y - height < 5 {
+            let soil = SCNNode(); soil.simdPosition = SIMD3<Float>(effect.position.x, height, effect.position.z)
+            if let scorch = WorldDamageEffectVisual.makeScorch(centre: soil.simdPosition, yaw: 0, ground: ground) {
+                scorch.simdPosition = .zero; soil.addChildNode(scorch)
+            }
+            let earth = SCNMaterial(); earth.diffuse.contents = NSColor(calibratedRed: 0.12, green: 0.085, blue: 0.045, alpha: 1)
+            earth.lightingModel = .physicallyBased
+            earth.roughness.contents = 1
+            for i in 0..<16 {
+                let a = Float(i) * 2.39996, r = 0.5 + Float(i % 5) * 0.27
+                let piece = SCNNode(geometry: SCNSphere(radius: 0.08 + CGFloat(i % 3) * 0.035))
+                (piece.geometry as? SCNSphere)?.segmentCount = 6
+                piece.geometry?.firstMaterial = earth
+                let p = soil.simdPosition + SIMD3<Float>(cos(a) * r, 0, sin(a) * r)
+                let y = ground(p + SIMD3<Float>(0, 0.4, 0), 0.1)
+                if y.isFinite { piece.simdPosition = SIMD3<Float>(p.x - soil.simdPosition.x, y - height + 0.04, p.z - soil.simdPosition.z) }
+                piece.simdScale = SIMD3<Float>(1.3, 0.45, 0.8); soil.addChildNode(piece)
+            }
+            chargeEnvironmentRoot.addChildNode(soil)
+            chargeEnvironmentNodes["terrain-damage:\(effect.id)"] = soil
+        }
+        let nearby = installedEnvironmentDescriptors.filter {
+            $0.kind == .tree && chargeDamagedTrees[$0.id] == nil
+                && simd_distance(SIMD2<Float>($0.position.x, $0.position.z), SIMD2<Float>(effect.position.x, effect.position.z)) < 6
+        }.sorted { simd_distance($0.position, effect.position) < simd_distance($1.position, effect.position) }.prefix(8)
+        var affected: Set<UUID> = []
+        for descriptor in nearby {
+            let stored = installedEnvironmentNodes[descriptor.id]
+            let refreshed = scene.rootNode.childNode(withName: "environment.trees", recursively: true)?.childNodes.first {
+                simd_distance($0.simdWorldPosition, descriptor.position) < 0.25
+            }
+            guard let original = stored?.parent != nil ? stored : refreshed else { continue }
+            let contact = SIMD3<Float>(descriptor.position.x,
+                min(descriptor.position.y + descriptor.size.y, max(descriptor.position.y, effect.position.y)), descriptor.position.z)
+            let exposure = blast.exposure(at: contact)
+            guard exposure > 0.08 else { continue }
+            let tree = original.clone(); tree.simdTransform = original.simdWorldTransform
+            var budget = 2_000
+            tree.enumerateHierarchy { node, _ in
+                node.physicsBody = nil; node.removeAllActions(); node.removeAllAnimations()
+                guard let geometry = node.geometry?.copy() as? SCNGeometry else { return }
+                geometry.materials = geometry.materials.map { material in
+                    let copy = material.copy() as! SCNMaterial
+                    let dark = CGFloat(max(0.13, 1 - exposure * 0.85))
+                    copy.multiply.contents = NSColor(calibratedRed: dark, green: dark * 0.82, blue: dark * 0.7, alpha: 1)
+                    return copy
+                }
+                node.geometry = geometry
+                if (node.name ?? "").lowercased().contains("trunk") && exposure > 0.35 {
+                    let wood = SCNMaterial(); wood.name = "damage.exposed-wood"
+                    wood.diffuse.contents = NSColor(calibratedRed: 0.30, green: 0.18, blue: 0.075, alpha: 1)
+                    wood.roughness.contents = 1; wood.isDoubleSided = true
+                    let direction = contact - effect.position
+                    let normal = simd_length_squared(direction) > 0.001 ? simd_normalize(direction) : SIMD3<Float>(1, 0, 0)
+                    if let damaged = VehicleBodyworkDeformation.deform(geometry, toBody: node.simdWorldTransform,
+                        sites: [GroundVehicleDamageSite(point: contact, severity: exposure, heat: exposure,
+                            tearsPanels: exposure > 0.65, normal: normal)], glass: false,
+                        triangleBudget: &budget, exposedMaterial: wood) { node.geometry = damaged }
+                }
+            }
+            original.removeFromParentNode(); affected.insert(descriptor.id)
+            chargeEnvironmentRoot.addChildNode(tree)
+            chargeEnvironmentNodes["environment-tree:\(descriptor.id)"] = tree
+            let away = SIMD3<Float>(descriptor.position.x - effect.position.x, 0, descriptor.position.z - effect.position.z)
+            let direction = simd_length_squared(away) > 0.001 ? simd_normalize(away) : SIMD3<Float>(1, 0, 0)
+            chargeDamagedTrees[descriptor.id] = ChargeTreeDamage(id: descriptor.id, node: tree,
+                originalOrientation: tree.simdWorldOrientation, axis: simd_cross(SIMD3<Float>(0, 1, 0), direction),
+                angle: exposure > 0.5 ? .pi * 0.46 : exposure * 0.22, bornAt: chargeEnvironmentTime)
+            if exposure > 0.6 {
+                for kind in [InterceptEffectKind.fire, .smoke] {
+                    chargeEnvironmentEffects.append(InterceptWorldEffect(id: UUID(), runID: effect.runID,
+                        impactID: effect.impactID, vehicleID: descriptor.id.uuidString, kind: kind,
+                        position: contact, startedAt: chargeEnvironmentTime, lifetime: kind == .fire ? 35 : 60, scale: 0.8))
+                }
+            }
+        }
+        if !affected.isEmpty {
+            scenePopulationService.removeDamagedTrees(affected)
+            let damagedNodeIDs = Set(affected.compactMap { installedEnvironmentNodes[$0] }.map(ObjectIdentifier.init))
+            let removed = Set(obstacleMap.compactMap { id, node in damagedNodeIDs.contains(ObjectIdentifier(node)) ? id : nil })
+            environmentObstacles.removeAll { removed.contains($0.id) }
+            removed.forEach { obstacleMap.removeValue(forKey: $0); obstacleSourceByID.removeValue(forKey: $0) }
+            installedEnvironmentDescriptors.removeAll { affected.contains($0.id) }
+            refreshChargeTreeCollisions()
+        }
+        environmentRevision &+= 1
+        updateChargeEnvironmentDamage(deltaTime: 0)
+    }
+
+    func updateChargeEnvironmentDamage(deltaTime: Float) {
+        chargeEnvironmentTime += TimeInterval(max(0, deltaTime))
+        SCNTransaction.begin(); SCNTransaction.disableActions = true
+        defer { SCNTransaction.commit() }
+        var moving = false
+        var finishedFalling = false
+        for damage in chargeDamagedTrees.values {
+            let age = Float(chargeEnvironmentTime - damage.bornAt), fraction = min(1, max(0, age / 2.4))
+            guard age - deltaTime < 2.4 else { continue }
+            let eased = fraction * fraction * (3 - 2 * fraction)
+            damage.node.simdWorldOrientation = simd_quatf(angle: damage.angle * eased, axis: damage.axis) * damage.originalOrientation
+            moving = moving || fraction < 1
+            finishedFalling = finishedFalling || (age >= 2.4 && age - deltaTime < 2.4)
+        }
+        chargeCollisionRefresh += deltaTime
+        if finishedFalling || (moving && chargeCollisionRefresh >= 0.2) { refreshChargeTreeCollisions(); chargeCollisionRefresh = 0 }
+        chargeEnvironmentEffects.removeAll { chargeEnvironmentTime - $0.startedAt >= $0.lifetime }
+        let active = Set(chargeEnvironmentEffects.map(\.id))
+        for id in Array(chargeEnvironmentEffectVisuals.keys) where !active.contains(id) {
+            chargeEnvironmentEffectVisuals.removeValue(forKey: id)?.node.removeFromParentNode()
+        }
+        for effect in chargeEnvironmentEffects {
+            let visual: WorldDamageEffectVisual
+            if let existing = chargeEnvironmentEffectVisuals[effect.id] { visual = existing } else {
+                visual = WorldDamageEffectVisual(kind: effect.kind, scale: effect.scale ?? 1)
+                visual.node.name = "mission.charge.environment.\(effect.kind.rawValue)"
+                chargeEnvironmentRoot.addChildNode(visual.node); chargeEnvironmentEffectVisuals[effect.id] = visual
+            }
+            visual.node.simdPosition = effect.position
+            visual.update(age: chargeEnvironmentTime - effect.startedAt, lifetime: effect.lifetime,
+                normal: effect.normal, wind: currentWeather.windVector)
+        }
+    }
+
+    private func refreshChargeTreeCollisions() {
+        let ids = Set(chargeDamagedTrees.keys)
+        environmentObstacles.removeAll { ids.contains($0.id) }
+        for damage in chargeDamagedTrees.values {
+            let b = damage.node.boundingBox
+            var low = SIMD3<Float>(repeating: .greatestFiniteMagnitude), high = -low
+            for x in [b.min.x, b.max.x] { for y in [b.min.y, b.max.y] { for z in [b.min.z, b.max.z] {
+                let p = damage.node.simdConvertPosition(SIMD3<Float>(Float(x), Float(y), Float(z)), to: nil)
+                low = simd_min(low, p); high = simd_max(high, p)
+            } } }
+            let half = SIMD2<Float>(max(0.1, high.x - low.x), max(0.1, high.z - low.z)) * 0.5
+            environmentObstacles.append(CollisionObstacle(id: damage.id, center: (low + high) * 0.5,
+                radius: simd_length(half), source: "damaged_tree", baseY: low.y, topY: high.y,
+                planarHalfExtents: half, yawRadians: 0))
+            obstacleMap[damage.id] = damage.node; obstacleSourceByID[damage.id] = "damaged_tree"
+        }
+        environmentObstacleIndex = CollisionObstacleSpatialIndex(obstacles: environmentObstacles)
     }
 
     var hasReplayDebris: Bool { !detachedVehiclePartNodes.isEmpty }
@@ -1374,7 +1571,8 @@ final class DroneSceneController {
         // Close enough for the shortest supported 10 m hose even when measured from the side
         // pump outlet, but clear of the launch pad and the aircraft's take-off envelope.
         let dock = dockSpawnPosition
-        let planarPosition = SIMD2<Float>(dock.x + 6.0, dock.z + 4.0)
+        let truckOffset = launchPadInstance == nil ? SIMD2<Float>(6, 4) : SIMD2<Float>(-7, 6.5)
+        let planarPosition = SIMD2<Float>(dock.x, dock.z) + truckOffset
         let groundY = supportSurfaceHeight(
             at: planarPosition,
             clearanceRadius: 1.4,
@@ -1980,14 +2178,12 @@ final class DroneSceneController {
                 state == .initialClimb ||
                 state == .transitionToFlight ||
                 state == .completed
-            let releaseBlend = throwing ? clampedProgress : (released ? 1.0 : 0.0)
-            // 0 = holding the airframe at the release point, 1 = full forward
-            // follow-through after the throw (arm sweeps down along -Z).
-            if let armPivot = handLaunchPOVCameraNode.childNode(
-                withName: "hand_launch_pov_arm_pivot",
-                recursively: true
-            ) {
-                armPivot.eulerAngles.x = SCNFloat(-releaseBlend * 1.05)
+            if throwing || released {
+                handLaunchReleaseRequested = true
+            } else if state == .idle || state == .prelaunchCheck || state == .aligning ||
+                        (state == .aborted && clampedProgress == 0) {
+                handLaunchReleaseRequested = false
+                handLaunchReleaseBlend = 0
             }
         case .airLaunch:
             // No launcher in the scene to animate: a carrier release is the absence of
@@ -2102,15 +2298,11 @@ final class DroneSceneController {
     /// Hold point of the airframe in the operator's hand, in world space —
     /// rides the gaze ray so hand, aircraft and view stay glued together.
     func handLaunchPOVCradlePoint() -> SIMD3<Float>? {
-        guard isHandLaunchPOVActive else {
+        guard isHandLaunchPOVActive, let plan = handLaunchGripPlan else {
             return nil
         }
         return handLaunchPOVCameraNode.simdConvertPosition(
-            SIMD3<Float>(
-                LaunchRigMetrics.handHoldSideOffset,
-                -LaunchRigMetrics.handHoldDropBelowEyes,
-                -LaunchRigMetrics.handHoldForwardOffset
-            ),
+            plan.holdOffset,
             to: nil
         )
     }
@@ -2242,58 +2434,43 @@ final class DroneSceneController {
         )
     }
 
-    /// First-person viewmodel arm: the left arm enters the frame from the
-    /// lower-left, its open palm cupping the airframe's belly at the hold
-    /// point. Camera-local, so it follows every look movement together with
-    /// the held aircraft (whose cradle point rides the same gaze ray).
+    /// Real skinned hands use separate finger joints and shoulder/elbow IK.
+    /// The grip and the physics hold point share the rendered aircraft geometry.
     private func buildHandLaunchPOVArm() {
         lastLaunchPresentation = nil
-        handLaunchPOVArmBuilt = true
-
-        let shoulderLocal = SIMD3<Float>(-0.32, -0.48, 0.15)
-        let palmTargetLocal = SIMD3<Float>(
-            LaunchRigMetrics.handHoldSideOffset,
-            -LaunchRigMetrics.handHoldDropBelowEyes - 0.085,
-            -LaunchRigMetrics.handHoldForwardOffset
+        handLaunchArmsNode.childNodes.forEach { $0.removeFromParentNode() }
+        handLaunchArms.removeAll()
+        handLaunchReleaseRequested = false
+        handLaunchReleaseBlend = 0
+        let plan = HandLaunchGripPlan.measure(
+            aircraftID: activeProfile.id,
+            root: droneNode,
+            bodyNodes: componentNodes[.flightControllerCore] ?? [],
+            wingNodes: (componentNodes[.armFL] ?? []) + (componentNodes[.armFR] ?? [])
         )
-        let reachVector = palmTargetLocal - shoulderLocal
-        let reach = simd_length(reachVector)
-
-        let aligner = SCNNode()
-        aligner.simdPosition = shoulderLocal
-        aligner.simdOrientation = simd_quatf(
-            from: SIMD3<Float>(0.0, 0.0, -1.0),
-            to: reachVector / reach
-        )
-        handLaunchPOVCameraNode.addChildNode(aligner)
-
-        let pivot = SCNNode()
-        pivot.name = "hand_launch_pov_arm_pivot"
-        aligner.addChildNode(pivot)
-
-        if let armModel = HandLaunchArmAssetLoader.shared.makeArmNode(reach: reach) {
-            pivot.addChildNode(armModel)
-        } else {
-            let skinMaterial = SCNMaterial()
-            skinMaterial.diffuse.contents = NSColor(calibratedRed: 0.72, green: 0.56, blue: 0.45, alpha: 1.0)
-            skinMaterial.roughness.contents = 0.85
-            let elbowLocal = SIMD3<Float>(0.02, -0.055, -reach * 0.52)
-            let handLocal = SIMD3<Float>(0.0, 0.0, -reach)
-            pivot.addChildNode(launchRigSegment(
-                from: .zero, to: elbowLocal, radius: 0.052, material: skinMaterial
-            ))
-            pivot.addChildNode(launchRigSegment(
-                from: elbowLocal, to: handLocal, radius: 0.044, material: skinMaterial
-            ))
-            let palm = SCNNode(geometry: SCNSphere(radius: 0.055))
-            palm.geometry?.materials = [skinMaterial]
-            palm.simdPosition = handLocal
-            pivot.addChildNode(palm)
+        handLaunchGripPlan = plan
+        handLaunchArmsNode.name = "hand_launch_arms"
+        handLaunchArmsNode.isHidden = true
+        handLaunchPOVCameraNode.addChildNode(handLaunchArmsNode)
+        for anchor in plan.anchors {
+            guard let arm = AdaptiveHandLaunchAssetLoader.shared.makeArm(rightHand: anchor.rightHand) else { continue }
+            handLaunchArmsNode.addChildNode(arm.node)
+            handLaunchArms.append(arm)
         }
-
-        // A first-person viewmodel casting a big detached shadow on the
-        // ground reads as a glitch, not realism.
+        handLaunchPOVArmBuilt = handLaunchArms.count == plan.anchors.count
         disableShadowsRecursively(handLaunchPOVCameraNode)
+    }
+
+    private func updateHandLaunchArms(deltaTime: Float) {
+        handLaunchArmsNode.isHidden = !isHandLaunchPOVActive
+        guard isHandLaunchPOVActive, let plan = handLaunchGripPlan else { return }
+        if handLaunchReleaseRequested {
+            handLaunchReleaseBlend = min(1, handLaunchReleaseBlend + max(0, deltaTime) / 0.32)
+        }
+        let release = handLaunchReleaseBlend * handLaunchReleaseBlend * (3 - 2 * handLaunchReleaseBlend)
+        for (arm, anchor) in zip(handLaunchArms, plan.anchors) {
+            arm.place(anchor: anchor, aircraft: droneNode, camera: handLaunchPOVCameraNode, release: release)
+        }
     }
 
     private func disableShadowsRecursively(_ node: SCNNode) {
@@ -2497,136 +2674,11 @@ final class DroneSceneController {
     private enum LaunchRigMetrics {
         static let catapultDeckHeight: Float = 0.62
         static let catapultCradleOffset: Float = 0.17
-        /// Hand launch is presented first-person: the airframe rides the
-        /// operator's gaze ray, held in the left hand (the sculpted asset is
-        /// a left arm) — forward of, below and to the left of the eyes
-        /// (composition validated with offscreen renders: the screen centre
-        /// stays clear for aiming, the arm enters from the lower-left). The
-        /// physics release origin and the POV camera must agree on these
-        /// numbers.
+        /// Drafted hold distance before the first-person measured grip is active.
         static let handHoldForwardOffset: Float = 0.75
-        static let handHoldDropBelowEyes: Float = 0.22
-        static let handHoldSideOffset: Float = -0.18
         static let handEyeAboveRelease: Float = 0.20
         /// Height of the canister trunnion above the launch vehicle's deck.
         static let canisterPivotHeight: Float = 1.35
-    }
-
-    /// Loads `HandLaunchArm.usdz` (sculpted human arm, shoulder ball to open
-    /// hand) for the hand-launch rig. The anchor points below were measured
-    /// from the mesh vertices (model units): the returned node has the
-    /// shoulder ball at its origin and the palm centre at `(0, 0, -reach)`,
-    /// so a parent pivot can swing it like a shoulder joint.
-    final class HandLaunchArmAssetLoader {
-        static let shared = HandLaunchArmAssetLoader()
-
-        private static let shoulderAnchor = SIMD3<Float>(-29.24, 77.21, 3.64)
-        private static let palmAnchor = SIMD3<Float>(71.54, -136.39, 23.21)
-        /// Roll about the arm axis that turns the open palm upward so it
-        /// carries the fuselage from below (chosen from rendered variants).
-        private static let palmUpRollRadians: Float = .pi / 2.0
-
-        private let loadLock = NSLock()
-        private var cachedTemplate: SCNNode?
-        private var didAttemptLoad = false
-
-        private init() {}
-
-        /// Kicks off the USDZ parse on a background queue as early as the
-        /// scene exists, well before the operator ever reaches hand-launch
-        /// hold. Parsing `HandLaunchArm.usdz` synchronously on first use used
-        /// to show up as a sudden frame hitch right as the first-person rig
-        /// was built; warming the cache ahead of time makes that first
-        /// `makeArmNode` call a cheap clone instead.
-        func preloadInBackground() {
-            DispatchQueue.global(qos: .utility).async { [self] in
-                _ = loadTemplate()
-            }
-        }
-
-        /// Arm with the shoulder at the node origin reaching to a palm at
-        /// `(0, 0, -reach)`. Returns nil when the USDZ asset is unavailable —
-        /// the caller supplies its own procedural fallback.
-        func makeArmNode(reach: Float) -> SCNNode? {
-            guard let template = loadTemplate() else {
-                return nil
-            }
-            let shoulder = Self.shoulderAnchor
-            let armAxis = simd_normalize(Self.palmAnchor - shoulder)
-            let armLength = simd_length(Self.palmAnchor - shoulder)
-            let scale = max(0.05, reach) / max(1.0, armLength)
-
-            let alignRotation = simd_quatf(from: armAxis, to: SIMD3<Float>(0.0, 0.0, -1.0))
-            let rollRotation = simd_quatf(
-                angle: Self.palmUpRollRadians,
-                axis: SIMD3<Float>(0.0, 0.0, 1.0)
-            )
-            let rotation = rollRotation * alignRotation
-
-            let arm = template.clone()
-            arm.simdScale = SIMD3<Float>(repeating: scale)
-            arm.simdOrientation = rotation
-            arm.simdPosition = -rotation.act(shoulder * scale)
-
-            let wrapper = SCNNode()
-            wrapper.name = "hand_launch_arm_model"
-            wrapper.addChildNode(arm)
-            return wrapper
-        }
-
-        /// Locked across the whole load (not just the cache read) so a
-        /// background preload and a main-thread `makeArmNode` racing each
-        /// other never both parse the USDZ, and the main thread — if it
-        /// somehow gets there first — simply blocks until the one load
-        /// finishes rather than falling back to the procedural arm.
-        private func loadTemplate() -> SCNNode? {
-            loadLock.lock()
-            defer { loadLock.unlock() }
-
-            if didAttemptLoad {
-                return cachedTemplate
-            }
-            didAttemptLoad = true
-
-            guard let url = Bundle.main.url(
-                forResource: "HandLaunchArm",
-                withExtension: "usdz"
-            ), let scene = try? SCNScene(url: url, options: [
-                .checkConsistency: false
-            ]) else {
-                print("[LaunchRig] HandLaunchArm.usdz unavailable; using procedural arm fallback")
-                return nil
-            }
-
-            let root = SCNNode()
-            root.name = "hand_launch_arm_template"
-            for child in scene.rootNode.childNodes {
-                root.addChildNode(child.clone())
-            }
-            normalizeMaterials(root)
-            cachedTemplate = root
-            return root
-        }
-
-        /// The Sketchfab sculpt ships with a translucent-looking material that
-        /// lets the terrain bleed through; force an opaque matte skin tone.
-        private func normalizeMaterials(_ node: SCNNode) {
-            node.castsShadow = true
-            node.geometry?.materials.forEach { material in
-                material.transparency = 1.0
-                material.blendMode = .replace
-                material.transparent.contents = nil
-                material.diffuse.contents = NSColor(
-                    calibratedRed: 0.87, green: 0.70, blue: 0.58, alpha: 1.0
-                )
-                material.roughness.contents = 0.85
-                material.metalness.contents = 0.0
-                material.isDoubleSided = true
-            }
-            for child in node.childNodes {
-                normalizeMaterials(child)
-            }
-        }
     }
 
     /// Capsule strut between two points; the workhorse of the procedural
@@ -5137,6 +5189,13 @@ final class DroneSceneController {
 
     func setDroneProfile(_ profile: DroneModelProfile) {
         activeProfile = profile
+        handLaunchPOVArmBuilt = false
+        handLaunchGripPlan = nil
+        handLaunchArms.removeAll()
+        handLaunchArmsNode.childNodes.forEach { $0.removeFromParentNode() }
+        handLaunchArmsNode.isHidden = true
+        handLaunchReleaseRequested = false
+        handLaunchReleaseBlend = 0
         lastLaunchPresentation = nil
         airframeBoosterEffluxNode = nil
         airframeBoosterIsBurning = false
@@ -5182,6 +5241,9 @@ final class DroneSceneController {
         fpvPresentationRootNode.simdTransform = matrix_identity_float4x4
         configureDroneCollisionProxy(for: profile)
         resetCameraRuntimeState()
+        if isHandLaunchPOVActive {
+            buildHandLaunchPOVArm()
+        }
     }
 
     func resetCameraRuntimeState() {
@@ -5283,6 +5345,11 @@ final class DroneSceneController {
         terrain: TerrainConfiguration,
         printProceduralDiagnostics: Bool
     ) {
+        chargeEnvironmentRoot.childNodes.forEach { $0.removeFromParentNode() }
+        chargeEnvironmentRoot.removeFromParentNode(); chargeEnvironmentNodes.removeAll()
+        chargeDamagedTrees.removeAll(); chargeEnvironmentEffects.removeAll(); chargeEnvironmentEffectVisuals.removeAll()
+        chargeEnvironmentImpactIDs.removeAll(); chargeEnvironmentTime = 0
+        chargeCollisionRefresh = 0
         // The dock and support surface may move when a new world is installed. Recreate the
         // sandbox hose truck on the next payload refresh so it cannot remain at the old origin.
         removeFreeFlightFireTruck()
@@ -5456,8 +5523,8 @@ final class DroneSceneController {
             // deferred `updateDockStationPosition` moves the pad, tens of metres away. Syncing the
             // dock here closes that window.
             if let spawn = world.spawnPoint {
-                dockSpawnPosition = spawn
-                dockStationNode.simdPosition = spawn
+                dockSpawnPosition = spawn + SIMD3<Float>(0, launchPadGroundRise, 0)
+                dockStationNode.simdPosition = dockSpawnPosition
                     + SIMD3<Float>(0.0, -dockDeckSurfaceHeight, 0.0)
             }
 
@@ -6205,7 +6272,7 @@ final class DroneSceneController {
         )
         let droneOrientation = orientationQuaternion(from: state.orientation)
         droneNode.simdOrientation = droneOrientation
-
+        updateHandLaunchArms(deltaTime: deltaTime)
 
         updateGroundDetailPatch(around: state.position)
 
@@ -6257,6 +6324,11 @@ final class DroneSceneController {
             deltaTime: deltaTime
         )
         updateWeatherAnimation(deltaTime: deltaTime, weather: currentWeather)
+        launchPadInstance?.update(
+            wind: currentWeather.windVector,
+            gusts: currentWeather.gusts,
+            deltaTime: deltaTime
+        )
         applyPayloadOpticsShadowQuality(
             isActive: camera.mode == .payloadOptics,
             weather: currentWeather
@@ -6731,6 +6803,26 @@ final class DroneSceneController {
             }
             if best == nil || surfaceHeight > best!.height {
                 best = (surfaceHeight, surface.normal)
+            }
+        }
+        if let height = launchPadInstance?.supportHeight(
+            at: planarPosition, clearanceRadius: clearanceRadius, maximumHeight: maximumHeight
+        ), best == nil || height > best!.height {
+            best = (height, SIMD3<Float>(0, 1, 0))
+        }
+        // The aircraft remembers its last support height when a query misses. Once
+        // it leaves the raised pad, explicitly return the procedural zero datum so
+        // that the remembered deck height cannot become an invisible floor outside.
+        if launchPadInstance != nil, installedWorld == nil, meshCollision == nil,
+           !groundNode.isHidden, let plane = groundNode.geometry as? SCNPlane,
+           maximumHeight + 0.08 >= 0 {
+            let local = groundNode.simdConvertPosition(
+                SIMD3<Float>(planarPosition.x, groundNode.simdWorldPosition.y, planarPosition.y), from: nil)
+            if abs(local.x) + clearanceRadius <= Float(plane.width) * 0.5,
+               abs(local.y) + clearanceRadius <= Float(plane.height) * 0.5,
+               best == nil || best!.height < 0 {
+                // The rendered plane has a small negative depth bias; physics is Y=0.
+                best = (0, SIMD3<Float>(0, 1, 0))
             }
         }
         return best
@@ -8141,7 +8233,7 @@ final class DroneSceneController {
     /// nozzle points while `isSpraying`, independent of whether that hit counts as a suppression
     /// target (a real hose sprays wherever it's pointed, on-target or not).
     @discardableResult
-    func updateHoseAimAndSpray(fireTreeNodes: [SCNNode], isSpraying: Bool) -> Int? {
+    func updateHoseAimAndSpray(fireTreeNodes: [SCNNode], isSpraying: Bool, burningIndices: Set<Int>? = nil) -> Int? {
         ensureHoseRig()
         guard let hit = hoseAimRaycast() else {
             hideHoseSprayVisual()
@@ -8152,10 +8244,22 @@ final class DroneSceneController {
         // proxies with `obstacleMap[id] = tree` in `spawnFireResponseScenario`, where `tree` is
         // the exact node stored in `fireTreeNodes` — so owner-identity lookup replaces the old
         // hit-node-descendant walk.
-        let aimedIndex: Int? = hit.hitObstacleID.flatMap { obstacleID in
+        let hitTreeIndex: Int? = hit.hitObstacleID.flatMap { obstacleID in
             guard let ownerNode = obstacleMap[obstacleID] else { return nil }
             return fireTreeNodes.firstIndex { $0 === ownerNode }
         }
+        let flames = fireTreeNodes.indices.compactMap { index -> FireHoseAimTargeting.Flame? in
+            guard fireTreeFlameNodes.indices.contains(index),
+                  burningIndices?.contains(index) ?? !fireTreeFlameNodes[index].isHidden else { return nil }
+            let flame = fireTreeFlameNodes[index]
+            let height = fireTreeHeightsMeters.indices.contains(index) ? fireTreeHeightsMeters[index] * 0.55 : 8
+            return FireHoseAimTargeting.Flame(index: index, centre: flame.simdWorldPosition,
+                height: height, radius: max(0.85, height * 0.25))
+        }
+        let flameHit = FireHoseAimTargeting.hit(origin: hit.origin, direction: hit.forward,
+            reach: max(1, Float(hoseOpticsState.nozzleThrowMeters)), flames: flames,
+            blockingDistance: hit.hitDistance, blockingTreeIndex: hitTreeIndex)
+        let aimedIndex = flameHit?.index
 
         guard isSpraying, let stream = hoseStreamNode, let impact = hoseImpactNode else {
             hideHoseSprayVisual()
@@ -8163,7 +8267,7 @@ final class DroneSceneController {
         }
 
         let endpoint: SIMD3<Float>
-        if let hitDistance = hit.hitDistance {
+        if let hitDistance = flameHit?.distance ?? hit.hitDistance {
             endpoint = hit.origin + hit.forward * hitDistance
         } else {
             let reach = max(1.0, Float(hoseOpticsState.nozzleThrowMeters))
@@ -9047,7 +9151,7 @@ final class DroneSceneController {
     /// even where the physics template has more units (Wingcopter: 8) than
     /// the visual rig has pods (4).
     private func updatePropulsionUnitVisuals(state: DroneState) {
-        for rig in articulatedNodes { rig.applyControl(elevatorDeflection: state.elevatorDeflection) }
+        for rig in articulatedNodes { rig.applyMechanization(state: state) }
         guard !tiltPivotNodes.isEmpty else { return }
         guard let representative = state.propulsionUnits.first(where: { $0.role == .tiltRotor }) else { return }
         let angle = CGFloat(representative.tiltAngleRad)
@@ -10930,6 +11034,14 @@ final class DroneSceneController {
 
     private func configureDockStationGeometry() {
         dockStationNode.childNodes.forEach { $0.removeFromParentNode() }
+        launchPadInstance = UAVLaunchPadAssetLoader.shared.makeInstance()
+        if let pad = launchPadInstance {
+            // The existing dock parent is offset down by this amount. The USDZ's
+            // own origin is the deck surface, so compensate inside the parent.
+            pad.node.simdPosition.y = dockDeckSurfaceHeight
+            dockStationNode.addChildNode(pad.node)
+            return
+        }
 
         let platformMaterial = SCNMaterial()
         platformMaterial.diffuse.contents = NSColor(calibratedRed: 0.34, green: 0.36, blue: 0.39, alpha: 1.0)
@@ -10982,6 +11094,10 @@ final class DroneSceneController {
         dockStationNode.addChildNode(stripeB)
     }
 
+    private var launchPadGroundRise: Float {
+        launchPadInstance == nil ? 0 : UAVLaunchPadConstants.deckRiseAboveGroundM
+    }
+
     private func updateDockStationPosition(for terrain: TerrainConfiguration) {
         // An imported world has no world-origin apron: (0, 0, 0) in a photogrammetric tile is an
         // arbitrary point, in this city usually open harbour, and always at the vertical datum's
@@ -10990,8 +11106,8 @@ final class DroneSceneController {
         // terrain on the first reset — including the one at session start, which is why the
         // aircraft appeared beneath the surface instead of on its deck.
         if let meshSpawn = meshSpawnPoint {
-            dockSpawnPosition = meshSpawn
-            dockStationNode.simdPosition = meshSpawn + SIMD3<Float>(0.0, -dockDeckSurfaceHeight, 0.0)
+            dockSpawnPosition = meshSpawn + SIMD3<Float>(0, launchPadGroundRise, 0)
+            dockStationNode.simdPosition = dockSpawnPosition + SIMD3<Float>(0.0, -dockDeckSurfaceHeight, 0.0)
             return
         }
 
@@ -10999,10 +11115,10 @@ final class DroneSceneController {
         let dockCenter = SIMD3<Float>(0.0, 0.0, 0.0)
         dockSpawnPosition = SIMD3<Float>(
             dockCenter.x.clamped(to: -extent...extent),
-            0.0,
+            launchPadGroundRise,
             dockCenter.z.clamped(to: -extent...extent)
         )
-        // Keep the visual launch deck flush with the physics ground plane so spawn/reset use the same reference height.
+        // Spawn/reset and the support query share the visible deck's elevation.
         dockStationNode.simdPosition = dockSpawnPosition + SIMD3<Float>(0.0, -dockDeckSurfaceHeight, 0.0)
     }
 

@@ -35,6 +35,7 @@ struct FlightOpsModuleView: View {
                             viewModel.arm()
                         }
                     }
+                    .instructorTarget("simulation.command.arm")
 
                     OperationalActionButton(
                         titleKey: "command.takeoff",
@@ -44,6 +45,7 @@ struct FlightOpsModuleView: View {
                         viewModel.takeoff()
                     }
                     .disabled(!viewModel.canInitiateTakeoffCommand)
+                    .instructorTarget("simulation.command.takeoff")
 
                     OperationalActionButton(
                         titleKey: "command.land",
@@ -59,6 +61,7 @@ struct FlightOpsModuleView: View {
                         ) {
                             viewModel.hover()
                         }
+                        .instructorTarget("simulation.command.hover")
 
                         OperationalActionButton(
                             titleKey: "command.auto_path",
@@ -66,6 +69,7 @@ struct FlightOpsModuleView: View {
                         ) {
                             viewModel.activateAutoPath()
                         }
+                        .instructorTarget("simulation.command.autoPath")
 
                         OperationalActionButton(
                             titleKey: "command.return_home",
@@ -73,6 +77,7 @@ struct FlightOpsModuleView: View {
                         ) {
                             viewModel.activateReturnHome()
                         }
+                        .instructorTarget("simulation.command.returnHome")
                     }
                 }
             }
@@ -152,6 +157,7 @@ struct FlightOpsModuleView: View {
                                 viewModel.activateFixedWingAssist(assistMode)
                             }
                             .disabled(isFixedWingAssistDisabled(assistMode))
+                            .instructorTarget("simulation.assist.\(assistMode.rawValue)")
                         }
                     }
                 }
@@ -172,6 +178,12 @@ struct FlightOpsModuleView: View {
                             viewModel.setFlightControlMode(mode)
                         }
                     }
+                }
+            }
+
+            if viewModel.aircraftMechanizationConfiguration != nil {
+                ModuleSection(titleKey: "mechanics.title", subtitleKey: "mechanics.subtitle") {
+                    AircraftMechanizationControls(viewModel: viewModel)
                 }
             }
 
@@ -324,5 +336,131 @@ struct FlightOpsModuleView: View {
 
     private func localized(_ key: String) -> String {
         NSLocalizedString(key, comment: "")
+    }
+}
+
+/// Shared by both flight panels. The positions below are measured servo
+/// positions; the pickers issue commands and never set a visual's transform.
+///
+/// Nothing here refuses a selection. The limit speeds are shown next to the levers, the load
+/// on what is out is shown against its limit, and what breaks is reported where it broke.
+/// A lever left in AUTO is worked by the autopilot while it is flying; a selected position
+/// is the operator's and the autopilot leaves it alone.
+struct AircraftMechanizationControls: View {
+    @SimulationObservedObject var viewModel: DroneSimulationViewModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                surface("mechanics.aileron", viewModel.controlSurfaceAnglesDegrees.x)
+                surface("mechanics.elevator", viewModel.controlSurfaceAnglesDegrees.y)
+                surface("mechanics.rudder", viewModel.controlSurfaceAnglesDegrees.z)
+            }
+            if let model = viewModel.aircraftMechanizationModel {
+                let state = viewModel.aircraftMechanizationState
+                if model.configuration.hasFlaps {
+                    flaps(model.characteristics, state: state)
+                }
+                if model.configuration.retractableGear {
+                    gear(model.characteristics, state: state)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func flaps(_ c: AircraftMechanizationCharacteristics, state: AircraftMechanizationState) -> some View {
+        Picker("mechanics.flaps", selection: Binding(
+            get: {
+                guard !viewModel.isFlapLeverAutomatic else { return -1 }
+                return viewModel.flapLeverPosition < 0.1 ? 0 : viewModel.flapLeverPosition < 0.7 ? 1 : 2
+            },
+            set: { viewModel.setFlapCommand($0 < 0 ? nil : $0 == 0 ? 0 : $0 == 1 ? Double(AircraftMechanizationCharacteristics.takeoffFlapSetting) : 1) }
+        )) {
+            Text("mechanics.automatic").tag(-1)
+            Text("mechanics.retracted").tag(0)
+            Text(L10n.f("mechanics.takeoff", degrees(c.flapMaxRad * AircraftMechanizationCharacteristics.takeoffFlapSetting))).tag(1)
+            Text(L10n.f("mechanics.landing", degrees(c.flapMaxRad))).tag(2)
+        }
+        .disabled(!viewModel.canAdjustMechanization)
+        reading("mechanics.actual_flaps", String(format: "%.0f° → %.0f°", degrees(state.flapAngleRadians),
+                                                 degrees(state.flapSelection * c.flapMaxRad)))
+        reading("mechanics.flap_limit", speed(c.flapLimitSpeedMps))
+        load(state.flapLoadRatio)
+        if state.flapPanelHealth.x <= 0.5 { failure("mechanics.flap_lost_left") }
+        if state.flapPanelHealth.y <= 0.5 { failure("mechanics.flap_lost_right") }
+    }
+
+    @ViewBuilder
+    private func gear(_ c: AircraftMechanizationCharacteristics, state: AircraftMechanizationState) -> some View {
+        Picker("mechanics.gear", selection: Binding(
+            get: { viewModel.isLandingGearLeverAutomatic ? -1 : viewModel.landingGearLeverDown ? 1 : 0 },
+            set: { viewModel.setLandingGearCommand($0 < 0 ? nil : $0 == 1) }
+        )) {
+            Text("mechanics.automatic").tag(-1)
+            Text("mechanics.gear_up").tag(0)
+            Text("mechanics.gear_down").tag(1)
+        }
+        .pickerStyle(.segmented)
+        .disabled(!viewModel.canAdjustMechanization)
+        reading("mechanics.actual_gear", L10n.s(gearStatusKey(state)),
+                tint: state.gearDownAndLocked ? GroundControlPalette.success : GroundControlPalette.textSecondary)
+        reading("mechanics.gear_limit", speed(c.gearLimitSpeedMps))
+        load(state.gearLoadRatio)
+        if state.gearDoorsLost { failure("mechanics.gear_doors_lost") }
+        if state.gearCrushedOnGround {
+            failure("mechanics.gear_crushed")
+        } else if state.gearLegFailed {
+            failure("mechanics.gear_leg_failed")
+        }
+    }
+
+    private func gearStatusKey(_ state: AircraftMechanizationState) -> String {
+        if state.gearInTransit { return "mechanics.gear_moving" }
+        return state.gearExtension > 0.5 ? "mechanics.gear_locked_down" : "mechanics.gear_locked_up"
+    }
+
+    /// Air load on what is deployed, against its limit. Shown from the limit upwards: below
+    /// it there is nothing to report.
+    @ViewBuilder
+    private func load(_ ratio: Float) -> some View {
+        if ratio >= 1 {
+            Text(L10n.f("mechanics.overload", Int((ratio * 100).rounded()),
+                        Int(AircraftMechanizationModel.ultimateLoadFactor * 100)))
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(GroundControlPalette.warning)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func failure(_ key: String) -> some View {
+        Text(LocalizedStringKey(key))
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(GroundControlPalette.danger)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func surface(_ key: String, _ degrees: Float) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(LocalizedStringKey(key)).foregroundStyle(GroundControlPalette.textSecondary)
+            Text(String(format: "%+.1f°", degrees)).monospacedDigit()
+        }
+        .font(.caption)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func reading(_ key: String, _ value: String,
+                         tint: Color = GroundControlPalette.textSecondary) -> some View {
+        HStack {
+            Text(LocalizedStringKey(key)).foregroundStyle(GroundControlPalette.textSecondary)
+            Spacer()
+            Text(value).monospacedDigit().foregroundStyle(tint)
+        }
+        .font(.caption)
+    }
+
+    private func degrees(_ radians: Float) -> Float { radians * 180 / .pi }
+    private func speed(_ metersPerSecond: Float) -> String {
+        String(format: "%.0f m/s · %.0f km/h", metersPerSecond, metersPerSecond * 3.6)
     }
 }

@@ -1,0 +1,19 @@
+[
+  {
+    "bounds_max_m" : [
+      0.076435640454292297,
+      0.028768999502062798,
+      0.076435640454292297
+    ],
+    "bounds_min_m" : [
+      -0.076435640454292297,
+      -0.0022499999031424522,
+      -0.076435640454292297
+    ],
+    "id" : "frame-cinewhoop-25",
+    "imported_triangles" : 47592,
+    "meshes" : 105,
+    "scene_kit_import" : "passed",
+    "textured_materials" : 89
+  }
+]

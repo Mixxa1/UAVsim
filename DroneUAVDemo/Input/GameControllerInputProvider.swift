@@ -499,6 +499,13 @@ private extension InputAction {
             return 0
         case .disarmAircraft:
             return 1
+        case .requestTakeoff: return 63
+        case .requestLanding: return 64
+        case .activateAutoPath: return 65
+        case .takeManualControl: return 66
+        case .activateAltitudeHold: return 67
+        case .openFlightPanel: return 68
+        case .openCameraPanel: return 69
         case .toggleFPV:
             return 2
         case .toggleMissionMap:
@@ -609,6 +616,11 @@ private extension InputAction {
             return 51
         case .raceBuilderCyclePassage:
             return 52
+        // Keyboard-only for now (⇧C / ⇧F): no gamepad button is spent on the levers.
+        case .toggleLandingGear:
+            return 1_002
+        case .stepFlaps:
+            return 1_003
         }
     }
 }

@@ -23,8 +23,8 @@ final class InputBindingsStore {
             .filter { !$0.contains(KeyboardCommand.toggleControlPanel.titleKey) }
     }
 
-    func rebind(_ command: KeyboardCommand, keyCode: UInt16, keyLabel: String) {
-        keyboardInputService.rebind(command: command, to: keyCode, keyLabel: keyLabel)
+    func rebind(_ command: KeyboardCommand, keyCode: UInt16, keyLabel: String, requiresShift: Bool = false) {
+        keyboardInputService.rebind(command: command, to: keyCode, keyLabel: keyLabel, requiresShift: requiresShift)
     }
 
     func resetToDefaults() {

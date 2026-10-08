@@ -31,6 +31,13 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
 
     private weak var sceneView: FocusableSCNView?
     private weak var preparedDamageEffects: SCNNode?
+    @MainActor private static var preparedDamagePipelineVariants: Set<String> = []
+    private static let damagePreparationQueue = DispatchQueue(label: "com.uavsim.damage-preparation", qos: .userInitiated)
+    // A snapshot can hold main briefly. Never queue a capture for every rendered frame while
+    // that happens: old callbacks must not delay the first image from a newly selected camera.
+    private let captureDispatchLock = NSLock()
+    private var captureDispatchPending = false
+    private var latestRenderedTime: TimeInterval = 0
     private var processedFrameOwner: ProcessedFrameOwner = .none
     private var fpvPipelineActive = false
     private var postProcessingRequired = false
@@ -93,9 +100,21 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
     ) {
         // SceneKit may invoke its delegate on a render thread. Snapshotting and AppKit view
         // mutation stay on main; expensive RGB/composite processing stays on one serial worker.
+        captureDispatchLock.lock()
+        latestRenderedTime = time
+        guard !captureDispatchPending else { captureDispatchLock.unlock(); return }
+        captureDispatchPending = true
+        captureDispatchLock.unlock()
         DispatchQueue.main.async { [weak self] in
-            self?.captureFPVFrameIfNeeded(atTime: time)
-            self?.capturePayloadSensorFrameIfNeeded(atTime: time)
+            guard let self else { return }
+            self.captureDispatchLock.lock()
+            let latest = self.latestRenderedTime
+            self.captureDispatchLock.unlock()
+            self.captureFPVFrameIfNeeded(atTime: latest)
+            self.capturePayloadSensorFrameIfNeeded(atTime: latest)
+            self.captureDispatchLock.lock()
+            self.captureDispatchPending = false
+            self.captureDispatchLock.unlock()
         }
     }
 
@@ -109,6 +128,15 @@ final class SceneRenderCoordinator: NSObject, SCNSceneRendererDelegate, @uncheck
         guard let preparation, preparation !== preparedDamageEffects else { return }
         preparedDamageEffects = preparation
         view.prepare([preparation], completionHandler: nil)
+        if let device = view.device {
+            let antialiasing = view.antialiasingMode
+            let key = "\(device.registryID):\(antialiasing.rawValue)"
+            if Self.preparedDamagePipelineVariants.insert(key).inserted {
+                Self.damagePreparationQueue.async {
+                    WorldDamageEffectVisual.prepareRenderPipelines(device: device, antialiasing: antialiasing)
+                }
+            }
+        }
     }
 
     /// Clears the shared frame only when the pass asking for it is the one showing it.

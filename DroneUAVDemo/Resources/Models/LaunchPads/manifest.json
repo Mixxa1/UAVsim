@@ -1,0 +1,45 @@
+{
+  "id": "uav-launch-pad",
+  "name": "Стартовая площадка БВС",
+  "file": "uav-launch-pad.usdz",
+  "design": "Original visual concept, procedural geometry and textures",
+  "visible_text": false,
+  "markings": "White UAV pictogram inside a dark octagon with yellow outline, alignment ring and direction arrow",
+  "meters_per_unit": 1,
+  "up_axis": "Y",
+  "approach_axis": "+Z",
+  "origin": "Centre of the landing surface, Y=0",
+  "deck_size_m": [
+    12,
+    12
+  ],
+  "apron_size_m": [
+    16,
+    16
+  ],
+  "landing_surface_y_m": 0,
+  "foundation_bottom_y_m": -0.31,
+  "clear_centre_radius_m": 5.5,
+  "flush_lens_max_y_m": 0.01,
+  "mesh_count": 186,
+  "triangles": 37542,
+  "materials": 16,
+  "edge_lights": 12,
+  "concrete_slabs": 16,
+  "animation": {
+    "duration_seconds": 6.0,
+    "fps": 30,
+    "nodes": [
+      "Windsock/Yaw",
+      "Windsock/Yaw/Fabric01",
+      "Windsock/Yaw/Fabric01/Fabric02",
+      "Windsock/Yaw/Fabric01/Fabric02/Fabric03",
+      "Windsock/Yaw/Fabric01/Fabric02/Fabric03/Fabric04",
+      "Windsock/Yaw/Fabric01/Fabric02/Fabric03/Fabric04/Fabric05"
+    ],
+    "description": "Cyclic windsock heading and five articulated fabric sections"
+  },
+  "sha256": "0ec59be2d3011c8d44431d92a9725187bd2d544e452133ccc6aad0c9b1e9608a",
+  "bytes": 7522173,
+  "arkit_validation": "passed"
+}

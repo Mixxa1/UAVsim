@@ -78,6 +78,16 @@ struct CompactTelemetryHUDView: View {
                         )
                 }
             }
+            // Undercarriage and flaps are the operator's to set, so where they are is always shown.
+            if let mechanization = telemetry.mechanization {
+                Text(mechanizationLine(mechanization))
+                    .font(.caption2.weight(mechanization.loadRatio >= 1 || mechanization.hasFailure ? .semibold : .regular).monospaced())
+                    .foregroundStyle(
+                        mechanization.hasFailure ? GroundControlPalette.danger
+                            : mechanization.loadRatio >= 1 ? GroundControlPalette.warning
+                            : GroundControlPalette.textPrimary
+                    )
+            }
             if telemetry.autoNavigationActive || telemetry.targetDistanceMeters.isFinite {
                 Text(autoNavigationLine)
                     .font(.caption2.monospaced())
@@ -113,6 +123,22 @@ struct CompactTelemetryHUDView: View {
     /// or one that has got hot and not yet cooled.
     private var showsHighSpeedBlock: Bool {
         telemetry.machNumber >= 0.30 || telemetry.envelopeWorstFraction > 0.85
+    }
+
+    private func mechanizationLine(_ mechanization: TelemetrySnapshot.MechanizationReadout) -> String {
+        var parts: [String] = []
+        if let gearKey = mechanization.gearStatusKey {
+            parts.append(String(format: localized("hud.compact.gear"), localized(gearKey)))
+        }
+        if let flaps = mechanization.flapDegrees {
+            parts.append(String(format: localized("hud.compact.flaps"), flaps))
+        }
+        if mechanization.hasFailure {
+            parts.append(localized("hud.compact.mechanization_failure"))
+        } else if mechanization.loadRatio >= 1 {
+            parts.append(String(format: localized("hud.compact.mechanization_load"), mechanization.loadRatio * 100))
+        }
+        return parts.joined(separator: " · ")
     }
 
     private var autoNavigationLine: String {

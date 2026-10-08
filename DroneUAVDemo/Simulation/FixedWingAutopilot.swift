@@ -38,6 +38,11 @@ struct FixedWingAutopilotInput {
     /// Height above the surface below the aircraft. Drives low-altitude bank protection, which is
     /// about proximity to the ground and not about how far below its cruise level the route is.
     var heightAboveSurfaceMeters: Float = .greatestFiniteMagnitude
+    /// The lever that holds this airframe's level cruise and the least one guidance may ask
+    /// for, where they have been worked out from its own engine. `nil` leaves the law on its
+    /// fleet figures — a mid-point of 0.55 and nothing below 0.32.
+    var cruiseLever: Float? = nil
+    var minimumLever: Float? = nil
 }
 
 struct FixedWingAutopilotPlan {
@@ -789,7 +794,11 @@ final class FixedWingAutopilot {
         state.previousTargetSpeed = targetSpeed
         state.hasTargetSpeed = true
         let speedError = targetSpeed - currentSpeed
-        let cruiseHover: Float = 0.55
+        let cruiseHover: Float = input.cruiseLever ?? 0.55
+        // An airframe with its own figures may be asked for less than the fleet's lowest lever,
+        // never for more room at the top.
+        let throttleSpan = min(Tuning.throttleHoverSpan.lowerBound, input.minimumLever ?? 1.0)
+            ... Tuning.throttleHoverSpan.upperBound
         let altitudeBoost = max(0.0, altitudeError) * Tuning.throttleAltitudeAssistGain
         let stallBoost: Float = stallProtectionActive ? 0.18 : 0.0
         var rawThrottle = (cruiseHover
@@ -797,7 +806,7 @@ final class FixedWingAutopilot {
             + altitudeBoost
             + stallBoost
             - max(0.0, -altitudeError) * 0.012) // gentle pull back during high-altitude descent
-        rawThrottle = rawThrottle.clamped(to: Tuning.throttleHoverSpan)
+        rawThrottle = rawThrottle.clamped(to: throttleSpan)
         let throttleAlpha = filterAlpha(tau: Tuning.throttleFilterTau, dt: input.deltaTime)
         state.filteredThrottle = state.filteredThrottle + (rawThrottle - state.filteredThrottle) * throttleAlpha
         // Coordinated-turn drag compensation, applied post-filter — same
@@ -810,7 +819,7 @@ final class FixedWingAutopilot {
         // Feed-forward only. Keeping drag compensation in the filter memory pinned power at the
         // ceiling after a turn, invalidating the speed/radius envelope used by route planning.
         let commandedThrottle = (state.filteredThrottle + turnDragBoost)
-            .clamped(to: Tuning.throttleHoverSpan)
+            .clamped(to: throttleSpan)
 
         let bankDeg = state.filteredBankRad.radiansToDegrees
         let pitchDeg = commandedPitchRad.radiansToDegrees

@@ -50,7 +50,16 @@ struct DroneSimulationContext {
     let vehicleMassProperties: VehicleMassProperties
     /// Multi-sphere physical contact profile of the built visual. Empty
     /// profile falls back to the legacy single-point ground clamp.
-    let contactProfile: VehicleContactProfile
+    ///
+    /// For an airframe with a retractable undercarriage this is the profile for the legs that
+    /// are down and locked in the state being stepped (`gearUnsupportedMask`).
+    var contactProfile: VehicleContactProfile
+    /// The same contacts with every leg in place. A leg locking, unlocking or failing inside
+    /// a step is resolved against this; `nil` means `contactProfile` is itself that profile.
+    var neutralContactProfile: VehicleContactProfile? = nil
+    /// Flaps and retractable undercarriage of this airframe, resolved by the caller once.
+    /// `nil` lets the engine look the catalogue model up itself, once per step.
+    var mechanization: AircraftMechanizationModel? = nil
     /// Per-rotor thrust model with damage/failure factors baked in — the
     /// multirotor mixer and VTOL per-unit thrust sums consume this. Empty
     /// model keeps the legacy single-virtual-rotor math.

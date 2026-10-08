@@ -1,0 +1,11 @@
+{
+  "build": "passed",
+  "app_path": "/Users/misha/UAVsim/DerivedData/UAVLaunchPad/Build/Products/Debug/DroneUAVDemo.app",
+  "asset_sha256": "0ec59be2d3011c8d44431d92a9725187bd2d544e452133ccc6aad0c9b1e9608a",
+  "feature_source_hashes": {
+    "DroneUAVDemo/Scene/UAVLaunchPad.swift": "98c9a7a1b4514b8b7b05daa2d03032841ec0cdd6d0aa13737682887c03d1283e",
+    "DroneUAVDemo/Scene/DroneSceneController.swift": "2f26dabdc543683d30d546451ea546a385ba1f7f78cf51c7a7bd02b303ee9475",
+    "DroneUAVDemo/Domain/WeatherModel.swift": "495a20c7694af92466542e93cffdd794e97e077b5551865d82f2ba5950a5a32d",
+    "DroneUAVDemo.xcodeproj/project.pbxproj": "ba1d84b96571ddd28fae4ca4a16744712a82fc4dd5f54e53f7a9c0b175b7b9c6"
+  }
+}

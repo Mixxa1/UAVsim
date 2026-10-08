@@ -36,7 +36,8 @@ struct AeroDiagnosticsPanelView: View {
             turnAuthority: wing.turnAuthority,
             minSustainableSpeedMps: wing.minSustainableSpeedMps,
             profileID: profile.id,
-            engineering: profile.engineeringAerodynamics
+            engineering: profile.engineeringAerodynamics,
+            wingAreaM2: wing.wingAreaM2
         )
     }
 

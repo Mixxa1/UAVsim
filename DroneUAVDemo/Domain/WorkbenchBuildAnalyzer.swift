@@ -11,6 +11,13 @@ enum WorkbenchAirframeClass: String, Codable {
 struct WorkbenchBuildStats: Hashable {
     var totalMassKg: Double = 0
     var centerOfMass: SIMD3<Double> = .zero
+    /// Σ m·(x−x̄)², Σ m·(y−ȳ)², Σ m·(z−z̄)² over the frame and everything fitted to it, each
+    /// taken as a point at its mount, kg·m². What the layout contributes to the moments of
+    /// inertia; the frame's own extent is added by whoever knows its shape.
+    var secondMomentsAboutCenterOfMass: SIMD3<Double> = .zero
+    /// Σ m·(x², y², z²) of the bare frame about its own centroid, body axes, when the frame was
+    /// drawn in CAD and arrived with its solids. `nil` for a library frame, which is one mass.
+    var frameSecondMoments: SIMD3<Double>?
     var motorCount: Int = 0
     var batteryEnergyWh: Double = 0
     var batteryCells: Int = 0
@@ -67,6 +74,8 @@ enum WorkbenchBuildAnalyzer {
 
         var mass = max(frame.massKg, 0)
         var weightedCoM = SIMD3<Double>.zero
+        // Σ m·r² component by component, about the frame origin; moved to the centre of mass below.
+        var secondMoments = SIMD3<Double>.zero
         stats.componentCount = 1
 
         let motor = build.spec(for: .motor)
@@ -78,11 +87,13 @@ enum WorkbenchBuildAnalyzer {
             if let motor {
                 mass += motor.massKg
                 weightedCoM += position * motor.massKg
+                secondMoments += position * position * motor.massKg
                 stats.componentCount += 1
             }
             if let propeller {
                 mass += propeller.massKg
                 weightedCoM += position * propeller.massKg
+                secondMoments += position * position * propeller.massKg
                 stats.componentCount += 1
             }
         }
@@ -92,9 +103,10 @@ enum WorkbenchBuildAnalyzer {
             if kind == .servo, !frame.servoMounts.isEmpty {
                 for servoMount in resolvedServoPositions(frame: frame, spec: spec) {
                     mass += spec.massKg
-                    weightedCoM += SIMD3<Double>(
-                        Double(servoMount.x), Double(servoMount.y), Double(servoMount.z)
-                    ) * spec.massKg
+                    let servoPosition = SIMD3<Double>(
+                        Double(servoMount.x), Double(servoMount.y), Double(servoMount.z))
+                    weightedCoM += servoPosition * spec.massKg
+                    secondMoments += servoPosition * servoPosition * spec.massKg
                     stats.componentCount += 1
                 }
                 continue
@@ -102,7 +114,9 @@ enum WorkbenchBuildAnalyzer {
             let slot = componentLayout[kind]?.position
                 ?? resolvedSlotPosition(kind, spec: spec, frame: frame)
             mass += spec.massKg
-            weightedCoM += SIMD3<Double>(Double(slot.x), Double(slot.y), Double(slot.z)) * spec.massKg
+            let slotPosition = SIMD3<Double>(Double(slot.x), Double(slot.y), Double(slot.z))
+            weightedCoM += slotPosition * spec.massKg
+            secondMoments += slotPosition * slotPosition * spec.massKg
             stats.componentCount += 1
             if kind == .battery {
                 stats.batteryEnergyWh = spec.param(p.batteryEnergyWh) ?? 0
@@ -113,6 +127,14 @@ enum WorkbenchBuildAnalyzer {
         }
         stats.totalMassKg = mass
         stats.centerOfMass = mass > 1e-9 ? weightedCoM / mass : .zero
+        if case let .imported(construction) = build.frame {
+            stats.frameSecondMoments = WorkbenchFrameSolidMoments.secondMoments(
+                of: construction, scaledToMassKg: max(frame.massKg, 0))
+        }
+        // Parallel axis: the frame sits at the origin and is in `mass`, so its own offset from the
+        // common centre comes out of the same subtraction.
+        stats.secondMomentsAboutCenterOfMass = simd_max(
+            .zero, secondMoments - stats.centerOfMass * stats.centerOfMass * mass)
 
         if let motor {
             let singleThrust = motor.param(p.motorMaxThrustN) ?? 0
@@ -141,6 +163,22 @@ enum WorkbenchBuildAnalyzer {
             if frame.architecture == .fixedWing {
                 let cruisePower = stats.maxElectricalPowerW * 0.34
                 stats.estimatedHoverTimeMin = stats.batteryEnergyWh / max(cruisePower, 1) * 60 * 0.84
+            } else if frame.architecture == .liftCruiseVTOL, frame.liftMotorCount > 0,
+                      let ratedThrust = motor?.param(p.motorMaxThrustN), ratedThrust > 0,
+                      let ratedPower = motor?.param(p.motorMaxPowerW), ratedPower > 0 {
+                // A lift-and-cruise aircraft hovers on its lift motors alone, and power goes as
+                // thrust to the three-halves: they hover at 1/liftRatio of their rated thrust and
+                // at that fraction to the 1.5 of their rated power.
+                //
+                // ⚠️ It was held to the multicopter rule below, with the pusher counted among the
+                // motors that hold it up and power growing more slowly than thrust — 0.41 of rated
+                // power at a third of rated thrust where the propeller takes 0.18. That is 1.5 kW
+                // to hold up the 3.9 kg Aquila LC-4, which momentum theory puts near 0.6 kW on its
+                // four ten-inch discs. Nothing flew on the figure until the battery began charging
+                // a hover by it; it does now.
+                let liftRatio = ratedThrust * Double(frame.liftMotorCount) / max(stats.totalMassKg * 9.80665, 1e-6)
+                let hoverPower = ratedPower * Double(frame.liftMotorCount) * pow(min(1, 1 / max(liftRatio, 0.01)), 1.5)
+                stats.estimatedHoverTimeMin = stats.batteryEnergyWh / max(hoverPower, 1) * 60 * 0.82
             } else {
                 let hoverThrottle = sqrt(min(1, 1 / max(stats.thrustToWeight, 0.01)))
                 let hoverPower = stats.maxElectricalPowerW * pow(hoverThrottle, 1.55)
@@ -871,5 +909,76 @@ enum WorkbenchBuildAnalyzer {
             break
         }
         return position
+    }
+}
+
+/// The mass distribution of a frame drawn in CAD, integrated over its own solids.
+///
+/// ⚠️ A CAD frame arrived as one mass at its origin. How long its wing was, how far out its
+/// booms stood — the drawing knew, and the flight was given a guess in its place: half the mass
+/// along the span and half along the length. The `.uavframe` carries each solid's closed surface
+/// and its mass, and that is all a tensor needs.
+enum WorkbenchFrameSolidMoments {
+    private static let lock = NSLock()
+    private static var cache: (id: String, triangles: Int, massKg: Double, moments: SIMD3<Double>?)?
+
+    /// Σ m·(x², y², z²) about the frame's own centroid, in the body axes the Workbench places
+    /// parts in. `nil` when a solid's surface does not close onto the volume CAD declared for it.
+    static func secondMoments(of construction: WorkbenchConstruction, scaledToMassKg frameMassKg: Double) -> SIMD3<Double>? {
+        guard let bodies = construction.bodies, !bodies.isEmpty else { return nil }
+        let triangles = construction.mesh.indices.count / 3
+        lock.lock()
+        defer { lock.unlock() }
+        // One entry: the frame being built is asked about on every analysis of the build.
+        if let cached = cache, cached.id == construction.id, cached.triangles == triangles, cached.massKg == frameMassKg {
+            return cached.moments
+        }
+        let moments = integrate(construction, bodies: bodies, frameMassKg: frameMassKg)
+        cache = (construction.id, triangles, frameMassKg, moments)
+        return moments
+    }
+
+    private static func integrate(_ construction: WorkbenchConstruction, bodies: [WorkbenchConstruction.Body],
+                                  frameMassKg: Double) -> SIMD3<Double>? {
+        let vertices = construction.mesh.vertices
+        let indices = construction.mesh.indices
+        func vertex(_ index: UInt32) -> SIMD3<Double>? {
+            let base = Int(index) * 3
+            guard base + 2 < vertices.count else { return nil }
+            return SIMD3<Double>(Double(vertices[base]), Double(vertices[base + 1]), Double(vertices[base + 2]))
+        }
+        var mass = 0.0
+        var first = SIMD3<Double>.zero
+        var second = SIMD3<Double>.zero
+        for body in bodies {
+            guard body.massKg > 0, body.triangleCount > 0 else { continue }
+            // A closed surface, one tetrahedron from the origin per triangle: volume d/6, first
+            // moment d/24·Σv, second moment d/60·(Σv² + Σ of the pairwise products).
+            var volume = 0.0
+            var bodyFirst = SIMD3<Double>.zero
+            var bodySecond = SIMD3<Double>.zero
+            for triangle in body.firstTriangle..<(body.firstTriangle + body.triangleCount) {
+                let base = triangle * 3
+                guard base + 2 < indices.count,
+                      let a = vertex(indices[base]), let b = vertex(indices[base + 1]), let c = vertex(indices[base + 2]) else {
+                    return nil
+                }
+                let d = simd_dot(a, simd_cross(b, c))
+                volume += d / 6
+                bodyFirst += (a + b + c) * (d / 24)
+                bodySecond += (a * a + b * b + c * c + a * b + b * c + a * c) * (d / 60)
+            }
+            // Wound the other way round the whole solid comes out negative; a surface that does
+            // not close comes out as some other volume than the one CAD measured.
+            guard abs(abs(volume) - body.volumeM3) <= 0.03 * body.volumeM3 else { return nil }
+            let density = body.massKg / volume
+            mass += body.massKg
+            first += bodyFirst * density
+            second += bodySecond * density
+        }
+        guard mass > 0 else { return nil }
+        let aboutCentroid = simd_max(.zero, second - first * first / mass) * (frameMassKg / mass)
+        // Model space is Z-up; the Workbench's body axes are (x, z, −y) of it.
+        return SIMD3<Double>(aboutCentroid.x, aboutCentroid.z, aboutCentroid.y)
     }
 }

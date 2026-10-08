@@ -1,0 +1,12 @@
+{
+  "hand_models": 2,
+  "hand_launch_profiles": 7,
+  "source_license": "CC0-1.0",
+  "native_clone_independence": "passed",
+  "released_hands_do_not_follow_aircraft": "passed",
+  "max_sample_penetration_mm": 1.995075959712267,
+  "max_shoulder_error_mm": 0.0001365714012990793,
+  "max_wrist_angle_degrees": 56.531558990478516,
+  "app_build": "succeeded",
+  "bundled_hashes": "match"
+}

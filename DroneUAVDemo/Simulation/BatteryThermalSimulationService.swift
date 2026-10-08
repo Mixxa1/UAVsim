@@ -18,6 +18,12 @@ struct BatteryComputationInput {
     /// endurance — that came out as 2.5 kW from a six-cell pack, roughly 113 A,
     /// which cooked the battery twice in a row on the ramp.
     let propulsionDrawsFromBattery: Bool
+    /// Share of the weight a hybrid is carrying on its rotors rather than on its wing, 0…1.
+    /// Zero for everything that is not a hybrid in the air.
+    let rotorBorneFraction: Float
+    /// The lever the airframe holds its cruise on — the condition its declared endurance is
+    /// quoted for. `nil` from a caller with no flight baseline to read it from.
+    let cruiseReferenceThrottle: Float?
 
     init(
         droneProfile: DroneModelProfile,
@@ -27,7 +33,9 @@ struct BatteryComputationInput {
         verticalSpeedMps: Float,
         throttle: Float,
         maneuverAggressiveness: Float,
-        propulsionDrawsFromBattery: Bool = true
+        propulsionDrawsFromBattery: Bool = true,
+        rotorBorneFraction: Float = 0.0,
+        cruiseReferenceThrottle: Float? = nil
     ) {
         self.droneProfile = droneProfile
         self.weather = weather
@@ -37,6 +45,8 @@ struct BatteryComputationInput {
         self.throttle = throttle
         self.maneuverAggressiveness = maneuverAggressiveness
         self.propulsionDrawsFromBattery = propulsionDrawsFromBattery
+        self.rotorBorneFraction = rotorBorneFraction
+        self.cruiseReferenceThrottle = cruiseReferenceThrottle
     }
 }
 
@@ -52,22 +62,78 @@ final class BatteryThermalSimulationService {
         // carries avionics, servos and payload while the engine does the work, so
         // it draws a small fraction and is sized to outlast the tanks rather than
         // to move the airframe.
-        let fullFlightPower = input.droneProfile.batteryEnergyWh / max(0.1, (input.droneProfile.maxFlightTimeMin / 60.0))
-        let baseHoverPower = input.propulsionDrawsFromBattery
-            ? fullFlightPower
-            : fullFlightPower * 0.08
+        // ⚠️ The declared figure is met in the condition it is declared for.
+        //
+        // The model was `energy / flight time` multiplied by a throttle term and a speed term that
+        // are both above one in any flight at all — so the time on the datasheet was the time at
+        // zero throttle and zero airspeed, and nothing ever flew for it. An aeroplane at its own
+        // cruise drew 1.7–1.8 of the anchor and lasted 49–62 % of its declared endurance, all
+        // fourteen of them; a multirotor in a hover lasted 68–76 % of its flight time, and the
+        // hover time its entry declares separately was never read. A flight time under six
+        // minutes was floored at six, so the racing quads flew half as long again as theirs.
+        //
+        // Each term is now taken relative to its value at the reference: the cruise speed and
+        // cruise throttle for a wing, the hover throttle at rest for rotors.
+        let profile = input.droneProfile
+        let energy = profile.batteryEnergyWh
+        let flightPower = energy / max(0.005, profile.maxFlightTimeMin / 60.0)
+        let speedRatio = input.speedMps / max(0.1, profile.maxHorizontalSpeedMps)
+        func throttleTerm(_ lever: Float) -> Float { 0.66 + lever * 1.24 }
+        func linearSpeedTerm(_ ratio: Float) -> Float { 1.0 + ratio * 0.58 }
 
-        let speedFactor = 1.0 + (input.speedMps / max(0.1, input.droneProfile.maxHorizontalSpeedMps)) * 0.58
-        let verticalFactor = 1.0 + abs(input.verticalSpeedMps) / max(0.1, input.droneProfile.maxVerticalSpeedMps) * 0.42
-        // Throttle only loads the pack when the pack is what turns the propellers.
-        let throttleFactor = input.propulsionDrawsFromBattery
-            ? 0.66 + input.throttle * 1.24
-            : 1.0
+        let propulsionPower: Float
+        if !input.propulsionDrawsFromBattery {
+            // Avionics, servos and payload of a fuel aircraft: unchanged.
+            propulsionPower = flightPower * 0.08 * linearSpeedTerm(speedRatio)
+        } else {
+            // On the wing: the declared endurance at cruise speed and cruise throttle. Without a
+            // cruise throttle to refer to — a caller that has no flight baseline — the old terms.
+            var wingPower = flightPower * linearSpeedTerm(speedRatio) * throttleTerm(input.throttle)
+            if let cruiseLever = input.cruiseReferenceThrottle, let wing = profile.fixedWingParameters {
+                let cruiseRatio = wing.cruiseSpeedMps / max(0.1, profile.maxHorizontalSpeedMps)
+                wingPower /= linearSpeedTerm(cruiseRatio) * throttleTerm(cruiseLever)
+            }
+
+            // On the rotors: the declared hover time at the hover throttle, and the declared
+            // flight time at the speed a rotorcraft covers most ground on — 0.4 of its maximum,
+            // where a rotor has left its own downwash and the airframe's drag has not yet come in.
+            // The curve through those two and the old 1.58 at full speed dips below the hover for
+            // a camera platform, whose flight time is the longer of the two, and only rises for a
+            // racing quad, whose flight time is quoted for flying it hard.
+            var rotorPower: Float?
+            let hoverMinutes = profile.maxHoverTimeMin
+            if hoverMinutes > 0, profile.hoverThrottle > 0.01 {
+                let hoverPower = energy / max(0.005, hoverMinutes / 60.0)
+                let flightOverHover = hoverMinutes / max(0.01, profile.maxFlightTimeMin)
+                let linear = (flightOverHover - 1.0928) / 0.24
+                let speedTerm = max(0.5, 1.0 + linear * speedRatio + (0.58 - linear) * speedRatio * speedRatio)
+                rotorPower = hoverPower * speedTerm * throttleTerm(input.throttle) / throttleTerm(profile.hoverThrottle)
+            }
+
+            switch profile.airframeClass {
+            case .multirotor:
+                propulsionPower = rotorPower ?? wingPower
+            case .fixedWing:
+                propulsionPower = wingPower
+            case .hybridVTOL:
+                // A hybrid that declares how long it hovers is charged for hovering while it
+                // hovers; one that does not — every catalogue hybrid — is charged at the rate of
+                // its wing in a hover too, which is too little and is all its entry supports.
+                let share = input.rotorBorneFraction.clamped(to: 0.0...1.0)
+                if let rotorPower, hoverMinutes < profile.maxFlightTimeMin, share > 0 {
+                    propulsionPower = wingPower + (rotorPower - wingPower) * share
+                } else {
+                    propulsionPower = wingPower
+                }
+            }
+        }
+
+        let verticalFactor = 1.0 + abs(input.verticalSpeedMps) / max(0.1, profile.maxVerticalSpeedMps) * 0.42
         let maneuverFactor = 1.0 + input.maneuverAggressiveness * 0.36
         let weatherFactor = input.weather.effectiveFactors.batteryDrainMultiplier
         let damageFactor = input.damageState.batteryPenaltyMultiplier
 
-        let rawPowerDraw = baseHoverPower * speedFactor * verticalFactor * throttleFactor * maneuverFactor * weatherFactor * damageFactor
+        let rawPowerDraw = propulsionPower * verticalFactor * maneuverFactor * weatherFactor * damageFactor
         next.powerDrawW = rawPowerDraw
 
         let drainPercent = (rawPowerDraw * deltaTime / 3600.0) / max(0.1, input.droneProfile.batteryEnergyWh) * 100.0

@@ -3,8 +3,8 @@
   "models": [
     {
       "id": "wingtra-ray",
-      "geometry_sha256": "07a11bfc0e96ed92b34a0fb485c9163b0f1bd38eb7777eb88b9cf71e864ef6b9",
-      "mesh_count": 156,
+      "geometry_sha256": "c9cb93d8291c4f1a3910ff129b6854ab0086862e7ae05fa60ea975ffc1b1fef1",
+      "mesh_count": 163,
       "contact_tolerance_m": 6.25e-05,
       "component_count": 1,
       "islands": [],
@@ -33,13 +33,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 268,
-      "seconds": 0.65
+      "triangle_pairs_examined": 310,
+      "seconds": 0.69
     },
     {
       "id": "ageagle-ebee-x",
-      "geometry_sha256": "b8f94caf3a7ba80612a34a085055a9d13df6969d8babbd0dec0dbc25dc6ec4b5",
-      "mesh_count": 173,
+      "geometry_sha256": "8c7282e332de923a41e1b257ac5bd6409760125dd390384af4b8f7e40a43eef0",
+      "mesh_count": 185,
       "contact_tolerance_m": 5.8e-05,
       "component_count": 1,
       "islands": [],
@@ -55,13 +55,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 388,
-      "seconds": 0.76
+      "triangle_pairs_examined": 490,
+      "seconds": 0.75
     },
     {
       "id": "delair-dt26-open-payload",
-      "geometry_sha256": "97c4f41a0f857ece65a7c014dc20599e61b44f43d9b329d0efadafc21a213e40",
-      "mesh_count": 262,
+      "geometry_sha256": "b7c95225f0f0dbbab31ce7ea34d3aca30d1d5c09e8c92b616ff3f40c9aac2c59",
+      "mesh_count": 291,
       "contact_tolerance_m": 0.000165,
       "component_count": 1,
       "islands": [],
@@ -89,13 +89,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 450,
-      "seconds": 0.93
+      "triangle_pairs_examined": 577,
+      "seconds": 0.86
     },
     {
       "id": "jouav-cw-20e",
-      "geometry_sha256": "4727cf99c57c67c6531b9dd497ddd57e29acaba547a060e194e678da1e5632d8",
-      "mesh_count": 335,
+      "geometry_sha256": "9473acd892ac06641b41dc5cca27db29b786b7b8dbaa1ff15e4194fce62c5440",
+      "mesh_count": 349,
       "contact_tolerance_m": 0.000175,
       "component_count": 1,
       "islands": [],
@@ -158,13 +158,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 479,
-      "seconds": 1.76
+      "triangle_pairs_examined": 511,
+      "seconds": 1.91
     },
     {
       "id": "delair-ux11",
-      "geometry_sha256": "c859043261a305d92bd4723e009aced678e30dd525fd04a629719502f6d5ed31",
-      "mesh_count": 161,
+      "geometry_sha256": "63cbff05307f9191873dc189ece4f8a673946ad044e077455546ae15da5525c9",
+      "mesh_count": 167,
       "contact_tolerance_m": 6e-05,
       "component_count": 1,
       "islands": [],
@@ -180,13 +180,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 330,
-      "seconds": 0.63
+      "triangle_pairs_examined": 404,
+      "seconds": 0.76
     },
     {
       "id": "c-astral-bramor-c4eye",
-      "geometry_sha256": "d4010c11f7f49bdfdf2085fd060301e50be9718da6b592574d4d6e9fc3573a77",
-      "mesh_count": 173,
+      "geometry_sha256": "e85ee7e8e73f2740880620c0d2033bfd5cf81a27aa98645a3a153ac0fea6def4",
+      "mesh_count": 175,
       "contact_tolerance_m": 0.00011499999999999999,
       "component_count": 1,
       "islands": [],
@@ -214,13 +214,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 328,
-      "seconds": 0.82
+      "triangle_pairs_examined": 420,
+      "seconds": 0.9
     },
     {
       "id": "aerovironment-puma-le",
-      "geometry_sha256": "cb7cf4933d7dade0d57cb950782f99fad48e80743fab82cca3276cfe5c381628",
-      "mesh_count": 255,
+      "geometry_sha256": "e65ccae38dcb3fd8cbae6e74503de67846ab78570a361eec8a808e1c214b066e",
+      "mesh_count": 284,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -249,13 +249,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 438,
-      "seconds": 0.88
+      "triangle_pairs_examined": 557,
+      "seconds": 0.91
     },
     {
       "id": "tekever-ar3",
-      "geometry_sha256": "2e510d71ffc1a1a8b3dc6490d63e08cf7c19086c2b39acb4d7ac27896db40f76",
-      "mesh_count": 255,
+      "geometry_sha256": "ca605857fd9822f497e7ad585dec832260e96a24afb155fedc580d985e9e223a",
+      "mesh_count": 284,
       "contact_tolerance_m": 0.000175,
       "component_count": 1,
       "islands": [],
@@ -283,13 +283,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 449,
-      "seconds": 0.89
+      "triangle_pairs_examined": 574,
+      "seconds": 0.97
     },
     {
       "id": "deltaquad-evo",
-      "geometry_sha256": "a47de044271ae07e7e2392faaa87799761523a9dc73440e4c9ad6d8d49750df0",
-      "mesh_count": 247,
+      "geometry_sha256": "4243cba5dac4a03b8da807a54955b9db506fa748928c2ad6810a802d0814cf12",
+      "mesh_count": 251,
       "contact_tolerance_m": 0.00013450000000000002,
       "component_count": 1,
       "islands": [],
@@ -302,8 +302,6 @@
             0.1575
           ],
           "attached_to": [
-            "MainWingLeft_01",
-            "MainWingRight_01",
             "Fuselage_01"
           ]
         }
@@ -360,25 +358,25 @@
         {
           "rotor": "Propeller_09",
           "stationary_contacts": [
-            "MainWingLeft_01",
-            "MainWingRight_01",
             "PusherMount_01",
             "MotorStatorCase_05",
             "MotorBell_05",
             "MotorCoolingRib_13",
             "MotorCoolingRib_14",
             "MotorCoolingRib_15",
-            "MotorShaft_05"
+            "MotorShaft_05",
+            "MainWingElevonLeftFixedMainWingLeft_01_01",
+            "MainWingElevonRightFixedMainWingRight_01_01"
           ]
         }
       ],
-      "triangle_pairs_examined": 418,
-      "seconds": 0.97
+      "triangle_pairs_examined": 519,
+      "seconds": 1.09
     },
     {
       "id": "tekever-ar5",
-      "geometry_sha256": "0ab07bda50af5cec04c4716dfdde0dc34804e216ff1deea74125480ad0777f78",
-      "mesh_count": 283,
+      "geometry_sha256": "a5f9a38a65bdcd4d4794aae3d340a701006119b345b05fc194f81320409680d0",
+      "mesh_count": 319,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -413,13 +411,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 497,
-      "seconds": 1.53
+      "triangle_pairs_examined": 633,
+      "seconds": 3.33
     },
     {
       "id": "aerovironment-raven-b",
-      "geometry_sha256": "137cddf968e8ea28d37593099557c7f667b8214b1edfc683aa35778a43ee1508",
-      "mesh_count": 227,
+      "geometry_sha256": "c8020c683652be16a52c84d6aa4de041ddfd31e0f7521c5187f830baff936f4a",
+      "mesh_count": 244,
       "contact_tolerance_m": 7e-05,
       "component_count": 1,
       "islands": [],
@@ -446,13 +444,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 393,
-      "seconds": 0.8
+      "triangle_pairs_examined": 462,
+      "seconds": 0.88
     },
     {
       "id": "aerovironment-puma-3-ae",
-      "geometry_sha256": "9e836a628b73741e2cb66285f0eb64679ae17e73b3d5b10e8ccdba237a7bb454",
-      "mesh_count": 255,
+      "geometry_sha256": "23d96543ed4379f7c5d7f3dff0fbe0153b7d372a2840fac5563bdc2906369f25",
+      "mesh_count": 284,
       "contact_tolerance_m": 0.00014,
       "component_count": 1,
       "islands": [],
@@ -481,13 +479,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 438,
-      "seconds": 0.94
+      "triangle_pairs_examined": 558,
+      "seconds": 0.95
     },
     {
       "id": "aerovironment-jump-20",
-      "geometry_sha256": "5a9a1a995f265992e9689bd65741a5208105d1d7872169c14f8045fd326d70cd",
-      "mesh_count": 335,
+      "geometry_sha256": "400c63ab83e7d9adb25d2cff02668c853abaa789e668951be789c3680d2413f0",
+      "mesh_count": 362,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -551,13 +549,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 516,
-      "seconds": 1.8
+      "triangle_pairs_examined": 639,
+      "seconds": 1.65
     },
     {
       "id": "insitu-scaneagle",
-      "geometry_sha256": "8be1ca1aa1656765a8b0974a6bf1e82223014d10c6c019cee8999eaec3344f43",
-      "mesh_count": 175,
+      "geometry_sha256": "a741710b2dc426a013f3dc5b7ae1002c86f4a59088f61ad9cc813e8c37ab72bf",
+      "mesh_count": 179,
       "contact_tolerance_m": 0.000155,
       "component_count": 1,
       "islands": [],
@@ -585,13 +583,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 266,
-      "seconds": 0.51
+      "triangle_pairs_examined": 358,
+      "seconds": 0.64
     },
     {
       "id": "aeronautics-orbiter-3",
-      "geometry_sha256": "1e453b5679fdbfccba0c688413c5caa0d90ca560452a31d3fe5e03187366bf06",
-      "mesh_count": 173,
+      "geometry_sha256": "4b3d3a1c8ad107153a7a310176a220e40bc95348ea1f7212d47526d61049434c",
+      "mesh_count": 175,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -619,13 +617,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 316,
-      "seconds": 1.04
+      "triangle_pairs_examined": 402,
+      "seconds": 1.01
     },
     {
       "id": "aeronautics-orbiter-4",
-      "geometry_sha256": "693995d955529729b7f738c70849a9210d7f5a2fc7ee6d69a03a754a76f26860",
-      "mesh_count": 182,
+      "geometry_sha256": "c59a89b575c445b497629b10af4915001675d523998b4f86228b305328030cbb",
+      "mesh_count": 184,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -653,13 +651,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 342,
-      "seconds": 1.11
+      "triangle_pairs_examined": 428,
+      "seconds": 1.23
     },
     {
       "id": "aeronautics-aerostar",
-      "geometry_sha256": "462986503dbccefef40d907ced343ee77ec7f2de57a14596e147eec1ec24dbb2",
-      "mesh_count": 342,
+      "geometry_sha256": "6b95cb6eaaaa45f8466321db60046363abfa0c9e7f00cd8af744fd6bc6ac0df8",
+      "mesh_count": 372,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -686,13 +684,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 567,
-      "seconds": 1.52
+      "triangle_pairs_examined": 685,
+      "seconds": 3.13
     },
     {
       "id": "elbit-hermes-450",
-      "geometry_sha256": "5461603f26424a44f843c2af40de8fb740f2daf65ae2e59f9c3e525ac53d2bf7",
-      "mesh_count": 338,
+      "geometry_sha256": "7ae017377b26a73b099f76844107d415a3ba5e97c1149e09d591c9b4072424d7",
+      "mesh_count": 368,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -720,13 +718,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 573,
-      "seconds": 1.45
+      "triangle_pairs_examined": 717,
+      "seconds": 2.92
     },
     {
       "id": "iai-heron-mk-ii",
-      "geometry_sha256": "3a3990fa817dc78e487918ed9011a41faa79e8ccd396676bd76e6bdf25da7bf8",
-      "mesh_count": 347,
+      "geometry_sha256": "58012a0a8396de84ec9bd079e2dc9f9c8152cd14968f8e8b40e69cde088a8d7a",
+      "mesh_count": 399,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -753,13 +751,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 627,
-      "seconds": 1.6
+      "triangle_pairs_examined": 788,
+      "seconds": 2.15
     },
     {
       "id": "iai-heron-tp",
-      "geometry_sha256": "ca880d98670dfa3518f82d54b5414c8fb6cafc528e06a4f1b5ea1cbdd389b935",
-      "mesh_count": 358,
+      "geometry_sha256": "272fdcf3292c9c2bc2aed05afc2d9aad5c7e25e5b67794584e5b6aa371c361cc",
+      "mesh_count": 421,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -786,132 +784,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 644,
-      "seconds": 1.32
-    },
-    {
-      "id": "baykar-bayraktar-tb2",
-      "geometry_sha256": "b0151a80aedbbeffefc36f0756d1a01c0ac860a6b5c1fa2aa6be1d4e8394efc6",
-      "mesh_count": 338,
-      "contact_tolerance_m": 0.0002,
-      "component_count": 1,
-      "islands": [],
-      "joints": [
-        {
-          "name": "CameraMount",
-          "anchor": [
-            0,
-            -0.4355,
-            1.6575
-          ],
-          "attached_to": [
-            "Fuselage_01"
-          ]
-        }
-      ],
-      "rotor_bearings": [
-        {
-          "rotor": "Propeller_08",
-          "stationary_contacts": [
-            "MotorStatorCase_01",
-            "MotorBell_01",
-            "MotorShaft_01"
-          ]
-        }
-      ],
-      "triangle_pairs_examined": 558,
-      "seconds": 1.22
-    },
-    {
-      "id": "baykar-bayraktar-tb3",
-      "geometry_sha256": "1ed9edb9f17f80a763ca1d9afe73e9abef980a19f60052533f58c5638465b6f3",
-      "mesh_count": 348,
-      "contact_tolerance_m": 0.0002,
-      "component_count": 1,
-      "islands": [],
-      "joints": [
-        {
-          "name": "CameraMount",
-          "anchor": [
-            0,
-            -0.55945,
-            2.12925
-          ],
-          "attached_to": [
-            "Fuselage_01"
-          ]
-        }
-      ],
-      "rotor_bearings": [
-        {
-          "rotor": "Propeller_08",
-          "stationary_contacts": [
-            "MotorStatorCase_01",
-            "MotorBell_01",
-            "MotorShaft_01"
-          ]
-        }
-      ],
-      "triangle_pairs_examined": 573,
-      "seconds": 1.05
-    },
-    {
-      "id": "baykar-akinci",
-      "geometry_sha256": "d7499982c145be559d5a9909a2dbd32aeb1dc173342d84c14cd6d26b7ab38c68",
-      "mesh_count": 414,
-      "contact_tolerance_m": 0.0002,
-      "component_count": 1,
-      "islands": [],
-      "joints": [
-        {
-          "name": "CameraMount",
-          "anchor": [
-            0,
-            -0.7995000000000001,
-            3.075
-          ],
-          "attached_to": [
-            "Fuselage_01"
-          ]
-        }
-      ],
-      "rotor_bearings": [
-        {
-          "rotor": "Propeller_01",
-          "stationary_contacts": [
-            "MotorStatorCase_01",
-            "MotorBell_01",
-            "MotorShaft_01"
-          ]
-        },
-        {
-          "rotor": "Propeller_02",
-          "stationary_contacts": [
-            "MotorStatorCase_02",
-            "MotorBell_02",
-            "MotorShaft_02"
-          ]
-        }
-      ],
-      "triangle_pairs_examined": 679,
-      "seconds": 1.55
-    },
-    {
-      "id": "baykar-kizilelma",
-      "geometry_sha256": "7ee77406934fc365968e0d3019f0c1af043dc630c54a109bfddff705d0ec6385",
-      "mesh_count": 337,
-      "contact_tolerance_m": 0.0002,
-      "component_count": 1,
-      "islands": [],
-      "joints": [],
-      "rotor_bearings": [],
-      "triangle_pairs_examined": 587,
-      "seconds": 1.23
+      "triangle_pairs_examined": 822,
+      "seconds": 2.14
     },
     {
       "id": "leonardo-falco-evo",
-      "geometry_sha256": "3f39b19f253e0e444f3e242ce1ccbb0792963b0935d2f2592abfe7ee65f6f74b",
-      "mesh_count": 342,
+      "geometry_sha256": "50deae931113775bd1992d5dfe980e1cc3f44e1f579a6c19867ca2e4e64d1401",
+      "mesh_count": 374,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -938,13 +817,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 551,
-      "seconds": 1.03
+      "triangle_pairs_examined": 663,
+      "seconds": 2.81
     },
     {
       "id": "leonardo-falco-xplorer",
-      "geometry_sha256": "6f97891d3997694ade16bac5dca2bf0431a61377b3f848d7fa3722bd3eee9314",
-      "mesh_count": 339,
+      "geometry_sha256": "acbc6fad1dbb71ff7544905a42d61826c4d69dd9e1a1abbaf47c6ff99e7a633c",
+      "mesh_count": 388,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -972,13 +851,13 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 576,
-      "seconds": 1.13
+      "triangle_pairs_examined": 753,
+      "seconds": 1.63
     },
     {
       "id": "piaggio-p1hh-hammerhead",
-      "geometry_sha256": "83c0bffd20a719422f6422822eb71d84d709a2f5b20d61d431e7190f0577d0b9",
-      "mesh_count": 497,
+      "geometry_sha256": "a04676db96b0b7b0efdc220d50bde036655a0f33d7428b4b93ec5a617bc90ad8",
+      "mesh_count": 569,
       "contact_tolerance_m": 0.0002,
       "component_count": 1,
       "islands": [],
@@ -1013,8 +892,8 @@
           ]
         }
       ],
-      "triangle_pairs_examined": 832,
-      "seconds": 1.27
+      "triangle_pairs_examined": 1060,
+      "seconds": 2.2
     },
     {
       "id": "dji-mini-5-pro",
@@ -1081,7 +960,7 @@
         }
       ],
       "triangle_pairs_examined": 214,
-      "seconds": 0.39
+      "seconds": 0.47
     },
     {
       "id": "dji-avata-2",
@@ -1130,7 +1009,7 @@
         }
       ],
       "triangle_pairs_examined": 314,
-      "seconds": 0.88
+      "seconds": 1.02
     },
     {
       "id": "autel-evo-max-4t-v2",
@@ -1197,7 +1076,7 @@
         }
       ],
       "triangle_pairs_examined": 289,
-      "seconds": 0.51
+      "seconds": 0.58
     }
   ]
 }

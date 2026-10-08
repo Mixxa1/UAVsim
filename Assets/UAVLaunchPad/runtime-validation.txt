@@ -1,0 +1,1 @@
+PASS: native 186-mesh pad, attached fabric inlets, wind direction in world space, calm/strong wind, pause, shortest turn, finite transforms and contact heights

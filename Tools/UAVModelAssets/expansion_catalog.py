@@ -1,4 +1,4 @@
-"""Thirty additional exterior assets researched on 2026-10-06.
+"""Additional exterior assets researched on 2026-10-06.
 
 Dimensions are in metres. Only values explicitly listed in ``published`` are
 claimed as published measurements; other shaping dimensions are visual estimates.
@@ -80,18 +80,6 @@ CATALOG = [
     aircraft('iai-heron-tp', 'IAI Heron TP', 'twinboom', 26., 14.,
              'https://www.iai.co.il/product/heron-tp/',
              'Wingspan 26 m; length 14 m', paint='paint_gray', tail='h', gear=True, dome=True, turboprop=True),
-    aircraft('baykar-bayraktar-tb2', 'Baykar Bayraktar TB2', 'tb', 12., 6.5,
-             'https://baykartech.com/en/uav/bayraktar-tb2/',
-             'Wingspan 12 m; length 6.5 m', paint='paint_gray', gear=True, revision=2),
-    aircraft('baykar-bayraktar-tb3', 'Baykar Bayraktar TB3', 'tb', 14., 8.35,
-             'https://baykartech.com/en/press/naval-variant-of-the-famous-bayraktar-drone-ready-for-first-flight/',
-             'Wingspan 14 m; length 8.35 m', paint='paint_gray', gear=True, revision=3),
-    aircraft('baykar-akinci', 'Baykar AKINCI', 'akinci', 20., 12.3,
-             'https://cdn.baykartech.com/media/upload/userFormUpload/A9hsTup1Jbq6SqmJ5M6Zec0WyWXofrWX.pdf',
-             'Wingspan 20 m; length 12.3 m', paint='paint_gray', gear=True),
-    aircraft('baykar-kizilelma', 'Baykar KIZILELMA', 'kizilelma', 10., 14.5,
-             'https://baykartech.com/en/uav/bayraktar-kizilelma/',
-             'Wingspan 10 m; length 14.5 m', paint='paint_gray', gear=True),
     aircraft('leonardo-falco-evo', 'Leonardo Falco EVO', 'twinboom', 12.5, 5.2,
              'https://aeronautics.leonardo.com/documents/30508878/30801272/FALCO_EVO_MM07818-VEL.pdf?t=1675434951098',
              'Wingspan 12.5 m; length 5.2 m', paint='paint_gray', tail='inverted-v', gear=True),
@@ -115,5 +103,4 @@ CATALOG = [
          dimensions_m=[.657, .147, .563], shape={}),
 ]
 
-assert len(CATALOG) == 30
-assert len({p['id'] for p in CATALOG}) == 30
+assert len({p['id'] for p in CATALOG}) == len(CATALOG)

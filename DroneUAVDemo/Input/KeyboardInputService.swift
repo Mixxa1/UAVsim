@@ -92,8 +92,14 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case vtolTransitionBack
 
     case hover
+    case armAircraft, disarmAircraft, takeoff, land, autoPath, returnHome, manualControl, altitudeHold
+    case openFlightPanel, openCameraPanel
     case resetDrone
     case releasePayload
+    /// Moves the undercarriage lever to the other position.
+    case toggleLandingGear
+    /// Moves the flap lever to its next position: up, takeoff, landing, up.
+    case stepFlaps
 
     case cameraModeFree
     case cameraModeChase
@@ -130,13 +136,16 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     var category: KeyBindingCategory {
         switch self {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
-             .vtolTransitionForward, .vtolTransitionBack, .hover, .resetDrone, .releasePayload:
+             .vtolTransitionForward, .vtolTransitionBack, .hover, .resetDrone, .releasePayload,
+             .toggleLandingGear, .stepFlaps, .armAircraft, .disarmAircraft, .takeoff, .land,
+             .autoPath, .returnHome, .manualControl, .altitudeHold:
             return .flight
         case .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .zoomIn, .zoomOut, .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .resetCameraOrientation,
              .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed, .sprayHoseTrigger:
             return .camera
-        case .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD:
+        case .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD,
+             .openFlightPanel, .openCameraPanel:
             return .ui
         case .toggleDamageOverlay, .toggleThermalOverlay:
             return .debug
@@ -150,10 +159,12 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
              .zoomIn, .zoomOut,
              .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .sprayHoseTrigger:
             return true
-        case .hover, .resetDrone, .releasePayload, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
+        case .hover, .resetDrone, .releasePayload, .toggleLandingGear, .stepFlaps, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .resetCameraOrientation,
              .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed,
-             .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay:
+             .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD, .toggleDamageOverlay, .toggleThermalOverlay,
+             .armAircraft, .disarmAircraft, .takeoff, .land, .autoPath, .returnHome, .manualControl,
+             .altitudeHold, .openFlightPanel, .openCameraPanel:
             return false
         }
     }
@@ -184,10 +195,24 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
             return "keybind.flight.vtol_transition_back"
         case .hover:
             return "keybind.flight.hover"
+        case .armAircraft: return "command.arm"
+        case .disarmAircraft: return "command.disarm"
+        case .takeoff: return "command.takeoff"
+        case .land: return "command.land"
+        case .autoPath: return "command.auto_path"
+        case .returnHome: return "command.return_home"
+        case .manualControl: return "mode.manual"
+        case .altitudeHold: return "mode.fixed_wing_altitude_hold"
+        case .openFlightPanel: return "module.flight_ops.toolbar_title"
+        case .openCameraPanel: return "module.camera.toolbar_title"
         case .resetDrone:
             return "keybind.flight.reset"
         case .releasePayload:
             return "keybind.flight.release_payload"
+        case .toggleLandingGear:
+            return "keybind.flight.landing_gear"
+        case .stepFlaps:
+            return "keybind.flight.flaps"
         case .cameraModeFree:
             return "keybind.camera.mode1"
         case .cameraModeChase:
@@ -252,9 +277,89 @@ struct KeyBindingDescriptor: Identifiable, Hashable {
     let command: KeyboardCommand
     var keyCode: UInt16
     var keyLabel: String
+    /// A chord: the key counts only with Shift held, and then it replaces whatever the same
+    /// key does unshifted. Shift on its own stays a key like any other.
+    var requiresShift: Bool = false
 
     var id: String { command.rawValue }
     var category: KeyBindingCategory { command.category }
+}
+
+/// Stable labels for the physical macOS key codes used by the simulator.
+/// `NSEvent.charactersIgnoringModifiers` follows the user's current keyboard layout and can turn
+/// a physical training key into a punctuation mark (for example `<` on a Cyrillic layout). The
+/// simulator's defaults and its tutorial describe the physical controls, so labels must come from
+/// the key code first and only fall back to the event's characters for keys we do not know.
+enum KeyboardKeyLabel {
+    static func forEvent(_ event: NSEvent) -> String {
+        label(for: event.keyCode, shift: event.modifierFlags.contains(.shift))
+            ?? event.charactersIgnoringModifiers?.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            ?? String(format: L10n.s("keybind.key.code"), event.keyCode)
+    }
+
+    static func label(for keyCode: UInt16, shift: Bool = false) -> String? {
+        switch keyCode {
+        case 0: return "A"
+        case 1: return "S"
+        case 2: return "D"
+        case 3: return "F"
+        case 4: return "H"
+        case 5: return "G"
+        case 6: return "Z"
+        case 7: return "X"
+        case 8: return "C"
+        case 9: return "V"
+        case 11: return "B"
+        case 12: return "Q"
+        case 13: return "W"
+        case 14: return "E"
+        case 15: return "R"
+        case 16: return "Y"
+        case 17: return "T"
+        case 18: return "1"
+        case 19: return "2"
+        case 20: return "3"
+        case 21: return "4"
+        case 22: return "6"
+        case 23: return "5"
+        case 24: return shift ? "+" : "="
+        case 25: return "9"
+        case 26: return "7"
+        case 27: return shift ? "_" : "-"
+        case 28: return "8"
+        case 29: return "0"
+        case 30: return "]"
+        case 31: return "O"
+        case 32: return "U"
+        case 33: return "["
+        case 34: return "I"
+        case 35: return "P"
+        case 37: return "L"
+        case 38: return "J"
+        case 39: return shift ? "\"" : "'"
+        case 40: return "K"
+        case 41: return shift ? ":" : ";"
+        case 42: return shift ? "|" : "\\"
+        case 43: return shift ? "<" : ","
+        case 44: return shift ? "?" : "/"
+        case 45: return "N"
+        case 46: return "M"
+        case 47: return shift ? ">" : "."
+        case 48: return "Tab"
+        case 49: return L10n.s("keybind.key.space")
+        case 50: return shift ? "~" : "`"
+        case 53: return "Esc"
+        case 56, 60: return "Shift"
+        case 58, 61: return "⌥"
+        case 123: return "←"
+        case 124: return "→"
+        case 125: return "↓"
+        case 126: return "↑"
+        case 69: return "Num+"
+        case 78: return "Num-"
+        default: return nil
+        }
+    }
 }
 
 struct KeyBindingProfile {
@@ -278,8 +383,20 @@ struct KeyBindingProfile {
             .vtolTransitionForward: KeyBindingDescriptor(command: .vtolTransitionForward, keyCode: 7, keyLabel: "X"),
             .vtolTransitionBack: KeyBindingDescriptor(command: .vtolTransitionBack, keyCode: 45, keyLabel: "N"),
             .hover: KeyBindingDescriptor(command: .hover, keyCode: 49, keyLabel: L10n.s("keybind.key.space")),
+            .armAircraft: KeyBindingDescriptor(command: .armAircraft, keyCode: 43, keyLabel: "<"),
+            .disarmAircraft: KeyBindingDescriptor(command: .disarmAircraft, keyCode: 47, keyLabel: ">"),
+            .takeoff: KeyBindingDescriptor(command: .takeoff, keyCode: 32, keyLabel: "U"),
+            .land: KeyBindingDescriptor(command: .land, keyCode: 32, keyLabel: "⇧U", requiresShift: true),
+            .autoPath: KeyBindingDescriptor(command: .autoPath, keyCode: 11, keyLabel: "⇧B", requiresShift: true),
+            .returnHome: KeyBindingDescriptor(command: .returnHome, keyCode: 4, keyLabel: "⇧H", requiresShift: true),
+            .manualControl: KeyBindingDescriptor(command: .manualControl, keyCode: 46, keyLabel: "M"),
+            .altitudeHold: KeyBindingDescriptor(command: .altitudeHold, keyCode: 17, keyLabel: "⇧T", requiresShift: true),
+            .openFlightPanel: KeyBindingDescriptor(command: .openFlightPanel, keyCode: 46, keyLabel: "⇧M", requiresShift: true),
+            .openCameraPanel: KeyBindingDescriptor(command: .openCameraPanel, keyCode: 31, keyLabel: "⇧O", requiresShift: true),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
             .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
+            .toggleLandingGear: KeyBindingDescriptor(command: .toggleLandingGear, keyCode: 8, keyLabel: "⇧C", requiresShift: true),
+            .stepFlaps: KeyBindingDescriptor(command: .stepFlaps, keyCode: 3, keyLabel: "⇧F", requiresShift: true),
             .cameraModeFree: KeyBindingDescriptor(command: .cameraModeFree, keyCode: 18, keyLabel: "1"),
             .cameraModeChase: KeyBindingDescriptor(command: .cameraModeChase, keyCode: 19, keyLabel: "2"),
             .cameraModeOrbit: KeyBindingDescriptor(command: .cameraModeOrbit, keyCode: 20, keyLabel: "3"),
@@ -322,21 +439,37 @@ struct KeyBindingProfile {
             .sorted { $0.rawValue < $1.rawValue }
     }
 
-    mutating func rebind(command: KeyboardCommand, keyCode: UInt16, keyLabel: String) {
+    /// What a key press means with Shift up or down. A chord bound to the key takes the press
+    /// when Shift is held; otherwise the unshifted bindings do, whether or not Shift is held —
+    /// Shift is also "accelerate", and W must go on working while it is down.
+    func commands(for keyCode: UInt16, shiftHeld: Bool) -> [KeyboardCommand] {
+        let onKey = bindings.values.filter { $0.keyCode == keyCode }
+        let chords = onKey.filter(\.requiresShift)
+        let chosen = shiftHeld && !chords.isEmpty ? chords : onKey.filter { !$0.requiresShift }
+        return chosen.map(\.command).sorted { $0.rawValue < $1.rawValue }
+    }
+
+    mutating func rebind(command: KeyboardCommand, keyCode: UInt16, keyLabel: String, requiresShift: Bool = false) {
+        let replacement = KeyBindingDescriptor(command: command, keyCode: keyCode, keyLabel: keyLabel,
+                                               requiresShift: requiresShift)
         guard let previous = bindings[command] else {
-            bindings[command] = KeyBindingDescriptor(command: command, keyCode: keyCode, keyLabel: keyLabel)
+            bindings[command] = replacement
             return
         }
 
-        if let conflicting = bindings.first(where: { $0.key != command && $0.value.keyCode == keyCode })?.key {
+        // A key and the same key with Shift are two different bindings.
+        if let conflicting = bindings.first(where: {
+            $0.key != command && $0.value.keyCode == keyCode && $0.value.requiresShift == requiresShift
+        })?.key {
             bindings[conflicting] = KeyBindingDescriptor(
                 command: conflicting,
                 keyCode: previous.keyCode,
-                keyLabel: previous.keyLabel
+                keyLabel: previous.keyLabel,
+                requiresShift: previous.requiresShift
             )
         }
 
-        bindings[command] = KeyBindingDescriptor(command: command, keyCode: keyCode, keyLabel: keyLabel)
+        bindings[command] = replacement
     }
 
     func groupedBindings() -> [KeyBindingCategory: [KeyBindingDescriptor]] {
@@ -346,13 +479,13 @@ struct KeyBindingProfile {
     }
 
     func conflicts() -> [String] {
-        let grouped = Dictionary(grouping: bindings.values, by: \.keyCode)
+        let grouped = Dictionary(grouping: bindings.values) { UInt32($0.keyCode) | ($0.requiresShift ? 1 << 16 : 0) }
         var conflicts: [String] = []
         for entry in grouped where entry.value.count > 1 {
             let commandTitles = entry.value
                 .map { NSLocalizedString($0.command.titleKey, comment: "") }
                 .sorted()
-            let keyName = entry.value.first?.keyLabel ?? String(entry.key)
+            let keyName = entry.value.first?.keyLabel ?? String(entry.key & 0xFFFF)
             conflicts.append("\(keyName): \(commandTitles.joined(separator: ", "))")
         }
         return conflicts.sorted()
@@ -363,9 +496,13 @@ enum InputAction: Equatable, Hashable {
     case requestHover
     case requestReset
     case dropPayload
+    case toggleLandingGear
+    case stepFlaps
     case armAircraft
     case disarmAircraft
     case launchAircraft
+    case requestTakeoff, requestLanding, activateAutoPath, takeManualControl, activateAltitudeHold
+    case openFlightPanel, openCameraPanel
     case toggleFPVLens
     /// Zero-based index of a camera-carrying payload station.
     case selectCameraStation(index: Int)
@@ -434,8 +571,15 @@ protocol KeyboardInputProviding {
     func currentBindingProfile() -> KeyBindingProfile
     func currentBindingConflicts() -> [String]
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String)
+    func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String, requiresShift: Bool)
     func resetBindingsToDefault()
     func setRaceBuilderShortcutsEnabled(_ enabled: Bool)
+}
+
+extension KeyboardInputProviding {
+    func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String, requiresShift: Bool) {
+        rebind(command: command, to: keyCode, keyLabel: keyLabel)
+    }
 }
 
 final class KeyboardInputService: KeyboardInputProviding {
@@ -514,6 +658,14 @@ final class KeyboardInputService: KeyboardInputProviding {
             sanitizeMissionOverlayBindings()
             sanitizeRangefinderAndThermalQuickBindings()
             userDefaults.set(true, forKey: "input.bindings.migrated.v4")
+        }
+        if profile == nil && !userDefaults.bool(forKey: "input.bindings.migrated.instructor.v2") {
+            sanitizeInstructorBindings()
+            userDefaults.set(true, forKey: "input.bindings.migrated.instructor.v2")
+        }
+        if profile == nil && !userDefaults.bool(forKey: "input.bindings.migrated.instructor.v3") {
+            repairInstructorArmBindings()
+            userDefaults.set(true, forKey: "input.bindings.migrated.instructor.v3")
         }
     }
 
@@ -644,7 +796,11 @@ final class KeyboardInputService: KeyboardInputProviding {
     }
 
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String) {
-        profile.rebind(command: command, keyCode: keyCode, keyLabel: keyLabel)
+        rebind(command: command, to: keyCode, keyLabel: keyLabel, requiresShift: false)
+    }
+
+    func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String, requiresShift: Bool) {
+        profile.rebind(command: command, keyCode: keyCode, keyLabel: keyLabel, requiresShift: requiresShift)
         // Prevent stale pressed-state links when a command changes key while held.
         activeContinuousCommands.removeAll()
         activeContinuousByKey.removeAll()
@@ -720,7 +876,7 @@ final class KeyboardInputService: KeyboardInputProviding {
             return nil
         }
 
-        let commands = commands(for: event.keyCode)
+        let commands = commands(for: event.keyCode, shiftHeld: event.modifierFlags.contains(.shift))
         guard !commands.isEmpty else {
             return event
         }
@@ -830,14 +986,36 @@ final class KeyboardInputService: KeyboardInputProviding {
             .contains { $0.value.contains(.cameraLookPrecision) }
     }
 
+    #if DEBUG
+    /// Exercise command dispatch in headless probes without posting native input events.
+    func dispatchCommandForTesting(_ command: KeyboardCommand) -> [InputAction] {
+        mapCommandToAction(command)
+        return consumeActions()
+    }
+    #endif
+
     private func mapCommandToAction(_ command: KeyboardCommand) {
         switch command {
+        case .armAircraft: enqueueAction(.armAircraft)
+        case .disarmAircraft: enqueueAction(.disarmAircraft)
+        case .takeoff: enqueueAction(.requestTakeoff)
+        case .land: enqueueAction(.requestLanding)
+        case .autoPath: enqueueAction(.activateAutoPath)
+        case .returnHome: enqueueAction(.returnHome)
+        case .manualControl: enqueueAction(.takeManualControl)
+        case .altitudeHold: enqueueAction(.activateAltitudeHold)
+        case .openFlightPanel: enqueueAction(.openFlightPanel)
+        case .openCameraPanel: enqueueAction(.openCameraPanel)
         case .hover:
             enqueueAction(.requestHover)
         case .resetDrone:
             enqueueAction(.requestReset)
         case .releasePayload:
             enqueueAction(.dropPayload)
+        case .toggleLandingGear:
+            enqueueAction(.toggleLandingGear)
+        case .stepFlaps:
+            enqueueAction(.stepFlaps)
         case .cameraModeFree:
             enqueueAction(.selectFreeCamera)
         case .cameraModeChase:
@@ -897,14 +1075,9 @@ final class KeyboardInputService: KeyboardInputProviding {
         if matchesCompassOverlayToggle(event) {
             return .toggleCompassOverlay
         }
-        if matchesTerrainMapToggle(event) {
+        if matchesTerrainMapToggle(event),
+           profile.commands(for: event.keyCode, shiftHeld: event.modifierFlags.contains(.shift)).isEmpty {
             return .toggleTerrainMap
-        }
-        if matchesArmShortcut(event) {
-            return .armAircraft
-        }
-        if matchesDisarmShortcut(event) {
-            return .disarmAircraft
         }
         return nil
     }
@@ -947,30 +1120,6 @@ final class KeyboardInputService: KeyboardInputProviding {
         return characters == "/" || characters == "\\"
     }
 
-    private func matchesArmShortcut(_ event: NSEvent) -> Bool {
-        if event.characters == "<" {
-            return true
-        }
-
-        if event.keyCode == 43 {
-            return true
-        }
-
-        return event.charactersIgnoringModifiers == ","
-    }
-
-    private func matchesDisarmShortcut(_ event: NSEvent) -> Bool {
-        if event.characters == ">" {
-            return true
-        }
-
-        if event.keyCode == 47 {
-            return true
-        }
-
-        return event.charactersIgnoringModifiers == "."
-    }
-
     private func handleDirectUIShortcut(for event: NSEvent) -> Bool {
         if raceBuilderShortcutsEnabled, handleRaceBuilderShortcut(for: event) {
             return true
@@ -981,6 +1130,12 @@ final class KeyboardInputService: KeyboardInputProviding {
             return true
         case Self.toolPanelToggleKeyCode:
             enqueueAction(.toggleToolPanel)
+            return true
+        case 46: // M — legacy terrain-map alias, available only when the key is not remapped.
+            guard profile.commands(for: event.keyCode, shiftHeld: event.modifierFlags.contains(.shift)).isEmpty else {
+                return false
+            }
+            enqueueAction(.toggleTerrainMap)
             return true
         default:
             return false
@@ -1024,11 +1179,11 @@ final class KeyboardInputService: KeyboardInputProviding {
         pendingActions.append(action)
     }
 
-    private func commands(for keyCode: UInt16) -> [KeyboardCommand] {
+    private func commands(for keyCode: UInt16, shiftHeld: Bool = false) -> [KeyboardCommand] {
         guard !Self.reservedDirectShortcutKeyCodes.contains(keyCode) else {
             return []
         }
-        let direct = profile.commands(for: keyCode)
+        let direct = profile.commands(for: keyCode, shiftHeld: shiftHeld)
         if !direct.isEmpty {
             return direct
         }
@@ -1176,6 +1331,51 @@ final class KeyboardInputService: KeyboardInputProviding {
         }
     }
 
+    private func sanitizeInstructorBindings() {
+        // These commands were introduced after v3 profiles had already shipped. Reset the first
+        // generated tutorial bindings once so a stale experimental value cannot replace the
+        // simulator's established arm/disarm controls (`<` / `>`). Deliberate remapping remains
+        // available immediately afterwards in Settings.
+        let defaults: [KeyboardCommand: KeyBindingDescriptor] = [
+            .armAircraft: KeyBindingDescriptor(command: .armAircraft, keyCode: 43, keyLabel: "<"),
+            .disarmAircraft: KeyBindingDescriptor(command: .disarmAircraft, keyCode: 47, keyLabel: ">"),
+            .takeoff: KeyBindingDescriptor(command: .takeoff, keyCode: 32, keyLabel: "U"),
+            .land: KeyBindingDescriptor(command: .land, keyCode: 32, keyLabel: "⇧U", requiresShift: true),
+            .autoPath: KeyBindingDescriptor(command: .autoPath, keyCode: 11, keyLabel: "⇧B", requiresShift: true),
+            .returnHome: KeyBindingDescriptor(command: .returnHome, keyCode: 4, keyLabel: "⇧H", requiresShift: true),
+            .manualControl: KeyBindingDescriptor(command: .manualControl, keyCode: 46, keyLabel: "M"),
+            .altitudeHold: KeyBindingDescriptor(command: .altitudeHold, keyCode: 17, keyLabel: "⇧T", requiresShift: true),
+            .openFlightPanel: KeyBindingDescriptor(command: .openFlightPanel, keyCode: 46, keyLabel: "⇧M", requiresShift: true),
+            .openCameraPanel: KeyBindingDescriptor(command: .openCameraPanel, keyCode: 31, keyLabel: "⇧O", requiresShift: true)
+        ]
+        var didChange = false
+        for (command, descriptor) in defaults where profile.bindings[command] != descriptor {
+            profile.bindings[command] = descriptor
+            didChange = true
+        }
+        if didChange { persistProfile() }
+    }
+
+    private func repairInstructorArmBindings() {
+        // v2 briefly shipped the tutorial controls as Y / Shift+Y. Repair only those exact
+        // generated descriptors so a user who deliberately chose another key keeps it.
+        let armWasGeneratedY = profile.bindings[.armAircraft].map {
+            $0.keyCode == 16 && !$0.requiresShift && $0.keyLabel == "Y"
+        } ?? false
+        let disarmWasGeneratedY = profile.bindings[.disarmAircraft].map {
+            $0.keyCode == 16 && $0.requiresShift && $0.keyLabel == "⇧Y"
+        } ?? false
+        guard armWasGeneratedY || disarmWasGeneratedY else { return }
+
+        if armWasGeneratedY {
+            profile.rebind(command: .armAircraft, keyCode: 43, keyLabel: "<")
+        }
+        if disarmWasGeneratedY {
+            profile.rebind(command: .disarmAircraft, keyCode: 47, keyLabel: ">")
+        }
+        persistProfile()
+    }
+
     private static func loadPersistedProfile(from defaults: UserDefaults, key: String) -> KeyBindingProfile? {
         guard let data = defaults.data(forKey: key),
               let persisted = try? JSONDecoder().decode(PersistedKeyBindingProfile.self, from: data) else {
@@ -1190,6 +1390,8 @@ private struct PersistedKeyBindingProfile: Codable {
         let command: String
         let keyCode: UInt16
         let keyLabel: String
+        /// Absent in profiles saved before chords existed.
+        var requiresShift: Bool? = nil
     }
 
     let bindings: [Entry]
@@ -1200,7 +1402,8 @@ private struct PersistedKeyBindingProfile: Codable {
             guard let command = KeyboardCommand(rawValue: entry.command) else {
                 continue
             }
-            resolved.rebind(command: command, keyCode: entry.keyCode, keyLabel: entry.keyLabel)
+            resolved.rebind(command: command, keyCode: entry.keyCode, keyLabel: entry.keyLabel,
+                            requiresShift: entry.requiresShift ?? false)
         }
         return resolved
     }
@@ -1214,7 +1417,8 @@ private extension KeyBindingProfile {
                 PersistedKeyBindingProfile.Entry(
                     command: $0.command.rawValue,
                     keyCode: $0.keyCode,
-                    keyLabel: $0.keyLabel
+                    keyLabel: $0.keyLabel,
+                    requiresShift: $0.requiresShift ? true : nil
                 )
             }
         return PersistedKeyBindingProfile(bindings: entries)

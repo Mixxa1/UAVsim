@@ -370,9 +370,9 @@ struct WorkbenchView: View {
                             Spacer()
                             Image(systemName: "arrow.up.right").foregroundStyle(.secondary)
                         }
-                        Text(value == .cfd ? "Аэродинамика" : value.title)
+                        Text(validationShelfTitle(value))
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
-                        Text(value == .overview ? "Статус всех испытаний" : value == .cfd ? "Обтекание и силы в полёте" : "Нагрузки, удары и резонанс")
+                        Text(validationShelfSubtitle(value))
                             .font(.system(size: 11)).foregroundStyle(GroundControlPalette.textSecondary)
                     }
                     .foregroundStyle(.white)
@@ -383,6 +383,23 @@ struct WorkbenchView: View {
                 }
                 .buttonStyle(ShellButtonStyle(cornerRadius: 14, hoverScale: 1.01))
             }
+        }
+    }
+
+    private func validationShelfTitle(_ panel: WorkbenchValidationHub.Panel) -> String {
+        switch panel {
+        case .cfd: return "Аэродинамика"
+        case .flight: return "Лётный паспорт"
+        case .overview, .structural: return panel.title
+        }
+    }
+
+    private func validationShelfSubtitle(_ panel: WorkbenchValidationHub.Panel) -> String {
+        switch panel {
+        case .overview: return "Статус всех испытаний"
+        case .flight: return "Расчёт сборки и её облёт"
+        case .cfd: return "Обтекание и силы в полёте"
+        case .structural: return "Нагрузки, удары и резонанс"
         }
     }
 
@@ -753,10 +770,29 @@ struct WorkbenchView: View {
                 statRow("Макс. тяга", String(format: "%.1f Н", viewModel.stats.totalMaxThrustN))
                 statRow("Тяга / вес", String(format: "%.2f", viewModel.stats.thrustToWeight))
                 statRow("Макс. RPM", formatNumber(viewModel.stats.maxRPM))
-                statRow("Расчётная скорость", String(format: "%.1f м/с", viewModel.stats.estimatedMaxSpeedMps))
-                statRow(viewModel.build.vehicleArchitecture == .fixedWing
-                        ? "Время полёта" : "Время висения",
-                        String(format: "%.1f мин", viewModel.stats.estimatedHoverTimeMin))
+                // A fixed wing is shown what it will fly like: the envelope the simulator takes
+                // from its own wing, weight and motor. The pitch-speed estimate and the hover time
+                // of the same parts, which used to stand here, describe neither.
+                if let envelope = UAVBuildProfileSynthesizer.designedEnvelope(for: viewModel.build) {
+                    statRow("Площадь крыла", String(format: "%.2f м²", envelope.wingAreaM2))
+                    statRow("Скорость сваливания", String(format: "%.1f м/с", envelope.stallSpeedMps))
+                    statRow("Крейсерская скорость", String(format: "%.1f м/с", envelope.cruiseSpeedMps))
+                    statRow("Макс. скорость", String(format: "%.1f м/с", envelope.maximumSpeedMps))
+                    statRow("Скороподъёмность",
+                            envelope.climbRateMps.map { String(format: "%.1f м/с", $0) } ?? "—")
+                    statRow(viewModel.build.vehicleArchitecture == .liftCruiseVTOL ? "Время на крыле" : "Время полёта",
+                            envelope.flightMinutes.map { String(format: "%.0f мин", $0) } ?? "—")
+                    if viewModel.build.vehicleArchitecture == .liftCruiseVTOL {
+                        // The two are an order of magnitude apart on the same pack, and it is the
+                        // short one that decides how a vertical takeoff and landing are flown.
+                        statRow("Время висения", String(format: "%.1f мин", viewModel.stats.estimatedHoverTimeMin))
+                    }
+                } else {
+                    statRow("Расчётная скорость", String(format: "%.1f м/с", viewModel.stats.estimatedMaxSpeedMps))
+                    statRow(viewModel.build.vehicleArchitecture == .fixedWing
+                            ? "Время полёта" : "Время висения",
+                            String(format: "%.1f мин", viewModel.stats.estimatedHoverTimeMin))
+                }
             }
         }
     }

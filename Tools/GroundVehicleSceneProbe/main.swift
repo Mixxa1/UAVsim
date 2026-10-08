@@ -10,7 +10,23 @@ import DroneUAVDemo
 @main
 struct GroundVehicleSceneProbe {
     @MainActor static func main() {
-        if CommandLine.arguments.contains("--detonation") {
+        if CommandLine.arguments.contains("--vehicle-surface") {
+            BodyworkDamageProbe.runSurface()
+            return
+        }
+        if CommandLine.arguments.contains("--bodywork-damage") {
+            BodyworkDamageProbe.run()
+            return
+        }
+        if CommandLine.arguments.contains("--replay-persistence") {
+            DetonationPresentationProbe.runPersistence()
+            return
+        }
+        if CommandLine.arguments.contains("--live-detonation") || CommandLine.arguments.contains("--live-feed-detonation") {
+            DetonationPresentationProbe.runLiveTick()
+            return
+        }
+        if CommandLine.arguments.contains("--detonation") || CommandLine.arguments.contains("--vfx-video") {
             _ = DetonationPresentationProbe.run(render: true)
             return
         }
@@ -147,7 +163,6 @@ struct GroundVehicleSceneProbe {
         let observer = adapter.makeActor(id: InterceptCallsign.observer, role: .observer, profile: profile,
             position: SIMD3<Float>(70, 40, 70), payload: nil, moduleShape: .ballast, seed: 42)
         var configuration = InterceptMissionConfiguration()
-        configuration.targetKind = .groundVehicle
         configuration.moduleShape = .ballast
         let session = InterceptMissionSession(configuration: configuration, target: target,
             observer: observer, origin: SIMD3<Float>(0, floor, 0))
@@ -211,6 +226,12 @@ struct GroundVehicleSceneProbe {
             render("intact", time: 0)
             let detonation = ChargeDetonation(position: GroundVehiclePart.engine.position(in: car.groundVehicle!.profile))
             car.receiveDetonation(detonation, directHit: true, now: 0)
+            check(car.groundVehicle!.damage.functionalState == .nominal, "Charges cannot damage a road vehicle")
+            car.receive(ImpactReport(componentID: "body", obstacleID: UUID(), obstacleSource: "road-accident-fixture",
+                material: .metalVehicle, acousticSurface: .metal, vehicleMaterial: .steel, impactEnergyJ: 2_000_000, normalClosingSpeed: 20,
+                tangentialSpeed: 0, tier: .criticalImpact, damage: [], connectionDamage: [],
+                contactPoint: GroundVehiclePart.engine.position(in: car.groundVehicle!.profile),
+                contactNormal: SIMD3<Float>(0, 0, -1), appliedImpulse: 0, detachedPartMotions: []))
             world.updateGroundWorld(car, now: 0, deltaTime: 0.001, ground: flat, wind: SIMD3<Float>(1, 0, 0))
             let explosion = WorldDamageEffectVisual(kind: .explosion)
             scene.rootNode.addChildNode(explosion.node)
@@ -303,12 +324,12 @@ struct GroundVehicleSceneProbe {
         // Exercise the actual contact -> session -> scene path, without a manually placed blast.
         let hitScene = SCNScene(); hitScene.background.contents = NSColor(calibratedWhite: 0.06, alpha: 1)
         let hitWorld = InterceptMissionScene(scene: hitScene, showsCallsigns: false)
-        let hitCar = hitWorld.makeGroundActor(id: InterceptCallsign.target, model: .cabover,
-            position: .zero, adapterProfile: profile, seed: 9)
+        let hitCar = hitWorld.makeActor(id: InterceptCallsign.target, role: .target, profile: profile,
+            position: SIMD3<Float>(0, 8, 0), payload: nil, moduleShape: .ballast, seed: 9)
         let hitObserver = hitWorld.makeActor(id: InterceptCallsign.observer, role: .observer, profile: profile,
             position: SIMD3<Float>(70, 40, 70), payload: nil, moduleShape: .ballast, seed: 9)
         var hitConfiguration = InterceptMissionConfiguration()
-        hitConfiguration.targetKind = .groundVehicle; hitConfiguration.moduleShape = .charge
+        hitConfiguration.moduleShape = .charge
         let hitSession = InterceptMissionSession(configuration: hitConfiguration, target: hitCar,
             observer: hitObserver, origin: .zero)
         let hitCamera = SCNNode(); hitCamera.camera = SCNCamera(); hitCamera.camera?.fieldOfView = 44
@@ -339,8 +360,8 @@ struct GroundVehicleSceneProbe {
         }
         let hotBefore = renderContact("before")
         var hitPrevious = DroneState.initial; hitPrevious.physicalState = .airborne
-        hitPrevious.position = SIMD3<Float>(0, 4.5, -2.7); hitPrevious.velocity = SIMD3<Float>(0, -40, 0)
-        var hitPlayer = hitPrevious; hitPlayer.position.y = 2.5
+        hitPrevious.position = SIMD3<Float>(0, 9.2, 0); hitPrevious.velocity = SIMD3<Float>(0, -40, 0)
+        var hitPlayer = hitPrevious; hitPlayer.position.y = 7.2
         var hitGraph = hitObserver.graph
         let hitContacts = VehicleContactProfile(spheres: [.init(componentID: "frame", offset: .zero, radius: 0.3)], boundingRadius: 0.3)
         _ = hitSession.simulate(deltaTime: 0.05, playerPrevious: hitPrevious, player: &hitPlayer,
@@ -352,7 +373,7 @@ struct GroundVehicleSceneProbe {
         print("CONTACT BLAST: \(blast.position), normal \(blast.normal), age \(hitSession.worldTime - blast.startedAt)")
         let hotOnContact = renderContact("first-frame")
         if hitRenderer != nil {
-            check(hotOnContact > hotBefore + 60, "The actual roof contact has a visible flash in its first rendered frame")
+            check(hotOnContact > hotBefore + 60, "The aircraft contact has a visible flash in its first rendered frame")
             let cover = SCNNode(geometry: SCNBox(width: 16, height: 12, length: 1, chamferRadius: 0))
             cover.geometry?.firstMaterial?.lightingModel = .constant
             cover.geometry?.firstMaterial?.diffuse.contents = NSColor(white: 0.02, alpha: 1)

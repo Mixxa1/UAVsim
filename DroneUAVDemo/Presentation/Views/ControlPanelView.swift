@@ -150,6 +150,11 @@ struct ControlPanelView: View {
                         step: 0.01,
                         formatter: Self.throttleFormatter
                     )
+                    if viewModel.aircraftMechanizationConfiguration != nil {
+                        GroupBox("mechanics.title") {
+                            AircraftMechanizationControls(viewModel: viewModel)
+                        }
+                    }
                 }
                 .padding(.top, 6)
             } label: {
@@ -170,7 +175,8 @@ struct ControlPanelView: View {
             },
             onEditAbstract: {
                 showAbstractEditor = true
-            }
+            },
+            selectionEnabled: !viewModel.isInstructorFlight
         )
     }
 

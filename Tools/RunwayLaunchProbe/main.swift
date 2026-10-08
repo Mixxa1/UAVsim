@@ -103,6 +103,7 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
     )
     state.armState = .armed
 
+    let mechanization = AircraftMechanizationModel.shared(for: profile, uav: uav)
     var brakeReleaseDistance: Float?
     var rotationDistance: Float?
     var unstickDistance: Float?
@@ -143,7 +144,7 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
             commandedPitchDeg = 3.0
         }
 
-        let control = DroneControlInput(
+        var control = DroneControlInput(
             // Ahead along the runway, not along -Z. A tactical heading of 0 points
             // at +Z, so a target written in raw axes turned every aircraft round
             // and flew the takeoff backwards down its own strip.
@@ -163,7 +164,14 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
             mode: .autoPath,
             controlMode: .stabilized
         )
-        let context = DroneSimulationContext(
+        // The takeoff is flown in the configuration its rotation speed is quoted for. That speed
+        // is 1.1·VS with the takeoff flap out, which on a P.1HH is slower than the clean wing
+        // stalls: flown clean it rotates on time and then runs another six hundred metres before
+        // the wing will carry it. In the app the autopilot sets this flap in takeoff mode.
+        if mechanization?.configuration.hasFlaps == true {
+            control.flapCommand = AircraftMechanizationCharacteristics.takeoffFlapSetting
+        }
+        var context = DroneSimulationContext(
             profile: profile,
             activeUAVProfile: uav,
             weather: .normal,
@@ -179,6 +187,8 @@ for profile in repository.allProfiles where profile.airframeClass == .fixedWing 
             engineState: state.engineRuntime,
             fuelPropulsion: backend
         )
+        context.neutralContactProfile = contactProfile
+        context.mechanization = mechanization
         state = physics.step(state: state, control: control, context: context, deltaTime: dt)
 
         if let fuel = fuelState, let flow = state.engineRuntime?.shaftPowerKW {
