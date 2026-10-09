@@ -14,6 +14,8 @@ struct SettingsView: View {
 
     @StateObject private var bindings: BindingsViewModel
     @State private var selected: SettingsPage = .guide
+    @State private var osdPresented = false
+    @AppStorage(AppGraphicsSettings.interfaceScaleKey) private var interfaceScale = 1.0
     private let simulationViewModel: DroneSimulationViewModel?
 
     init(onClose: @escaping () -> Void, onApplyWindowSize: @escaping (WindowSizePreset) -> Void = { _ in },
@@ -34,7 +36,7 @@ struct SettingsView: View {
         }
     }
     enum SettingsPage: String, CaseIterable, Identifiable {
-        case training, guide, keys, controller, video, audio, language, about
+        case training, guide, keys, controller, osd, video, audio, language, about
         var id: String { rawValue }
         var key: String { "settings.page." + rawValue }
         var icon: String {
@@ -43,6 +45,7 @@ struct SettingsView: View {
             case .guide: return "book.closed"
             case .keys: return "keyboard"
             case .controller: return "gamecontroller"
+            case .osd: return "viewfinder"
             case .video: return "display"
             case .audio: return "speaker.wave.2"
             case .language: return "globe"
@@ -118,6 +121,11 @@ struct SettingsView: View {
                             case .training: instructorSection
                             case .guide: guideSection
                             case .controller: controlsSection
+                            case .osd:
+                                sectionCard(titleKey: "settings.page.osd") {
+                                    Text("Расположите телеметрию в кадре, выберите шрифт и сохраните раскладку. Настройки применяются к FPV-виду.")
+                                    Button("Открыть редактор OSD") { osdPresented = true }.buttonStyle(.borderedProminent)
+                                }
                             case .video: videoSection; resolutionSection
                             case .audio: audioSection
                             case .language: languageSection
@@ -130,6 +138,10 @@ struct SettingsView: View {
             }.frame(maxHeight: .infinity)
 
             footer
+        }
+        .sheet(isPresented: $osdPresented) {
+            ScaledSettingsPanel(minimumSize: CGSize(width: 1040, height: 620)) { FPVOSDEditorView(viewModel: simulationViewModel) }
+                .frame(width: min(1120, (NSScreen.main?.visibleFrame.width ?? 1300) - 80), height: min(720, (NSScreen.main?.visibleFrame.height ?? 900) - 100))
         }
         .frame(minWidth: 720, idealWidth: 980, maxWidth: 1080, minHeight: 560, idealHeight: 720, maxHeight: 820)
         .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 20))
@@ -211,12 +223,21 @@ struct SettingsView: View {
     /// the key-bindings screen — both edit the one shared store.
     private var controlsSection: some View {
         sectionCard(titleKey: "settings.section.controls") {
+            USBControllerSettingsView(profile: simulationViewModel?.selectedDroneProfile)
+            ControlProfilesView(bindings: bindings)
             ControllerAxisSettingsView(store: .shared)
         }
     }
 
     private var videoSection: some View {
         sectionCard(titleKey: "settings.section.video") {
+            HStack {
+                Text("Масштаб интерфейса")
+                Slider(value: $interfaceScale, in: 0.75...1.5, step: 0.05)
+                Text("\(Int((interfaceScale * 100).rounded()))% ").monospacedDigit().frame(width: 55)
+                Button("100%") { interfaceScale = 1 }
+            }
+
             VStack(alignment: .leading, spacing: 14) {
                 labeledRow("settings.graphics.quality") {
                     Picker("", selection: qualityBinding) {

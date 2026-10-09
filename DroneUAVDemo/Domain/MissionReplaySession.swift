@@ -22,11 +22,22 @@ struct MissionReplaySession: Identifiable, Codable, Equatable {
     /// Storage keeps binary scene archives beside the JSON, avoiding base64 copies of meshes.
     var visualAssetFiles: [String: String]? = nil
 
+    /// Flight timeline length, excluding paused rewind and discarded branches.
+    var recordedDuration: TimeInterval? = nil
+    /// Sparse changes, allowing seeks to reconstruct a world edited during the flight.
+    var environmentChanges: [MissionReplayEnvironmentChange]? = nil
+
     var duration: TimeInterval {
+        if let recordedDuration { return recordedDuration }
         if let endedAt { return endedAt.timeIntervalSince(startedAt) }
         return Date().timeIntervalSince(startedAt)
     }
 
     var frameCount: Int { frames.count }
     var eventCount: Int { events.count }
+}
+
+struct MissionReplayEnvironmentChange: Codable, Equatable {
+    var timestamp: TimeInterval
+    var context: MissionReplayContextSnapshot
 }

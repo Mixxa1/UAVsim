@@ -1,0 +1,89 @@
+{
+  "source": "Original approximate exterior, not scanned CAD",
+  "reference": "https://www.radiomasterrc.com/products/tx16s-mark-ii-radio-controller",
+  "pivots": {
+    "GimbalLeft": [
+      -0.046,
+      0.03,
+      0.041
+    ],
+    "GimbalRight": [
+      0.046,
+      0.03,
+      0.041
+    ],
+    "Button0": [
+      -0.029,
+      0.065,
+      0.04
+    ],
+    "Button1": [
+      -0.017400000000000002,
+      0.065,
+      0.04
+    ],
+    "Button2": [
+      -0.005800000000000003,
+      0.065,
+      0.04
+    ],
+    "Button3": [
+      0.005799999999999996,
+      0.065,
+      0.04
+    ],
+    "Button4": [
+      0.017399999999999995,
+      0.065,
+      0.04
+    ],
+    "Button5": [
+      0.028999999999999995,
+      0.065,
+      0.04
+    ],
+    "Switch0": [
+      -0.081,
+      0.092,
+      0.039
+    ],
+    "Switch1": [
+      -0.066,
+      0.095,
+      0.039
+    ],
+    "Switch2": [
+      -0.08,
+      0.073,
+      0.039
+    ],
+    "Switch3": [
+      -0.094,
+      0.065,
+      0.039
+    ],
+    "Switch4": [
+      0.066,
+      0.095,
+      0.039
+    ],
+    "Switch5": [
+      0.081,
+      0.092,
+      0.039
+    ],
+    "Switch6": [
+      0.08,
+      0.073,
+      0.039
+    ],
+    "Switch7": [
+      0.094,
+      0.065,
+      0.039
+    ]
+  },
+  "meshes": 195,
+  "triangles": 27768,
+  "file": "DroneUAVDemo/Resources/Models/Controllers/RadioMasterTX16S.usdz"
+}

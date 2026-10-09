@@ -416,6 +416,8 @@ struct TerrainConfiguration {
     /// `ScenePopulationService` — off by default (and for every existing flow); set for mission
     /// terrain only, where "this looks like real forest cover" matters more than the normal
     /// freeform-flight object budget.
+    var reliefEnabled: Bool = false
+    var reliefAmplitude: Float = 70
     var missionDensityBoost: Bool = false
     /// When set (mission only), concentrates forest generation around this point/radius instead
     /// of spreading uniformly over the whole map — the collidable-object budget is finite
@@ -487,7 +489,7 @@ struct EnvironmentObjectDescriptor: Identifiable {
     let id: UUID
     let kind: EnvironmentObjectKind
     let biome: TerrainPreset
-    let position: SIMD3<Float>
+    var position: SIMD3<Float>
     let yawRadians: Float
     let size: SIMD3<Float>
     let boundingRadius: Float

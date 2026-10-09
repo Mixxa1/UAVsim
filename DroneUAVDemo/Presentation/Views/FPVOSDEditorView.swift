@@ -9,7 +9,11 @@ import SwiftUI
 /// atlas through the same composer the analog compositor uses. An element the installed
 /// equipment cannot feed is shown disabled with the reason rather than silently dropped.
 struct FPVOSDEditorView: View {
-    @SimulationObservedObject var viewModel: DroneSimulationViewModel
+    @StateObject private var viewModel: OSDEditorModel
+    init(viewModel: DroneSimulationViewModel? = nil) {
+        _viewModel = StateObject(wrappedValue: OSDEditorModel(simulation: viewModel))
+    }
+    @State private var fileError: String?
     @Environment(\.dismiss) private var dismiss
 
     @State private var selectedElement: OSDElement?
@@ -36,6 +40,9 @@ struct FPVOSDEditorView: View {
         .frame(minWidth: 1040, idealWidth: 1120, minHeight: 620, idealHeight: 680)
         .background(GroundControlPalette.panel)
         .task { loadAtlas(viewModel.fpvFontPreset) }
+        .alert("Настройки OSD", isPresented: Binding(get: { fileError != nil }, set: { if !$0 { fileError = nil } })) {
+            Button("OK") { fileError = nil }
+        } message: { Text(fileError ?? "") }
     }
 
     // MARK: Header
@@ -53,6 +60,24 @@ struct FPVOSDEditorView: View {
 
             Spacer(minLength: 12)
 
+            Button("Импорт") {
+                do {
+                    if let data = try SettingsFileIO.read() {
+                        let config = try JSONDecoder().decode(OSDFileConfiguration.self, from: data)
+                        guard config.version == 1, config.layout.version <= OSDLayoutConfiguration.currentVersion else {
+                            throw ControlProfileError.invalid("Неподдерживаемая версия OSD")
+                        }
+                        viewModel.setOSDLayout(config.layout); viewModel.setFPVFontPreset(config.font)
+                        loadAtlas(config.font)
+                    }
+                } catch { fileError = error.localizedDescription }
+            }
+            Button("Экспорт") {
+                do {
+                    let encoder = JSONEncoder(); encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                    try SettingsFileIO.export(encoder.encode(OSDFileConfiguration(layout: layout, font: viewModel.fpvFontPreset)), name: "UAVsim-OSD.json")
+                } catch { fileError = error.localizedDescription }
+            }
             Button("osd.editor.done") { dismiss() }
                 .keyboardShortcut(.defaultAction)
         }

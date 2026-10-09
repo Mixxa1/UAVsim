@@ -23,7 +23,7 @@ struct WorkbenchAerodynamicsPanel: View {
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             Picker(L10n.s("cfd.flow"), selection: Binding(get: { settings.model }, set: { model in
                 viewModel.updateAerodynamicSettings {
-                    $0.model = model
+                    $0.selectModel(model)
                     if !model.hasSuffix("sst") { $0.transition = "none" }
                     if model == "euler" { $0.layerHeightsM = [] }
                     else if $0.layerHeightsM.isEmpty { $0.layerHeightsM = WorkbenchAeroSettings.initial(for: viewModel.build).layerHeightsM }
@@ -63,6 +63,7 @@ struct WorkbenchAerodynamicsPanel: View {
                 Text(L10n.s("cfd.transition_hint"))
                     .font(.system(size: 11)).foregroundStyle(.secondary)
             }
+            if settings.model == "urans_sst" { timePlan }
             if settings.model != "euler" { wallPlan }
             angleEditor("α, °", key: \.alphaDeg)
             angleEditor("β, °", key: \.betaDeg)
@@ -214,6 +215,32 @@ struct WorkbenchAerodynamicsPanel: View {
                     $0.wallSizeM = max($0.reference.chordM / 60, 1e-4)
                 }
             }.disabled(planned.isEmpty)
+        }
+    }
+
+    /// The time-accurate part of a URANS run, with what the entered numbers amount to in the units
+    /// that decide whether it means anything: chord passages covered and steps per passage.
+    @ViewBuilder private var timePlan: some View {
+        let duration = settings.timeStepSeconds * Double(settings.timeSteps)
+        let passage = settings.speedMps > 0 ? settings.reference.chordM / settings.speedMps : 0
+        let innerIterations = Double(settings.timeSteps) * Double(settings.innerIterations)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack {
+                Text(L10n.s("cfd.time_step"))
+                Spacer()
+                TextField(L10n.s("cfd.time_step"), value: Binding(get: { settings.timeStepSeconds * 1000 }, set: { value in
+                    viewModel.updateAerodynamicSettings { $0.timeStepSeconds = value / 1000 }
+                }), format: .number).textFieldStyle(.roundedBorder).frame(width: 100)
+            }
+            integer(L10n.s("cfd.time_steps"), key: \.timeSteps)
+            integer(L10n.s("cfd.inner_iterations"), key: \.innerIterations)
+            integer(L10n.s("cfd.averaging_steps"), key: \.averagingSteps)
+            Text(L10n.f("cfd.time_plan", String(format: "%.3g", duration),
+                        String(format: "%.3g", passage > 0 ? duration / passage : 0),
+                        String(format: "%.3g", settings.timeStepSeconds > 0 ? passage / settings.timeStepSeconds : 0),
+                        String(format: "%.0f", innerIterations),
+                        String(format: "%.2g", innerIterations > 0 ? settings.timeoutSeconds / innerIterations : 0)))
+                .font(.system(size: 11)).foregroundStyle(.secondary)
         }
     }
 

@@ -6,7 +6,7 @@ struct LegalGateRootView: View {
     var body: some View {
         Group {
             if legalViewModel.isAccepted {
-                ContentView()
+                InterfaceScaleContainer { ContentView() }
             } else {
                 LegalAgreementView(viewModel: legalViewModel)
             }

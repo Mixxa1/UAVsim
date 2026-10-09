@@ -352,6 +352,8 @@ struct MissionScenarioParameters: Equatable {
     var timeOfDay: TimeOfDay
     var timeLimitMinutes: Int
     var seed: UInt64
+    var reliefEnabled: Bool
+    var reliefAmplitude: Float
 
     init(
         kind: MissionScenarioKind = .searchAndRescue,
@@ -362,7 +364,9 @@ struct MissionScenarioParameters: Equatable {
         weatherIntensity: Float = 0.3,
         timeOfDay: TimeOfDay = .day,
         timeLimitMinutes: Int? = nil,
-        seed: UInt64 = UInt64.random(in: 1...UInt64.max)
+        seed: UInt64 = UInt64.random(in: 1...UInt64.max),
+        reliefEnabled: Bool = false,
+        reliefAmplitude: Float = 70
     ) {
         self.kind = kind
         self.terrain = terrain
@@ -373,6 +377,8 @@ struct MissionScenarioParameters: Equatable {
         self.timeOfDay = timeOfDay
         self.timeLimitMinutes = timeLimitMinutes ?? difficulty.defaultTimeLimitMinutes
         self.seed = seed
+        self.reliefEnabled = reliefEnabled && terrain.supportsRelief
+        self.reliefAmplitude = min(250, max(10, reliefAmplitude.isFinite ? reliefAmplitude : 70))
     }
 
     var searchRadiusMeters: Float { difficulty.searchRadiusMeters }

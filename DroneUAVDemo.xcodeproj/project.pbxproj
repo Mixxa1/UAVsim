@@ -7,6 +7,13 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B5A300000000000000000001 /* Controllers in Resources */ = {isa = PBXBuildFile; fileRef = B5A300000000000000000002 /* Controllers */; };
+		8ADAD4E3D97869B0C3CED337 /* FlightRewindOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = E642A6C3535948C48D51EC85 /* FlightRewindOverlay.swift */; };
+		4B8D760681F490BDD2E51598 /* USBControllerSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A74D782CB80482AE50F42CE4 /* USBControllerSettingsView.swift */; };
+		3E8FEA21957D442DE455A6AB /* FlightWorkbenchSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 713F96BA47F896C5CF2D55DB /* FlightWorkbenchSettingsView.swift */; };
+		BB77B8028C15759E61BE55B5 /* USBControllerInput.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82CA70A718DB227F65865D1E /* USBControllerInput.swift */; };
+		60D6901E1EB40BC50075F0DA /* ControlProfiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = F547ECA292A3D504CC153A70 /* ControlProfiles.swift */; };
+		1BE394CFAC344C868D0DA2CA /* FlightWorkbenchModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4ED81899AEB5D138058A7EB8 /* FlightWorkbenchModels.swift */; };
 		CD9A28D2AAC62B1FAE3554FD /* InstructorSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 979D225B4D06B2DB8F5D678C /* InstructorSettingsView.swift */; };
 		9742ACC2B79EE77F0305FC55 /* InstructorOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 63458084B9AC60F7BD88AE32 /* InstructorOverlayView.swift */; };
 		38029451243063A5666C9368 /* FlightTrainingSceneLayer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0E072402FB0BC1EA4E87296E /* FlightTrainingSceneLayer.swift */; };
@@ -600,6 +607,13 @@
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B5A300000000000000000002 /* Controllers */ = {isa = PBXFileReference; lastKnownFileType = folder; path = "Models/Controllers"; sourceTree = "<group>"; };
+		E642A6C3535948C48D51EC85 /* FlightRewindOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightRewindOverlay.swift; sourceTree = "<group>"; };
+		A74D782CB80482AE50F42CE4 /* USBControllerSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USBControllerSettingsView.swift; sourceTree = "<group>"; };
+		713F96BA47F896C5CF2D55DB /* FlightWorkbenchSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightWorkbenchSettingsView.swift; sourceTree = "<group>"; };
+		82CA70A718DB227F65865D1E /* USBControllerInput.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = USBControllerInput.swift; sourceTree = "<group>"; };
+		F547ECA292A3D504CC153A70 /* ControlProfiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ControlProfiles.swift; sourceTree = "<group>"; };
+		4ED81899AEB5D138058A7EB8 /* FlightWorkbenchModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightWorkbenchModels.swift; sourceTree = "<group>"; };
 		979D225B4D06B2DB8F5D678C /* InstructorSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstructorSettingsView.swift; sourceTree = "<group>"; };
 		63458084B9AC60F7BD88AE32 /* InstructorOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = InstructorOverlayView.swift; sourceTree = "<group>"; };
 		0E072402FB0BC1EA4E87296E /* FlightTrainingSceneLayer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FlightTrainingSceneLayer.swift; sourceTree = "<group>"; };
@@ -1399,6 +1413,7 @@
 				100000000000000000000107 /* DroneState.swift */,
 				10000000000000000000010A /* TelemetrySnapshot.swift */,
 				100000000000000000000112 /* TerrainModel.swift */,
+				4ED81899AEB5D138058A7EB8 /* FlightWorkbenchModels.swift */,
 				100000000000000000000151 /* TargetMarkerState.swift */,
 				100000000000000000000111 /* WeatherModel.swift */,
 				1000000000000000000002C2 /* CodableVector3D.swift */,
@@ -1670,6 +1685,9 @@
 				10000000000000000000014C /* FlightOpsModuleView.swift */,
 				10000000000000000000014E /* CameraModuleView.swift */,
 				A9A00000000000000000000E /* FPVOSDEditorView.swift */,
+				E642A6C3535948C48D51EC85 /* FlightRewindOverlay.swift */,
+				A74D782CB80482AE50F42CE4 /* USBControllerSettingsView.swift */,
+				713F96BA47F896C5CF2D55DB /* FlightWorkbenchSettingsView.swift */,
 				A9A000000000000000000013 /* PayloadStationsView.swift */,
 				10000000000000000000014F /* ScenarioModuleView.swift */,
 				100000000000000000000A0A /* MissionSetupView.swift */,
@@ -1749,6 +1767,8 @@
 				AD5500000000000000000001 /* ControllerRateProfile.swift */,
 				1000000000000000000002AD /* InputCaptureCoordinator.swift */,
 				1000000000000000000002AC /* InputBindingsStore.swift */,
+				82CA70A718DB227F65865D1E /* USBControllerInput.swift */,
+				F547ECA292A3D504CC153A70 /* ControlProfiles.swift */,
 				10000000000000000000019E /* InputManager.swift */,
 				10000000000000000000019C /* InputProvider.swift */,
 				10000000000000000000019B /* InputSnapshot.swift */,
@@ -1807,6 +1827,7 @@
 				10000000000000000000040D /* ThirdPartyAssets.json */,
 				A0D1000000000000000000A5 /* Audio */,
 				B5A0000000000000000000A1 /* UAVModels */,
+				B5A300000000000000000002 /* Controllers */,
 				BC1000000000000000000002 /* WorkbenchParts */,
 				B5A0000000000000000000D1 /* Launchers */,
 				B5A0000000000000000000F1 /* CanisterLaunchers */,
@@ -2100,6 +2121,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B5A300000000000000000001 /* Controllers in Resources */,
 				A9A000000000000000000104 /* betaflight.mcm in Resources */,
 				A9A000000000000000000105 /* clarity.mcm in Resources */,
 				A9A000000000000000000106 /* Xander_Full_v3.mcm in Resources */,
@@ -2184,6 +2206,12 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				8ADAD4E3D97869B0C3CED337 /* FlightRewindOverlay.swift in Sources */,
+				4B8D760681F490BDD2E51598 /* USBControllerSettingsView.swift in Sources */,
+				3E8FEA21957D442DE455A6AB /* FlightWorkbenchSettingsView.swift in Sources */,
+				BB77B8028C15759E61BE55B5 /* USBControllerInput.swift in Sources */,
+				60D6901E1EB40BC50075F0DA /* ControlProfiles.swift in Sources */,
+				1BE394CFAC344C868D0DA2CA /* FlightWorkbenchModels.swift in Sources */,
 				CD9A28D2AAC62B1FAE3554FD /* InstructorSettingsView.swift in Sources */,
 				9742ACC2B79EE77F0305FC55 /* InstructorOverlayView.swift in Sources */,
 				38029451243063A5666C9368 /* FlightTrainingSceneLayer.swift in Sources */,

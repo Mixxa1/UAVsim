@@ -60,6 +60,9 @@ final class BindingsViewModel: ObservableObject {
         sections.lazy.flatMap(\.bindings).first { $0.command == command }
     }
 
+    func exportKeyboard() -> [KeyboardProfileEntry] { store.exportKeyboard() }
+    func importKeyboard(_ entries: [KeyboardProfileEntry]) { endCapture(); store.importKeyboard(entries); refresh() }
+
     func refresh() {
         sections = store.sections()
         conflicts = store.conflicts()

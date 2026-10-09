@@ -168,6 +168,11 @@ final class MissionReplayWorldVisuals {
 
     func node(for id: String) -> SCNNode? { id == "player" ? playerRoot : instances[id]?.node }
 
+    func invalidateTemplateEnvironment() {
+        replacedEnvironment.values.forEach { $0.isHidden = false }
+        replacedEnvironment.removeAll()
+    }
+
     func update(_ world: MissionReplayWorldSnapshot) {
         SCNTransaction.begin()
         SCNTransaction.disableActions = true

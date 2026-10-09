@@ -57,6 +57,11 @@ final class GameControllerInputProvider: InputProvider {
             return
         }
 
+        if let usb = USBControllerStore.shared.inputSnapshot(rates: settingsStore.rateProfile) {
+            snapshot = usb
+            previousButtonStates.removeAll()
+            return
+        }
         refreshActiveControllerIfNeeded()
 
         guard let controller = activeController,
@@ -135,7 +140,9 @@ final class GameControllerInputProvider: InputProvider {
     }
 
     var activeControllerName: String? {
-        activeController?.displayName
+        let usb = USBControllerStore.shared
+        if !usb.selectedDeviceID.isEmpty { return usb.devices.first { $0.id == usb.selectedDeviceID }?.name }
+        return activeController?.displayName
     }
 
     func connectedDeviceSummaries() -> [GameControllerDeviceSummary] {
@@ -520,6 +527,8 @@ private extension InputAction {
             return 7
         case .requestHover:
             return 8
+        case .rewindFlight:
+            return 40
         case .requestReset:
             return 9
         case .selectFreeCamera:

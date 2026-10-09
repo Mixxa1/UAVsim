@@ -17,7 +17,7 @@ final class AgriFieldSceneLayer {
     /// what keeps a future larger field from turning into a quarter of a million billboards
     /// without anyone deciding to.
     private static let maxCropClumps = 140_000
-    private static let groundY: Float = 0.0
+    private var terrain = TerrainConfiguration.default
     private static let soilPatchLift: Float = 0.04
     private static let coverageDecalLift: Float = 0.10
 
@@ -40,9 +40,11 @@ final class AgriFieldSceneLayer {
     func build(
         placement: AgriFieldPlacement,
         difficulty: MissionDifficulty,
-        into parent: SCNNode
+        into parent: SCNNode,
+        terrain: TerrainConfiguration = .default
     ) -> SIMD3<Float> {
         clear()
+        self.terrain = terrain
         rootNode.name = "agri.field"
         if !isAttached || rootNode.parent == nil {
             parent.addChildNode(rootNode)
@@ -101,11 +103,17 @@ final class AgriFieldSceneLayer {
         placement: AgriFieldPlacement,
         lift: Float
     ) -> SCNNode {
+        if terrain.usesRelief {
+            let mesh = drapedGeometry(placement: placement, min: SIMD2(repeating: -placement.fieldHalfExtent), max: SIMD2(repeating: placement.fieldHalfExtent), lift: lift)
+            mesh.materials = geometry.materials
+            let node = SCNNode(geometry: mesh); node.name = name; node.castsShadow = false
+            return node
+        }
         let wrapper = SCNNode()
         wrapper.name = name
         wrapper.position = SCNVector3(
             placement.fieldCenter.x,
-            Self.groundY + lift,
+            lift,
             placement.fieldCenter.y
         )
         // Negated on purpose. A SceneKit yaw of +θ turns a point the *opposite* way to the
@@ -120,6 +128,27 @@ final class AgriFieldSceneLayer {
         quad.castsShadow = false
         wrapper.addChildNode(quad)
         return wrapper
+    }
+
+    /// Soil, wetness and rails follow the same surface the low spraying passes fly over.
+    private func drapedGeometry(placement: AgriFieldPlacement, min: SIMD2<Float>, max: SIMD2<Float>, lift: Float) -> SCNGeometry {
+        let nx = Swift.max(1, Int(ceil((max.x - min.x) / 2))), nz = Swift.max(1, Int(ceil((max.y - min.y) / 2)))
+        var points: [SCNVector3] = [], normals: [SCNVector3] = [], uv: [CGPoint] = [], indices: [Int32] = []
+        for z in 0...nz { for x in 0...nx {
+            let u = Float(x) / Float(nx), v = Float(z) / Float(nz)
+            let local = min + (max - min) * SIMD2(u, v)
+            let world = placement.fieldLocalToWorld(local)
+            points.append(SCNVector3(world.x, terrain.surfaceHeight(x: world.x, z: world.y) + lift, world.y))
+            let normal = terrain.surfaceNormal(x: world.x, z: world.y)
+            normals.append(SCNVector3(normal.x, normal.y, normal.z))
+            uv.append(CGPoint(x: CGFloat(u), y: CGFloat(1 - v)))
+            if z < nz, x < nx {
+                let a = Int32(z * (nx + 1) + x), c = a + Int32(nx + 1)
+                indices += [a, c, a + 1, a + 1, c, c + 1]
+            }
+        } }
+        return SCNGeometry(sources: [SCNGeometrySource(vertices: points), SCNGeometrySource(normals: normals), SCNGeometrySource(textureCoordinates: uv)],
+            elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
     }
 
     // MARK: Crop
@@ -155,7 +184,7 @@ final class AgriFieldSceneLayer {
                     )
                     clumps.append(
                         WheatFieldAssetLoader.ClumpPlacement(
-                            position: SIMD3<Float>(offset.x, 0.0, offset.y),
+                            position: SIMD3<Float>(offset.x, terrain.surfaceHeight(x: placement.fieldLocalToWorld(chunkLocalOrigin + offset).x, z: placement.fieldLocalToWorld(chunkLocalOrigin + offset).y), offset.y),
                             yaw: Float.random(in: 0...(2.0 * .pi), using: &rng),
                             heightMeters: Float.random(in: 0.78...1.08, using: &rng)
                         )
@@ -165,7 +194,7 @@ final class AgriFieldSceneLayer {
                     return
                 }
                 let world = placement.fieldLocalToWorld(chunkLocalOrigin)
-                chunk.position = SCNVector3(world.x, Self.groundY, world.y)
+                chunk.position = SCNVector3(world.x, 0, world.y)
                 chunk.eulerAngles = SCNVector3(0.0, -placement.rowHeadingRadians, 0.0)
                 rootNode.addChildNode(chunk)
                 chunkCount += 1
@@ -189,11 +218,27 @@ final class AgriFieldSceneLayer {
         material.lightingModel = .constant
         material.isDoubleSided = true
 
+        if terrain.usesRelief {
+            let w = Float(thickness) * 0.5
+            let strips: [(SIMD2<Float>, SIMD2<Float>)] = [
+                (SIMD2(-half, -half - w), SIMD2(half, -half + w)),
+                (SIMD2(-half, half - w), SIMD2(half, half + w)),
+                (SIMD2(-half - w, -half), SIMD2(-half + w, half)),
+                (SIMD2(half - w, -half), SIMD2(half + w, half))]
+            let boundary = SCNNode(); boundary.name = "agri.field.boundary"
+            for (min, max) in strips {
+                let mesh = drapedGeometry(placement: placement, min: min, max: max, lift: 0.12)
+                mesh.firstMaterial = material
+                let node = SCNNode(geometry: mesh); node.castsShadow = false; boundary.addChildNode(node)
+            }
+            rootNode.addChildNode(boundary)
+            return
+        }
         let container = SCNNode()
         container.name = "agri.field.boundary"
         container.position = SCNVector3(
             placement.fieldCenter.x,
-            Self.groundY + Float(height) * 0.5,
+            Float(height) * 0.5,
             placement.fieldCenter.y
         )
         container.eulerAngles = SCNVector3(0.0, -placement.rowHeadingRadians, 0.0)
@@ -225,9 +270,10 @@ final class AgriFieldSceneLayer {
     private func buildRefillStation(placement: AgriFieldPlacement) -> SIMD3<Float> {
         let container = SCNNode()
         container.name = "agri.refill_station"
+        let groundY = terrain.surfaceHeight(x: placement.stationPosition.x, z: placement.stationPosition.y)
         container.position = SCNVector3(
             placement.stationPosition.x,
-            Self.groundY,
+            groundY,
             placement.stationPosition.y
         )
 
@@ -276,7 +322,7 @@ final class AgriFieldSceneLayer {
         container.addChildNode(beaconNode)
 
         rootNode.addChildNode(container)
-        return SIMD3<Float>(placement.stationPosition.x, Self.groundY, placement.stationPosition.y)
+        return SIMD3<Float>(placement.stationPosition.x, groundY, placement.stationPosition.y)
     }
 
     // MARK: Coverage decal

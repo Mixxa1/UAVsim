@@ -12,6 +12,7 @@ enum EnvironmentObjectFactory {
     private static var snowSpruceTrees = 0
     private static var proceduralFallbackTrees = 0
     private static var placeholdersHidden = 0
+    private static var rockMaterial: SCNMaterial?
 
     static func resetDiagnostics() {
         pineTrees = 0
@@ -40,7 +41,21 @@ enum EnvironmentObjectFactory {
                 return node
             }
             return EnvironmentProceduralVisualFactory.makeNode(for: descriptor, quality: quality)
-        case .pole, .rock, .crate, .marker:
+        case .rock:
+            let node = EnvironmentProceduralVisualFactory.makeNode(for: descriptor, quality: quality)
+            let stone: SCNMaterial
+            if let rockMaterial {
+                stone = rockMaterial
+            } else {
+                stone = AbandonedCityMaterialLoader.makeBrittleStoneMaterial(mapSizeMeters: 8)
+                stone.diffuse.mipFilter = .linear
+                stone.diffuse.maxAnisotropy = 8
+                rockMaterial = stone
+            }
+            node.geometry?.materials = [stone]
+            node.enumerateChildNodes { child, _ in child.geometry?.materials = [stone] }
+            return node
+        case .pole, .crate, .marker:
             if EnvironmentDebugOptions.showPlaceholderObjects {
                 return EnvironmentProceduralVisualFactory.makeNode(for: descriptor, quality: quality)
             }

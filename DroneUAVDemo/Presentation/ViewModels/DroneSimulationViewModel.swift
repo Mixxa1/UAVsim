@@ -554,6 +554,14 @@ extension DroneSimulationViewModel {
         /// on a MapKit-backed world `objects` is empty while the registry is at its fullest, and
         /// the HUD readout means "what the aircraft knows about", not "what is painted here".
         let registeredObjectCount: Int
+        var reliefEnabled: Bool = false
+        var reliefAmplitude: Float = 70
+        var reliefSafeSpawnRadius: Float = 15
+
+        var reliefConfiguration: TerrainConfiguration {
+            TerrainConfiguration(preset: preset, mapScale: mapScale, density: 0, seed: terrainSeed,
+                safeSpawnRadius: reliefSafeSpawnRadius, reliefEnabled: reliefEnabled, reliefAmplitude: reliefAmplitude)
+        }
 
         static let empty = TerrainMapSnapshot(
             preset: TerrainConfiguration.default.preset,
@@ -2047,6 +2055,19 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     private var vtolAutopilotPhase: VTOLAutopilotPhase = .idleGrounded
     private var state: DroneState
     private var lastFiniteState: DroneState
+    @Published private(set) var isRewindingFlight = false
+    @Published private(set) var rewindAvailableSeconds: Float = 0
+    @Published private(set) var rewindOffsetSeconds: Float = 0
+    private var liveFlightHistory = FlightHistory<LiveFlightCheckpoint>()
+    private var rewindPresent: LiveFlightCheckpoint?
+    private var rewindSelection: LiveFlightCheckpoint?
+    private var rewindPointerHeld = false
+    private var rewindSceneWasPaused = false
+    private var usbCalibrationPaused = false
+    private var usbCalibrationSceneWasPaused = false
+    private var cachedSpatialWind: (position: SIMD3<Float>, time: Float, direction: Float, speed: Float, gusts: Float, environment: UInt64, vector: SIMD3<Float>)?
+    private var lastHistorySample: Float = -1
+    private var historyEnvironmentSignature = ""
     private var simulationTimer: Timer?
     private var lastTimestamp: CFTimeInterval?
     private var simulationTime: Float = 0.0
@@ -2062,7 +2083,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     /// four-minute flight as an hour.
     private var fpvFlightLog = FPVFlightLog()
 
-    private struct FPVFlightLog {
+    fileprivate struct FPVFlightLog {
         var elapsedSeconds: Double = 0
         var distanceMeters: Double = 0
         private var lastPosition: SIMD3<Float>?
@@ -3219,7 +3240,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     init(
         physicsEngine: DronePhysicsEngine = SimpleDronePhysicsEngine(),
         keyboardInputService: KeyboardInputProviding = KeyboardInputService(),
-        controllerSettingsStore: ControllerSettingsStore = ControllerSettingsStore(),
+        controllerSettingsStore: ControllerSettingsStore = .shared,
         collisionService: CollisionAnalysisService = CollisionAnalysisService(),
         batteryThermalService: BatteryThermalSimulationService = BatteryThermalSimulationService(),
         telemetryExporter: TelemetryExporting = TelemetryExportService(),
@@ -3547,6 +3568,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     func stopRuntimeForExit() {
+        if isRewindingFlight { cancelFlightRewind() }
+        endUSBCalibrationPause()
         flightTrainingPreparationTask?.cancel()
         flightTrainingPreparationTask = nil
         isPreparingFlightTraining = false
@@ -4332,6 +4355,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     func releasePayload() {
+        clearLiveFlightHistory()
         guard canControlLocalVehicle else { return }
         // The capsule launcher stays mounted and fires one capsule at a time out of an ammo
         // count — deliberately NOT the single-ownership attach-once/drop-once flow below (that
@@ -4609,6 +4633,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     func reset() {
+        clearLiveFlightHistory()
         if flightTrainingSession != nil, !preparingTrainingAircraft {
             restartFlightTrainingLesson()
             return
@@ -6861,6 +6886,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     func setTerrainPreset(_ preset: TerrainPreset) {
         let compatiblePreset = preset.compatiblePreset(for: selectedDroneProfile.airframeClass)
         terrain.preset = compatiblePreset
+        if !compatiblePreset.supportsRelief { terrain.reliefEnabled = false }
         terrain.density = compatiblePreset.defaultDensity
         terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: terrain.mapScale)
         scheduleTerrainRegeneration(resetAfter: false)
@@ -6874,6 +6900,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         }
 
         terrain.preset = compatiblePreset
+        if !compatiblePreset.supportsRelief { terrain.reliefEnabled = false }
         terrain.density = compatiblePreset.defaultDensity
         terrain.safeSpawnRadius = recommendedSafeSpawnRadius(for: terrain.mapScale)
         return true
@@ -7178,6 +7205,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     }
 
     private func regenerateEnvironment() {
+        clearLiveFlightHistory()
         clearMissionPlan()
         cancelPendingTerrainDensityRegeneration()
         clearTargetMarker()
@@ -7330,6 +7358,9 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
 
         let params = config.parameters
         setTerrainPreset(params.terrain)
+        terrain.seed = params.seed
+        terrain.reliefEnabled = params.reliefEnabled && terrain.preset.supportsRelief
+        terrain.reliefAmplitude = params.reliefAmplitude
         // Search missions need real cover to search through — the terrain preset's generic
         // default density (0.72 for forest) reads too sparse for "the target could be behind any
         // of these trees" to feel true. Player picks the density preset in MissionSetupView
@@ -7409,6 +7440,9 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             attachPayload()
         }
 
+        // Resolve the height field before spawning scenario actors onto it.
+        cancelPendingTerrainDensityRegeneration()
+        regenerateEnvironment()
         let dock = sceneController.currentDockSpawnPoint()
         // Concentrate forest generation around the sector/zone instead of the whole map — set
         // before the still-pending debounced regen (scheduled above) fires, so this terrain
@@ -7426,6 +7460,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             )
             terrain.missionSearchSectorCenter = placement.sectorCenter
             terrain.missionSearchSectorRadius = placement.sectorRadius
+            scheduleTerrainRegeneration(resetAfter: false)
             let target = sceneController.spawnMissionSearchScenario(placement: placement)
             missionScenarioTargetWorldPosition = target
             missionScenarioRuntime = MissionScenarioRuntime(configuration: config, placement: placement)
@@ -7486,10 +7521,16 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             // A track chosen in Mission Setup — generated or from the library. No track is a real
             // choice, not a missing one: the pilot asked for an empty world and will build the
             // course in it, so nothing is generated behind their back.
-            let track = config.raceTrack ?? RaceTrack(
+            var track = config.raceTrack ?? RaceTrack(
                 name: L10n.s("race.builder.new_track"),
                 laps: 3
             )
+            if terrain.usesRelief {
+                for index in track.elements.indices {
+                    let position = track.elements[index].position
+                    track.elements[index].position.y += terrain.surfaceHeight(x: position.x, z: position.z)
+                }
+            }
             installRaceTrack(track, mode: config.raceMode)
             keyboardInputService.setRaceBuilderShortcutsEnabled(true)
             // Launching into an empty world *is* the request to build a course, so the builder
@@ -7938,7 +7979,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             ground: { [sceneController] p, r in
                 sceneController.groundVehicleSurfaceHeight(at: SIMD2<Float>(p.x, p.z), clearanceRadius: r,
                     maximumHeight: p.y + r) ?? .nan
-            }, wind: finiteVector(weather.windVector, fallback: .zero))
+            }, wind: finiteVector(currentWindVector, fallback: .zero))
         groundVehicleSightAccumulator += deltaTime
         if groundVehicleSightAccumulator >= 0.2 {
             groundVehicleSightAccumulator = 0
@@ -8002,7 +8043,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             playerContacts: vehicleContactProfile,
             playerClass: selectedDroneProfile.airframeClass,
             weather: weather,
-            wind: weather.windVector,
+            wind: currentWindVector,
             ground: { [sceneController] position, radius in
                 sceneController.supportSurfaceHeight(
                     at: SIMD2<Float>(position.x, position.z),
@@ -8042,7 +8083,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                     maximumHeight: position.y + radius
                 ) ?? .nan
             },
-            wind: finiteVector(weather.windVector, fallback: .zero)
+            wind: finiteVector(currentWindVector, fallback: .zero)
         )
         refreshInterceptLineOfSight(session: session, deltaTime: deltaTime)
 
@@ -8710,7 +8751,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             currentPosition: position,
             groundSpeed: groundSpeed,
             altitudeAGL: altitudeAGL,
-            windXZ: SIMD2<Float>(weather.windVector.x, weather.windVector.z),
+            windXZ: SIMD2<Float>(currentWindVector.x, currentWindVector.z),
             isSpraying: agriculturalSprayerState.isSpraying,
             drainedLiters: lastAgriDrainedLiters,
             tankRemainingLiters: tankRemaining,
@@ -8946,6 +8987,34 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     private func tick() {
         let frameStart = CACurrentMediaTime()
         let now = CACurrentMediaTime()
+        if isFlightRewindHeld, !isRewindingFlight { beginFlightRewind() }
+        if isRewindingFlight {
+            if isFlightRewindHeld {
+                let elapsed = forcedDeltaTime ?? Float(min(0.05, max(0, now - (lastTimestamp ?? now))))
+                seekFlightRewind(secondsBack: rewindOffsetSeconds + elapsed * 3)
+                simulationAudio.refreshMasterVolume()
+                _ = keyboardInputService.consumeActions()
+                lastTimestamp = now
+            } else {
+                resumeFlightFromRewind()
+            }
+            return
+        }
+        if USBControllerStore.shared.isCalibrating {
+            if !usbCalibrationPaused {
+                usbCalibrationPaused = true
+                usbCalibrationSceneWasPaused = scene.isPaused
+                scene.isPaused = true
+                missionReplayRecorder.pauseTimeline()
+            }
+            lastTimestamp = now
+            return
+        }
+        if usbCalibrationPaused {
+            endUSBCalibrationPause()
+            keyboardInputService.resetTransientState(); inputManager.reset()
+            lastTimestamp = now
+        }
         if isPreparingFlightTraining {
             // Keep the world frozen while a deferred lesson transition is assembling its SceneKit
             // graph. The preparation flag is published before the work starts, so this branch also
@@ -8963,7 +9032,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                     switch action {
                     case .openFlightPanel, .openCameraPanel, .toggleMissionMap, .toggleTelemetryHUD,
                          .toggleControlPanel, .toggleToolPanel, .selectFreeCamera, .selectChaseCamera,
-                         .selectOrbitCamera, .selectFPVCamera, .selectTopCamera, .cycleCameraMode, .toggleFPV:
+                         .selectOrbitCamera, .selectFPVCamera, .selectTopCamera, .cycleCameraMode, .toggleFPV, .rewindFlight:
                         return true
                     default: return false
                     }
@@ -9083,6 +9152,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             controllerSnapshot: controllerSnapshot
         )
         processInputActions(using: interactionAwareInput)
+        if isRewindingFlight { return }
         applyContinuousCameraLook(deltaTime: dt, controlState: interactionAwareInput)
         applyContinuousCameraZoom(deltaTime: dt)
         #if DEBUG
@@ -9822,7 +9892,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             damageState: damageState,
             batteryState: batteryState,
             collisionRisk: collisionAnalysis.riskScore,
-            windVector: weather.windVector,
+            windVector: currentWindVector,
             vehicleMassModel: vehicleMassModel,
             fixedWingLaunchDynamics: activeFixedWingLaunchDynamics,
             fixedWingThrottleCeiling: selectedDroneProfile.airframeClass == .fixedWing
@@ -10423,6 +10493,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         refreshMissionStatus()
         flushDamageEventAdapters()
         updateFlightTraining(deltaTime: dt)
+        recordLiveFlightCheckpoint()
         recordMissionReplayFrameIfNeeded()
         recordMissionReplayWarningsIfNeeded()
         checkpointCompletedMissionIfNeeded()
@@ -13097,6 +13168,9 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             switch action {
             case .requestHover:
                 hover()
+            case .rewindFlight:
+                beginFlightRewind()
+                if isRewindingFlight { return }
             case .requestReset:
                 reset()
             case .toggleLandingGear:
@@ -13105,6 +13179,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             case .stepFlaps:
                 stepFlapLever()
             case .dropPayload:
+                clearLiveFlightHistory()
                 // The same key does the same thing: it lets go of what the aircraft is carrying.
                 // On the delivery side that is the mission's one command, so it goes there first.
                 if interceptSession?.delivery?.state == .carried {
@@ -17746,7 +17821,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             6.0,
             simd_length(SIMD2<Float>(state.velocity.x, state.velocity.z))
         )
-        let windXZ = SIMD2<Float>(weather.windVector.x, weather.windVector.z)
+        let windXZ = SIMD2<Float>(currentWindVector.x, currentWindVector.z)
         // Predict with the bank authority available *now*, not with the profile's maximum bank.
         // In the failed run the altitude target was 95.5 m while the aircraft was at 32 m, so
         // low-altitude protection allowed about 15° of bank. The old max-bank radius predicted a
@@ -20028,7 +20103,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
     private func currentBallisticEnvironment() -> BallisticEnvironment {
         BallisticEnvironment(
             atmosphere: currentAtmosphere(),
-            windVector: finiteVector(weather.windVector, fallback: .zero)
+            windVector: finiteVector(currentWindVector, fallback: .zero)
         )
     }
 
@@ -20534,7 +20609,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 intensity: weather.intensity,
                 windDirectionDeg: weather.windDirectionDeg,
                 windSpeedMps: weather.windSpeedMps,
-                gusts: weather.gusts
+                gusts: weather.gusts,
+                spatialWindEnabled: weather.spatialWindEnabled
             ),
             terrain: ProjectSnapshot.Terrain(
                 presetRaw: terrain.preset.rawValue,
@@ -20542,6 +20618,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
                 density: terrain.density,
                 seed: terrain.seed,
                 safeSpawnRadius: terrain.safeSpawnRadius,
+                reliefEnabled: terrain.reliefEnabled,
+                reliefAmplitude: terrain.reliefAmplitude,
                 showsBoundaryBarrier: isBoundaryBarrierVisible
             ),
             camera: ProjectSnapshot.Camera(
@@ -20752,6 +20830,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         weather.windDirectionDeg = snapshot.weather.windDirectionDeg
         weather.windSpeedMps = snapshot.weather.windSpeedMps
         weather.gusts = snapshot.weather.gusts
+        weather.spatialWindEnabled = snapshot.weather.spatialWindEnabled ?? false
 
         attachedMeshWorld = snapshot.meshWorld
         attachedOpenDataWorld = snapshot.openDataWorld
@@ -20769,6 +20848,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         }
         terrain.density = snapshot.terrain.density
         terrain.seed = snapshot.terrain.seed
+        terrain.reliefEnabled = snapshot.terrain.reliefEnabled ?? false
+        terrain.reliefAmplitude = (snapshot.terrain.reliefAmplitude ?? 70).clamped(to: 10...250)
         terrain.safeSpawnRadius = max(
             snapshot.terrain.safeSpawnRadius > 0.1
                 ? snapshot.terrain.safeSpawnRadius
@@ -24604,9 +24685,13 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         hasher.combine(selectedDroneProfile.id)
         hasher.combine(Int((terrain.maxFlightAltitude * 10.0).rounded()))
         hasher.combine(vehicleMassModel.resolvedCurrentTotalMass.bitPattern)
-        hasher.combine(weather.windVector.x.bitPattern)
-        hasher.combine(weather.windVector.y.bitPattern)
-        hasher.combine(weather.windVector.z.bitPattern)
+        // Gusts change continuously. Revalidate the route when weather settings change,
+        // rather than invalidating launch guidance on every physics tick.
+        hasher.combine(weather.windDirectionDeg.bitPattern)
+        hasher.combine(weather.windSpeedMps.bitPattern)
+        hasher.combine(weather.gusts.bitPattern)
+        hasher.combine(weather.normalizedIntensity.bitPattern)
+        hasher.combine(weather.spatialWindEnabled)
         return hasher.finalize()
     }
 
@@ -25496,7 +25581,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             return refuse("first leg \(Int(firstLegLength)) m shorter than three envelope radii")
         }
         let firstLegDirection = firstLeg / firstLegLength
-        let windXZ = SIMD2<Float>(weather.windVector.x, weather.windVector.z)
+        let windXZ = SIMD2<Float>(currentWindVector.x, currentWindVector.z)
         let measuredAirVelocity = SIMD2<Float>(
             state.velocity.x - windXZ.x,
             state.velocity.z - windXZ.y
@@ -28028,7 +28113,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         state.velocity = .zero
         state.angularVelocity = .zero
         state.bodyAngularVelocity = .zero
-        state.forwardAirspeed = simd_length(weather.windVector)
+        state.forwardAirspeed = simd_length(currentWindVector)
         state.orientation = SIMD3<Float>(
             0.0,
             asset.railAngleDegrees.degreesToRadians,
@@ -28077,8 +28162,8 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             )
             nominalReleaseSpeed = min(wing.catapultExitSpeed, forceLimitedExitSpeed)
         }
-        let longitudinalWind = simd_dot(weather.windVector, direction)
-        let crosswind = simd_length(weather.windVector - direction * longitudinalWind)
+        let longitudinalWind = simd_dot(currentWindVector, direction)
+        let crosswind = simd_length(currentWindVector - direction * longitudinalWind)
         if mode == .runway {
             // A tailwind does not leave a rolling aircraft slow — it leaves it
             // long. Ground run scales with the square of the ratio between ground
@@ -28192,7 +28277,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
         )
         let tailwind = max(
             0.0,
-            simd_dot(SIMD2<Float>(weather.windVector.x, weather.windVector.z), launchDirection)
+            simd_dot(SIMD2<Float>(currentWindVector.x, currentWindVector.z), launchDirection)
         )
         let manoeuvreReserve = turnRadius + planningSpeed * Self.fixedWingTurnRollInSeconds
         // Prove the straight run the launch actually flies, not its failsafe backstop.
@@ -28453,7 +28538,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
 
         launchRuntimeSnapshot = fixedWingLaunchController.update(
             aircraftState: state,
-            windVector: weather.windVector,
+            windVector: currentWindVector,
             isArmed: isArmed,
             // Energy availability, whichever kind the aircraft carries: an empty
             // tank must scrub a launch exactly as a flat battery does.
@@ -28721,7 +28806,10 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             trail: terrainMapTrail,
             objects: staticOverlay.objects,
             agriField: currentAgriFieldMapOverlay(),
-            registeredObjectCount: sceneController.environmentMapDescriptors.count
+            registeredObjectCount: sceneController.environmentMapDescriptors.count,
+            reliefEnabled: terrain.usesRelief,
+            reliefAmplitude: terrain.reliefAmplitude,
+            reliefSafeSpawnRadius: terrain.safeSpawnRadius
         )
 
         if nextSnapshot != terrainMapSnapshot {
@@ -32960,7 +33048,7 @@ final class DroneSimulationViewModel: ObservableObject, SimulationPresentationSo
             "[LaunchDiagnostics][\(context)] " +
             "pos=\(state.position) ori=\(state.orientation) vel=\(state.velocity) angVel=\(state.angularVelocity) " +
             "controller=\(controllerType) mode=\(mode.rawValue) weather=\(weather.preset.rawValue) " +
-            "wind=\(weather.windVector) turb=\(f.turbulenceFactor) motors=[\(motors.x),\(motors.y),\(motors.z),\(motors.w)]"
+            "wind=\(currentWindVector) turb=\(f.turbulenceFactor) motors=[\(motors.x),\(motors.y),\(motors.z),\(motors.w)]"
         )
     }
 
@@ -33087,8 +33175,8 @@ private extension DroneSimulationViewModel {
     }
 
     func missionReplayTimestamp() -> TimeInterval {
-        guard let startedAt = missionReplayRecorder.currentSessionStartedAt else { return 0 }
-        return Date().timeIntervalSince(startedAt)
+        guard missionReplayRecorder.isRecording else { return 0 }
+        return missionReplayRecorder.timelineTimestamp
     }
 
     func updateMissionReplayLifecycle() {
@@ -33146,6 +33234,7 @@ private extension DroneSimulationViewModel {
         #endif
         let isAutopilotActive = missionExecutionState.status == .running || autoNavigationController.isActive
         let autopilotDescription: String? = isAutopilotActive ? mode.rawValue : nil
+        missionReplayRecorder.recordEnvironment(makeMissionReplayContextSnapshot(), at: missionReplayTimestamp())
         let frame = MissionReplayFrame(
             id: UUID(),
             timestamp: missionReplayTimestamp(),
@@ -33184,7 +33273,7 @@ private extension DroneSimulationViewModel {
             effects = session.effects.effects.map {
                 MissionReplayEffectSnapshot(id: $0.id, kind: $0.kind.rawValue, position: $0.position,
                     normal: $0.normal, age: max(0, session.worldTime - $0.startedAt), lifetime: $0.lifetime,
-                    scale: $0.scale, wind: finiteVector(weather.windVector, fallback: .zero))
+                    scale: $0.scale, wind: finiteVector(currentWindVector, fallback: .zero))
             }
         }
         if let actor = groundVehicleActor {
@@ -33195,7 +33284,7 @@ private extension DroneSimulationViewModel {
             effects += road.effects.map {
                 MissionReplayEffectSnapshot(id: $0.id, kind: $0.kind.rawValue, position: $0.position,
                     normal: $0.normal, age: max(0, road.worldTime - $0.startedAt), lifetime: $0.lifetime,
-                    scale: $0.scale, wind: finiteVector(weather.windVector, fallback: .zero))
+                    scale: $0.scale, wind: finiteVector(currentWindVector, fallback: .zero))
             }
         }
         effects += sceneController.chargeEnvironmentReplayEffects
@@ -33288,6 +33377,14 @@ private extension DroneSimulationViewModel {
             hasPayloadAttachedAtStart: payloadMountState == .occupied,
             recordedAtAppVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
             terrainDensity: terrain.density,
+            terrainReliefEnabled: terrain.reliefEnabled,
+            terrainReliefAmplitude: terrain.reliefAmplitude,
+            terrainSafeSpawnRadius: terrain.safeSpawnRadius,
+            weatherIntensity: weather.intensity,
+            windSpeedMps: weather.windSpeedMps,
+            windDirectionDeg: weather.windDirectionDeg,
+            windGusts: weather.gusts,
+            spatialWindEnabled: weather.spatialWindEnabled,
             importedWorld: attachedMeshWorld.map {
                 MissionReplayImportedWorldReference(kind: .photogrammetric, identifier: $0.sourceIdentifier, tileKey: $0.tileKey)
             } ?? attachedOpenDataWorld.map {
@@ -33307,8 +33404,12 @@ extension DroneSimulationViewModel {
     /// Headless integration probes run the same ticks without a timer, window or desktop input.
     /// Keeping private storage access here also avoids cross-module Swift field-offset bugs.
     @discardableResult
+    func flightReplayForTesting() -> MissionReplaySession? { missionReplayRecorder.checkpoint() }
+    func groundSurfaceForTesting(at position: SIMD2<Float>) -> Float? {
+        sceneController.supportSurfaceContact(at: position, clearanceRadius: 0, maximumHeight: -1)?.height
+    }
     func advanceFlightTrainingForTesting(steps: Int, deltaTime: Float = 1.0 / 60.0) -> DroneState {
-        precondition(isInstructorFlight && steps >= 0 && deltaTime > 0)
+        precondition(steps >= 0 && deltaTime > 0)
         simulationTimer?.invalidate()
         simulationTimer = nil
         let previousDelta = forcedDeltaTime
@@ -33542,5 +33643,224 @@ private extension Float {
 private extension Double {
     func clamped(to range: ClosedRange<Double>) -> Double {
         Swift.min(range.upperBound, Swift.max(range.lowerBound, self))
+    }
+}
+
+
+extension DroneSimulationViewModel {
+    var currentWindVector: SIMD3<Float> {
+        guard weather.spatialWindEnabled, weather.windSpeedMps > 0 else { return weather.windVector }
+        let revision = sceneController.environmentRevision
+        if let cached = cachedSpatialWind, cached.position == state.position, cached.time == simulationTime,
+           cached.direction == weather.windDirectionDeg, cached.speed == weather.windSpeedMps,
+           cached.gusts == weather.gusts, cached.environment == revision { return cached.vector }
+        let ground = sceneController.supportSurfaceContact(at: SIMD2(state.position.x, state.position.z), clearanceRadius: 0, maximumHeight: state.position.y)
+        let vector = weather.wind(at: state.position, time: simulationTime, groundHeight: ground?.height ?? 0, groundNormal: ground?.normal ?? SIMD3(0, 1, 0))
+        cachedSpatialWind = (state.position, simulationTime, weather.windDirectionDeg, weather.windSpeedMps, weather.gusts, revision, vector)
+        return vector
+    }
+    func setSpatialWindEnabled(_ enabled: Bool) { weather.spatialWindEnabled = enabled; hasUnsavedChanges = true }
+    func setReliefTerrain(enabled: Bool, amplitude: Float = 70, deferRegeneration: Bool = false) {
+        terrain.reliefEnabled = enabled && terrain.preset.supportsRelief
+        terrain.reliefAmplitude = amplitude.clamped(to: 10...250)
+        hasUnsavedChanges = true
+        if deferRegeneration { scheduleTerrainRegeneration(resetAfter: false, delayNanoseconds: 180_000_000) }
+        else { cancelPendingTerrainDensityRegeneration(); regenerateEnvironment() }
+    }
+}
+
+private extension DroneSimulationViewModel {
+    struct LiveFlightCheckpoint {
+        var time: Float
+        var replayTime: TimeInterval
+        var drone: DroneState
+        var controls: DroneControlValues
+        var armed: Bool
+        var controlMode: FlightControlMode
+        var battery: BatteryState
+        var fuel: FuelSystemState?
+        var thermal: ThermalState
+        var damage: DamageState
+        var graph: VehicleComponentGraph
+        var failures: [ActiveComponentFailure]
+        var failureSeed: UInt64
+        var failureGenerator: UInt64
+        var training: FlightTrainingSession?
+        var clock: WorldClock
+        var flightLog: FPVFlightLog
+        var logWasArmed: Bool
+        var fireActive: Bool
+        var fireStarted: TimeInterval?
+        var maxThrottleDuration: Float
+        var aftermath: CollisionAftermathState
+        var launch: LaunchState
+        var launchElapsed: Float
+        var launchRuntime: FixedWingLaunchRuntimeSnapshot
+        var cradleHeld: Bool
+        var mass: VehicleMassProperties
+    }
+    func makeLiveFlightCheckpoint() -> LiveFlightCheckpoint {
+        LiveFlightCheckpoint(time: simulationTime, replayTime: missionReplayTimestamp(), drone: state,
+            controls: controlValues, armed: isArmed, controlMode: flightControlMode, battery: batteryState,
+            fuel: fuelState, thermal: thermalState, damage: damageState, graph: componentGraph,
+            failures: Array(componentFailureRuntime.failures.values), failureSeed: componentFailureRuntime.persistenceSeed,
+            failureGenerator: componentFailureRuntime.persistenceGeneratorState, training: flightTrainingSession,
+            clock: worldClock, flightLog: fpvFlightLog, logWasArmed: fpvFlightLogWasArmed,
+            fireActive: batteryFireActive, fireStarted: batteryFireIgnitedAtSimulationTime,
+            maxThrottleDuration: sustainedMaxThrottleSeconds, aftermath: collisionAftermathState,
+            launch: launchState, launchElapsed: launchStateElapsed, launchRuntime: launchRuntimeSnapshot,
+            cradleHeld: launchCradleHoldActive, mass: vehicleMassProperties)
+    }
+    func restoreLiveFlightCheckpoint(_ checkpoint: LiveFlightCheckpoint) {
+        simulationTime = checkpoint.time
+        state = checkpoint.drone; lastFiniteState = state
+        controlValues = checkpoint.controls; isArmed = checkpoint.armed; mode = state.mode
+        physicalState = state.physicalState; flightControlMode = checkpoint.controlMode
+        batteryState = checkpoint.battery; fuelState = checkpoint.fuel; thermalState = checkpoint.thermal
+        let damageChanged = componentGraph != checkpoint.graph || damageState.healthByComponent != checkpoint.damage.healthByComponent || damageState.hiddenComponents != checkpoint.damage.hiddenComponents
+        componentGraph = checkpoint.graph; vehicleMassProperties = checkpoint.mass
+        componentFailureRuntime.restore(failures: checkpoint.failures, seed: checkpoint.failureSeed, generatorState: checkpoint.failureGenerator)
+        damageState = checkpoint.damage
+        if damageChanged {
+            refreshDamagePhysicsModels()
+            sceneController.restoreDetachedVehicleComponentVisibility(componentGraph)
+        }
+        vehicleMassProperties = checkpoint.mass
+        batteryFireActive = checkpoint.fireActive; batteryFireIgnitedAtSimulationTime = checkpoint.fireStarted
+        sustainedMaxThrottleSeconds = checkpoint.maxThrottleDuration
+        collisionAftermathState = checkpoint.aftermath
+        launchState = checkpoint.launch; launchStateElapsed = checkpoint.launchElapsed
+        launchRuntimeSnapshot = checkpoint.launchRuntime; launchCradleHoldActive = checkpoint.cradleHeld
+        let trainingChanged = flightTrainingProgress != checkpoint.training?.progress
+        flightTrainingSession = checkpoint.training; flightTrainingProgress = checkpoint.training?.progress
+        if trainingChanged { syncFlightTrainingSpheres() }
+        fpvFlightLog = checkpoint.flightLog; fpvFlightLogWasArmed = checkpoint.logWasArmed
+        worldClock = checkpoint.clock
+        sceneController.applyWorldClock(worldClock)
+        clearSignalLossState(restoringInputMode: false)
+        showBatteryDepletedDialog = false
+        collisionCooldown = 0; groundImpactCooldown = 0; impactSeverityAccumulator = 0
+        sceneController.update(with: state, camera: cameraConfiguration, damage: damageState,
+            thermal: thermalState, diagnosticMode: diagnosticMode, deltaTime: 0)
+        telemetry = buildTelemetrySnapshot(); warnings = buildWarnings()
+        refreshCompassOverlay(); refreshTerrainMapSnapshotIfVisible(recordTrail: false)
+    }
+    func recordLiveFlightCheckpoint() {
+        guard rewindUnavailableReason == nil, !isRewindingFlight else { return }
+        let signature = "\(selectedDroneProfile.id)-\(terrain.seed)-\(terrain.preset.rawValue)-\(terrain.mapScale.rawValue)-\(terrain.reliefEnabled)-\(terrain.reliefAmplitude)"
+        if signature != historyEnvironmentSignature || simulationTime < lastHistorySample {
+            clearLiveFlightHistory(); historyEnvironmentSignature = signature
+        }
+        guard simulationTime - lastHistorySample >= 0.1 else { return }
+        liveFlightHistory.append(time: simulationTime, value: makeLiveFlightCheckpoint())
+        lastHistorySample = simulationTime
+        rewindAvailableSeconds = min(120, simulationTime - (liveFlightHistory.oldestTime ?? simulationTime))
+    }
+    func clearLiveFlightHistory() {
+        if isRewindingFlight {
+            scene.isPaused = rewindSceneWasPaused; missionReplayRecorder.resumeTimeline()
+            simulationAudio.setRewindPlayback(false)
+        }
+        liveFlightHistory.removeAll(); lastHistorySample = -1; rewindAvailableSeconds = 0
+        rewindPresent = nil; rewindSelection = nil; rewindPointerHeld = false
+        rewindOffsetSeconds = 0; isRewindingFlight = false
+    }
+}
+
+extension DroneSimulationViewModel {
+    private func endUSBCalibrationPause() {
+        guard usbCalibrationPaused else { return }
+        usbCalibrationPaused = false
+        scene.isPaused = usbCalibrationSceneWasPaused
+        missionReplayRecorder.resumeTimeline()
+    }
+    var rewindUnavailableReason: String? {
+        if onlineRuntimeContext != nil || isSpectatorMode { return "Перемотка доступна в локальном полёте" }
+        if hasMissionScenario { return "Перемотка доступна в свободном полёте и обучении" }
+        if isPreparingFlightTraining { return "Дождитесь подготовки аппарата" }
+        if USBControllerStore.shared.isCalibrating { return "Завершите калибровку пульта" }
+        return nil
+    }
+    private var isFlightRewindHeld: Bool {
+        rewindPointerHeld || keyboardInputService.currentInputSnapshot().activeContinuousCommands.contains(.rewindFlight)
+            || USBControllerStore.shared.isRewindHeld
+    }
+    func setFlightRewindHeld(_ held: Bool) {
+        rewindPointerHeld = held
+        if held { beginFlightRewind() }
+        else if isRewindingFlight, !isFlightRewindHeld { resumeFlightFromRewind() }
+    }
+    func beginFlightRewind() {
+        guard rewindUnavailableReason == nil, !isRewindingFlight, rewindAvailableSeconds >= 0.2 else { return }
+        rewindPresent = makeLiveFlightCheckpoint()
+        rewindSelection = rewindPresent
+        missionReplayRecorder.pauseTimeline()
+        isRewindingFlight = true
+        rewindSceneWasPaused = scene.isPaused; scene.isPaused = true
+        inputManager.reset()
+        simulationAudio.setRewindPlayback(true)
+        showBatteryDepletedDialog = false
+        rewindOffsetSeconds = 0
+    }
+    func seekFlightRewind(secondsBack: Float) {
+        guard isRewindingFlight, let present = rewindPresent else { return }
+        rewindOffsetSeconds = secondsBack.clamped(to: 0...rewindAvailableSeconds)
+        if rewindOffsetSeconds == 0 { rewindSelection = present; restoreLiveFlightCheckpoint(present); return }
+        let time = present.time - rewindOffsetSeconds
+        guard let bracket = liveFlightHistory.bracket(at: time) else { return }
+        let later = time > bracket.later.time ? present : bracket.later.value
+        var checkpoint = bracket.earlier.value
+        let duration = later.time - checkpoint.time
+        let blend = duration > 0 ? ((time - checkpoint.time) / duration).clamped(to: 0...1) : 0
+        checkpoint.time += duration * blend
+        checkpoint.replayTime += (later.replayTime - checkpoint.replayTime) * Double(blend)
+        checkpoint.drone.position = simd_mix(checkpoint.drone.position, later.drone.position, SIMD3(repeating: blend))
+        checkpoint.drone.velocity = simd_mix(checkpoint.drone.velocity, later.drone.velocity, SIMD3(repeating: blend))
+        checkpoint.drone.attitudeQuat = simd_slerp(checkpoint.drone.attitudeQuat, later.drone.attitudeQuat, blend)
+        for axis in 0..<3 {
+            let difference = atan2(sin(later.drone.orientation[axis] - checkpoint.drone.orientation[axis]),
+                                   cos(later.drone.orientation[axis] - checkpoint.drone.orientation[axis]))
+            checkpoint.drone.orientation[axis] += difference * blend
+        }
+        checkpoint.drone.angularVelocity = simd_mix(checkpoint.drone.angularVelocity, later.drone.angularVelocity, SIMD3(repeating: blend))
+        checkpoint.drone.bodyAngularVelocity = simd_mix(checkpoint.drone.bodyAngularVelocity, later.drone.bodyAngularVelocity, SIMD3(repeating: blend))
+        rewindSelection = checkpoint
+        restoreLiveFlightCheckpoint(checkpoint)
+    }
+    func cancelFlightRewind() {
+        guard let present = rewindPresent else { return }
+        restoreLiveFlightCheckpoint(present)
+        missionReplayRecorder.resumeTimeline()
+        endFlightRewindInteraction()
+    }
+    func resumeFlightFromRewind() {
+        guard isRewindingFlight, let selected = rewindSelection else { return }
+        liveFlightHistory.discard(after: selected.time)
+        liveFlightHistory.append(time: selected.time, value: selected)
+        lastHistorySample = selected.time
+        missionReplayRecorder.resumeTimeline(at: selected.replayTime)
+        replayStopPendingAfterDisarm = false
+        takeManualControl()
+        resetFixedWingAutopilotCommands(); resetFixedWingAvoidanceState(); resetFlightControlRouting()
+        setFlightMode(.manual, reason: "flight_rewind_manual")
+        setTimeScale(.realtime)
+        controlValues.x = Double(state.position.x); controlValues.y = Double(state.position.y); controlValues.z = Double(state.position.z)
+        controlValues.roll = 0; controlValues.pitch = 0
+        controlValues.yaw = Double(state.orientation.z * 180 / .pi)
+        controlValues.throttle = Double(state.throttle)
+        resetTerrainMapTrail()
+        hasUnsavedChanges = true
+        rewindAvailableSeconds = selected.time - (liveFlightHistory.oldestTime ?? selected.time)
+        endFlightRewindInteraction()
+        recordMissionReplayFrameIfNeeded(force: true)
+        ensureSimulationRunning()
+    }
+    private func endFlightRewindInteraction() {
+        rewindPresent = nil; rewindSelection = nil; rewindPointerHeld = false
+        isRewindingFlight = false; rewindOffsetSeconds = 0
+        simulationAudio.setRewindPlayback(false)
+        scene.isPaused = rewindSceneWasPaused
+        _ = keyboardInputService.consumeActions(); inputManager.reset()
+        keyboardInputService.setInputProcessingMode(.flight); lastTimestamp = nil
     }
 }

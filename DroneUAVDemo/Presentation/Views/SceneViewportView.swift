@@ -1506,7 +1506,7 @@ struct TerrainMapCanvas: View {
         geographicImage: CGImage?
     ) {
         let texture = geographicImage
-            ?? TerrainMapSatelliteTextureProvider.texture(for: snapshot.preset)
+            ?? (snapshot.reliefEnabled ? TerrainMapReliefTextureProvider.texture(for: snapshot) : TerrainMapSatelliteTextureProvider.texture(for: snapshot.preset))
         let image = Image(decorative: texture, scale: 1.0, orientation: .up)
         let halfExtent = max(1.0, snapshot.worldHalfExtent)
         let worldRect = projection.projectedRect(

@@ -522,6 +522,10 @@ private struct TacticalMapLegendView: View {
                 legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.drop_zone")
             }
 
+            if snapshot.reliefEnabled {
+                Text("Рельеф · горизонтали \(Int(TerrainMapReliefTextureProvider.contourInterval(for: snapshot))) м")
+                    .font(.system(size: 9, weight: .medium)).foregroundStyle(GroundControlPalette.textSecondary)
+            }
             if snapshot.payloadImpact != nil {
                 legendRow(color: GroundControlPalette.warning, key: "tactical.map.legend.payload_impact")
             }
@@ -1938,5 +1942,67 @@ extension TerrainMapProjection {
             width: abs(bottomRight.x - topLeft.x),
             height: abs(bottomRight.y - topLeft.y)
         )
+    }
+}
+
+/// Cached shaded relief and contours derived from the simulator's physical height field.
+/// The procedural map projects +X to the left, so the raster follows that same convention.
+enum TerrainMapReliefTextureProvider {
+    private static let lock = NSLock()
+    private static var cache: [String: CGImage] = [:]
+
+    static func contourInterval(for snapshot: DroneSimulationViewModel.TerrainMapSnapshot) -> Float {
+        max(5, (snapshot.reliefAmplitude / 8 / 5).rounded() * 5)
+    }
+    static func texture(for snapshot: DroneSimulationViewModel.TerrainMapSnapshot) -> CGImage {
+        let key = "\(snapshot.preset.rawValue)-\(snapshot.mapScale.rawValue)-\(snapshot.terrainSeed)-\(snapshot.reliefAmplitude)-\(snapshot.reliefSafeSpawnRadius)"
+        lock.lock()
+        if let image = cache[key] { lock.unlock(); return image }
+        lock.unlock()
+        let image = makeTexture(snapshot)
+        lock.lock(); defer { lock.unlock() }
+        if cache.count >= 4 { cache.removeAll() }
+        cache[key] = image
+        return image
+    }
+    private static func makeTexture(_ snapshot: DroneSimulationViewModel.TerrainMapSnapshot) -> CGImage {
+        let terrain = snapshot.reliefConfiguration
+        let n = 129, size = 512
+        let extent = max(1, snapshot.worldHalfExtent)
+        let step = extent * 2 / Float(n - 1)
+        var heights = [Float](repeating: 0, count: n * n)
+        for z in 0..<n { for x in 0..<n {
+            heights[z * n + x] = terrain.surfaceHeight(x: extent - Float(x) * step, z: -extent + Float(z) * step)
+        } }
+        var bytes = [UInt8](repeating: 255, count: size * size * 4)
+        let interval = contourInterval(for: snapshot)
+        let light = simd_normalize(SIMD3<Float>(-0.6, 1, -0.4))
+        for y in 0..<size { for x in 0..<size {
+            let fx = Float(x) * Float(n - 1) / Float(size - 1), fy = Float(y) * Float(n - 1) / Float(size - 1)
+            let ix = min(n - 2, Int(fx)), iy = min(n - 2, Int(fy))
+            let u = fx - Float(ix), v = fy - Float(iy)
+            let a = heights[iy * n + ix], b = heights[iy * n + ix + 1]
+            let c = heights[(iy + 1) * n + ix], d = heights[(iy + 1) * n + ix + 1]
+            let h = (a * (1 - u) + b * u) * (1 - v) + (c * (1 - u) + d * u) * v
+            let dx = ((b - a) * (1 - v) + (d - c) * v) / step
+            let dz = ((c - a) * (1 - u) + (d - b) * u) / step
+            let shade = 0.52 + max(0, simd_dot(simd_normalize(SIMD3(dx, 1, -dz)), light)) * 0.48
+            let high = min(1, h / max(10, terrain.reliefAmplitude))
+            let slope = min(1, sqrt(dx * dx + dz * dz))
+            var color = simd_mix(SIMD3<Float>(0.26, 0.39, 0.22), SIMD3<Float>(0.55, 0.48, 0.33), SIMD3(repeating: high * 0.65 + slope * 0.25)) * shade
+            let pixelRise = max(0.005, sqrt(dx * dx + dz * dz) * extent * 2 / Float(size))
+            let contourDistance = abs(h / interval - (h / interval).rounded()) * interval / pixelRise
+            if h > interval * 0.5, contourDistance < 0.75 {
+                color *= 1 - (1 - contourDistance / 0.75) * 0.35
+            }
+            let offset = (y * size + x) * 4
+            bytes[offset] = UInt8(min(255, max(0, color.x * 255)))
+            bytes[offset + 1] = UInt8(min(255, max(0, color.y * 255)))
+            bytes[offset + 2] = UInt8(min(255, max(0, color.z * 255)))
+        } }
+        let provider = CGDataProvider(data: Data(bytes) as CFData)!
+        return CGImage(width: size, height: size, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: size * 4,
+            space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.noneSkipLast.rawValue),
+            provider: provider, decode: nil, shouldInterpolate: true, intent: .defaultIntent)!
     }
 }

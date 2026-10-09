@@ -95,6 +95,7 @@ struct ProjectSnapshot: Codable {
         var windDirectionDeg: Float
         var windSpeedMps: Float
         var gusts: Float
+        var spatialWindEnabled: Bool? = nil
     }
 
     struct Terrain: Codable {
@@ -103,6 +104,8 @@ struct ProjectSnapshot: Codable {
         var density: Float
         var seed: UInt64
         var safeSpawnRadius: Float
+        var reliefEnabled: Bool? = nil
+        var reliefAmplitude: Float? = nil
         var showsBoundaryBarrier: Bool?
     }
 

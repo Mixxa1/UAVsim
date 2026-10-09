@@ -82,6 +82,8 @@ struct ScenarioModuleView: View {
                         isExpanded: $showWeatherTuning,
                         content: {
                             VStack(alignment: .leading, spacing: 10) {
+                                Toggle("Пространственный ветер", isOn: Binding(get: { viewModel.weather.spatialWindEnabled }, set: viewModel.setSpatialWindEnabled))
+                                Text("Сдвиг по высоте, локальные порывы и подъём потока на склонах").font(.caption).foregroundStyle(.secondary)
                                 ModuleSliderRow(
                                     titleKey: "weather.wind_direction",
                                     value: Binding(
@@ -139,6 +141,13 @@ struct ScenarioModuleView: View {
                         }
                     }
                     .pickerStyle(.menu)
+
+                    TerrainSurfaceModePicker(
+                        relief: Binding(get: { viewModel.terrain.reliefEnabled }, set: { viewModel.setReliefTerrain(enabled: $0, amplitude: viewModel.terrain.reliefAmplitude) }),
+                        amplitude: Binding(get: { Double(viewModel.terrain.reliefAmplitude) }, set: { viewModel.setReliefTerrain(enabled: viewModel.terrain.reliefEnabled, amplitude: Float($0), deferRegeneration: true) }),
+                        supportsRelief: viewModel.terrain.preset.supportsRelief,
+                        onAmplitudeCommit: { viewModel.setReliefTerrain(enabled: viewModel.terrain.reliefEnabled, amplitude: viewModel.terrain.reliefAmplitude) }
+                    )
 
                     ModuleSliderRow(
                         titleKey: "terrain.density",

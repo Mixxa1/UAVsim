@@ -72,6 +72,7 @@ trap 'rm -rf "$TMP"' EXIT
 #                        is what a bigger, heavier machine sounds like
 # ---------------------------------------------------------------------------
 read -r -d '' ASSETS <<'TABLE' || true
+flight_rewind_loop|aero|UI|2693.mp3|loop|8.00 4.00 0.12|-8.0
 fpv_electronics_boot|vehicle|Vehicle/Electric|854647__qubodup__uav-drone-bootconnection-sounds.wav|oneshot|0.00 5.20|-6.0
 uav_heavy_spinup|vehicle|Vehicle/Electric|329543__*|pitched|1.20 5.60 0.80|-6.0
 helicopter_rotor_loop|vehicle|Vehicle/Rotorcraft|187681__*|loop|0.30 5.00 0.35|-7.0

@@ -65,10 +65,16 @@ struct WorkbenchAeroSettings: Codable, Hashable {
     var iterations = 2000
     var convergenceWindow = 100
     var threads = 2
+    /// URANS only: physical steps of second-order dual-time stepping, the inner iterations that
+    /// converge each of them, and the trailing steps the mean coefficients are averaged over.
+    var timeSteps = 240
+    var innerIterations = 25
+    var averagingSteps = 80
+    var timeStepSeconds = 0.001
     var residualTarget = -6.0
     var coefficientAbsoluteTolerance = 1e-4
     var coefficientRelativeTolerance = 1e-3
-    var timeoutSeconds = 3600.0
+    var timeoutSeconds = WorkbenchAeroSettings.defaultTimeoutSeconds(model: "sst")
     var farfieldLengths = 10.0
     var wallSizeM = 0.0
     var farfieldSizeM = 0.0
@@ -95,6 +101,10 @@ struct WorkbenchAeroSettings: Codable, Hashable {
         iterations = try c.decodeIfPresent(Int.self, forKey: .iterations) ?? d.iterations
         convergenceWindow = try c.decodeIfPresent(Int.self, forKey: .convergenceWindow) ?? d.convergenceWindow
         threads = try c.decodeIfPresent(Int.self, forKey: .threads) ?? d.threads
+        timeSteps = try c.decodeIfPresent(Int.self, forKey: .timeSteps) ?? d.timeSteps
+        innerIterations = try c.decodeIfPresent(Int.self, forKey: .innerIterations) ?? d.innerIterations
+        averagingSteps = try c.decodeIfPresent(Int.self, forKey: .averagingSteps) ?? d.averagingSteps
+        timeStepSeconds = try c.decodeIfPresent(Double.self, forKey: .timeStepSeconds) ?? d.timeStepSeconds
         residualTarget = try c.decodeIfPresent(Double.self, forKey: .residualTarget) ?? d.residualTarget
         coefficientAbsoluteTolerance = try c.decodeIfPresent(Double.self, forKey: .coefficientAbsoluteTolerance) ?? d.coefficientAbsoluteTolerance
         coefficientRelativeTolerance = try c.decodeIfPresent(Double.self, forKey: .coefficientRelativeTolerance) ?? d.coefficientRelativeTolerance
@@ -104,6 +114,17 @@ struct WorkbenchAeroSettings: Codable, Hashable {
         farfieldSizeM = try c.decodeIfPresent(Double.self, forKey: .farfieldSizeM) ?? d.farfieldSizeM
         grading = try c.decodeIfPresent(Double.self, forKey: .grading) ?? d.grading
         layerHeightsM = try c.decodeIfPresent([Double].self, forKey: .layerHeightsM) ?? d.layerHeightsM
+    }
+
+    /// The wall-clock limit one point starts with: the two numbers of cfd::defaultTimeoutSeconds,
+    /// where the measurement behind them is written down. A URANS point is timeSteps × innerIterations
+    /// steady marches, and the steady hour would stop the default 240 × 30 a sixth of the way in.
+    static func defaultTimeoutSeconds(model: String) -> Double { model == "urans_sst" ? 28_800 : 3600 }
+
+    /// Changing the model moves the limit from one default to the other; a limit the analyst set stays.
+    mutating func selectModel(_ selected: String) {
+        if timeoutSeconds == Self.defaultTimeoutSeconds(model: model) { timeoutSeconds = Self.defaultTimeoutSeconds(model: selected) }
+        model = selected
     }
 
     static func initial(for build: WorkbenchBuild) -> Self {
@@ -121,6 +142,11 @@ struct WorkbenchAeroSettings: Codable, Hashable {
         s.layerHeightsM = WorkbenchWallLayers.plan(wallTreatment: s.wallTreatment, speedMps: s.speedMps,
                                                    lengthM: s.reference.chordM, densityKgM3: s.densityKgM3, viscosityPaS: s.viscosityPaS)
         s.threads = WorkbenchWallLayers.solverThreads
+        // The CADNext dialog's starting point for URANS: sixty physical steps per chord passage.
+        if s.reference.chordM > 0 {
+            s.timeStepSeconds = s.reference.chordM / (s.speedMps * 60)
+            s.innerIterations = 30
+        }
         return s
     }
 
@@ -139,7 +165,7 @@ struct WorkbenchAeroSettings: Codable, Hashable {
             alphaDeg: alphaDeg, betaDeg: betaDeg,
             points: alphaDeg.flatMap { a in betaDeg.map { b in .init(alphaDeg: a, betaDeg: b, cl: 0, cd: 0, cm: 0, cy: 0, cRoll: 0, cYaw: 0) } })
         if let problem = table.problem { return problem }
-        guard ["euler", "laminar", "sst", "urans_sst"].contains(model) else { return "Выберите Euler, laminar, SST или URANS SST." }
+        guard EngineeringAeroTable.solverModels.contains(model) else { return "Выберите Euler, laminar, SST или URANS SST." }
         guard ["resolved", "functions"].contains(wallTreatment) else { return "Стенка: разрешённый слой или пристеночные функции." }
         guard wallTreatment == "resolved" || model.hasSuffix("sst") else { return "Пристеночные функции существуют только для турбулентных моделей." }
         guard ["none", "lm"].contains(transition) else { return "Переход: нет или γ-Reθ." }
@@ -153,6 +179,12 @@ struct WorkbenchAeroSettings: Codable, Hashable {
         guard model != "laminar" || reynolds <= 5e5 else { return "Ламинарная модель при Re = \(Int(reynolds)) неприменима: возьмите SST или URANS." }
         guard [wallSizeM, farfieldSizeM, farfieldLengths, grading, timeoutSeconds, coefficientAbsoluteTolerance, coefficientRelativeTolerance].allSatisfy({ $0.isFinite && $0 > 0 }), grading <= 1 else { return "Задайте положительные размеры сетки, время и допуски." }
         guard convergenceWindow >= 5, iterations >= convergenceWindow + 2, iterations <= 1_000_000, (1...256).contains(threads), residualTarget.isFinite, (-15 ... -3).contains(residualTarget) else { return "Некорректные параметры сходимости или число потоков." }
+        // The adapter's own limits. It reads the time-accurate fields of every job, so they have to
+        // be well-formed for a steady run too; a URANS run needs the whole set to be sound.
+        guard timeStepSeconds.isFinite, [timeSteps, innerIterations, averagingSteps].allSatisfy({ (0...1_000_000).contains($0) }),
+              model != "urans_sst" || (timeStepSeconds > 0 && timeStepSeconds <= 10 && (10...100_000).contains(timeSteps)
+                  && (2...10_000).contains(innerIterations) && averagingSteps >= 5 && averagingSteps <= timeSteps / 2)
+        else { return "URANS: проверьте физический шаг, число временных и внутренних шагов и окно усреднения (не больше половины шагов)." }
         guard layerHeightsM.count <= 100, layerHeightsM.allSatisfy({ $0.isFinite && $0 > 0 }),
               layerHeightsM.reduce(0, +) <= farfieldLengths * reference.spanM,
               (model == "euler") == layerHeightsM.isEmpty else { return "Вязкий расчёт требует слоёв; Euler — сетки без слоёв." }

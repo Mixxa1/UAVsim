@@ -112,7 +112,7 @@ enum ControllerScrollBehavior: String, CaseIterable, Identifiable, Codable {
     }
 }
 
-private struct PersistedControllerSettings: Codable {
+struct PersistedControllerSettings: Codable {
     var bindings: [String: String]
     var cursorSpeedMultiplier: Double
     var scrollBehavior: String
@@ -297,6 +297,40 @@ final class ControllerSettingsStore: ObservableObject {
         scrollBehavior = .rightStickWithTriggerBoost
         validationIssues = []
         persist()
+    }
+
+    func exportConfiguration() -> PersistedControllerSettings {
+        PersistedControllerSettings(bindings: bindings.reduce(into: [:]) { $0[$1.key.rawValue] = $1.value.rawValue },
+            cursorSpeedMultiplier: cursorSpeedMultiplier, scrollBehavior: scrollBehavior.rawValue, axisMap: axisMap, rateProfile: rateProfile)
+    }
+    static func validateConfiguration(_ config: PersistedControllerSettings) throws {
+        guard config.cursorSpeedMultiplier.isFinite, (0.45...2.4).contains(config.cursorSpeedMultiplier),
+              ControllerScrollBehavior(rawValue: config.scrollBehavior) != nil,
+              config.bindings.count == ControllerUIBindingAction.allCases.count,
+              config.bindings.allSatisfy({ ControllerUIBindingAction(rawValue: $0.key) != nil && ControllerButtonBinding(rawValue: $0.value) != nil }),
+              validationIssues(for: decodeBindings(from: config.bindings)).isEmpty,
+              let axes = config.axisMap, let rates = config.rateProfile, !axes.conflictingFlightAxes else {
+            throw ControlProfileError.invalid("Некорректная раскладка геймпада")
+        }
+        for binding in axes.bindings.values {
+            guard binding.deadzone.isFinite, (0...0.45).contains(binding.deadzone) else { throw ControlProfileError.invalid("Некорректная мёртвая зона") }
+        }
+        for rate in [rates.roll, rates.pitch, rates.yaw] {
+            guard rate.sensitivity.isFinite, rate.superRate.isFinite, rate.expo.isFinite,
+                  (0.1...1).contains(rate.sensitivity), (0...1).contains(rate.superRate), (0...1).contains(rate.expo) else {
+                throw ControlProfileError.invalid("Некорректные кривые управления")
+            }
+        }
+        guard rates.throttle.mid.isFinite, rates.throttle.expo.isFinite, rates.throttle.idle.isFinite,
+              (0...1).contains(rates.throttle.mid), (0...1).contains(rates.throttle.expo), (0...0.3).contains(rates.throttle.idle) else {
+            throw ControlProfileError.invalid("Некорректная кривая газа")
+        }
+    }
+    func applyConfiguration(_ config: PersistedControllerSettings) {
+        bindings = Self.decodeBindings(from: config.bindings); cursorSpeedMultiplier = config.cursorSpeedMultiplier
+        scrollBehavior = ControllerScrollBehavior(rawValue: config.scrollBehavior) ?? .rightStick
+        axisMap = config.axisMap ?? .default; rateProfile = config.rateProfile ?? .default
+        validateBindings(); persist()
     }
 
     private func ensureDefaultBindingsPresent() {

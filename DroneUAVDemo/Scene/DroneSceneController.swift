@@ -581,6 +581,9 @@ final class DroneSceneController {
     /// The nodes carrying a deformation right now — the only ones the next pass has to
     /// restore. Usually empty, which is the point.
     private var lastTerrainConfig: TerrainConfiguration?
+    private var reliefSurfaceNode: SCNNode?
+    private var reliefRayHeightGrid: [Float] = []
+    private var reliefSurfaceKey: String?
     private var lastGeneratedCityKey: CityGenerationKey?
     private let snowDecorationsNode = SCNNode()
 
@@ -3509,7 +3512,7 @@ final class DroneSceneController {
 
     /// First hit along a ray against the environment's analytic collision catalog
     /// (`environmentObstacles`: tree trunk/canopy boxes, building boxes/meshes, fire-truck box…)
-    /// plus the flat ground plane.
+    /// plus the physical terrain surface.
     ///
     /// This deliberately replaces SceneKit's `hitTestWithSegment` for the per-tick payload-camera/
     /// rangefinder/hose-nozzle distance queries: the render-scene hit test has to triangle-test
@@ -3546,6 +3549,10 @@ final class DroneSceneController {
                 bestDistance = hit.distance
                 bestObstacleID = nil
                 hasHit = true
+            }
+        } else if let terrain = lastTerrainConfig, terrain.usesRelief {
+            if let distance = terrain.reliefRayDistance(origin: origin, direction: dir, maxDistance: bestDistance, heights: reliefRayHeightGrid) {
+                bestDistance = distance; hasHit = true
             }
         } else {
             // Flat ground plane — same reference height the payload drop camera uses. Model
@@ -5494,7 +5501,7 @@ final class DroneSceneController {
             clearLidarCloud()
 
             guard let world else {
-                groundNode.isHidden = false
+                groundNode.isHidden = lastTerrainConfig?.usesRelief ?? false
                 meshSpawnPoint = nil
                 meshWater = nil
                 setMeshCollision(nil)
@@ -6758,6 +6765,11 @@ final class DroneSceneController {
         maximumHeight: Float
     ) -> (height: Float, normal: SIMD3<Float>)? {
         var best: (height: Float, normal: SIMD3<Float>)?
+        if meshCollision == nil, installedWorld == nil, let terrain = lastTerrainConfig, terrain.usesRelief {
+            let height = terrain.surfaceHeight(x: planarPosition.x, z: planarPosition.y)
+            // Procedural land is solid even when a fast step crosses below its surface.
+            best = (height, terrain.surfaceNormal(x: planarPosition.x, z: planarPosition.y))
+        }
 
         // An imported mesh world *is* the terrain and the rooftops, so it is consulted first and
         // then competes with the procedural surfaces on height like any other candidate. The
@@ -9334,7 +9346,7 @@ final class DroneSceneController {
         // Harmless in every world — a ground plane is what you want drawn first anyway — and
         // it is what lets the coplanar patch win by order instead of by a geometric lift.
         groundNode.renderingOrder = -2
-        guard terrain.mapScale.isExtendedRange,
+        guard !terrain.usesRelief, terrain.mapScale.isExtendedRange,
               terrain.preset != .gridDemo,
               terrain.preset != .city else {
             groundDetailNode?.removeFromParentNode()
@@ -9396,6 +9408,9 @@ final class DroneSceneController {
     }
 
     private func refreshGroundMaterial(for terrain: TerrainConfiguration) {
+        if let relief = reliefSurfaceNode {
+            relief.geometry?.materials = [MainActor.assumeIsolated { TerrainMeshFactory.makeReliefMaterial(configuration: terrain, snow: currentWeather.preset == .snow) }]
+        }
         guard let geometry = groundNode.geometry, terrain.preset != .gridDemo else { return }
         // Matches the ground plane's own size (`configureWorldSurfaceGeometry`, keyed off
         // `beltOuterRadius`) so the tiled texture keeps a consistent scale all the way to the
@@ -9564,6 +9579,7 @@ final class DroneSceneController {
         // grid and axes": reopening a project therefore drew a reference grid underneath a real
         // city. Suppression belongs to the function, not to whoever happens to call it.
         guard meshCollision == nil else {
+            reliefSurfaceNode?.removeFromParentNode(); reliefSurfaceNode = nil; reliefSurfaceKey = nil
             gridNode.isHidden = true
             axesNode.isHidden = true
             groundNode.isHidden = true
@@ -9595,14 +9611,15 @@ final class DroneSceneController {
         #endif
 
         configureWorldSurfaceGeometry(for: terrain)
+        groundNode.isHidden = terrain.usesRelief
         styleMark("surface")
         applyLightingProfile(for: terrain.preset)
         styleMark("lamps")
 
         switch terrain.preset {
         case .gridDemo:
-            gridNode.isHidden = false
-            axesNode.isHidden = false
+            gridNode.isHidden = terrain.usesRelief
+            axesNode.isHidden = terrain.usesRelief
         case .field, .forest, .cargoYard, .city:
             gridNode.isHidden = true
             axesNode.isHidden = true
@@ -9679,6 +9696,7 @@ final class DroneSceneController {
         // otherwise the base-emission map grows by three entries on every terrain rebuild.
         emissiveTerrainDetailMaterials.removeAll(keepingCapacity: true)
         baseTerrainDetailEmission.removeAll(keepingCapacity: true)
+        guard !terrain.usesRelief else { return }
 
         switch terrain.preset {
         case .field, .forest:
@@ -10130,10 +10148,10 @@ final class DroneSceneController {
     @discardableResult
     func spawnMissionSearchScenario(placement: MissionScenarioPlacement) -> SIMD3<Float> {
         clearMissionScenario()
-        let groundY: Float = 0.0
+        let groundY = lastTerrainConfig?.surfaceHeight(x: placement.targetPosition.x, z: placement.targetPosition.y) ?? 0
 
-        let ring = makeSearchSectorRing(radius: placement.sectorRadius)
-        ring.position = SCNVector3(placement.sectorCenter.x, groundY + 0.05, placement.sectorCenter.y)
+        let ring = makeSearchSectorRing(radius: placement.sectorRadius, center: placement.sectorCenter)
+        ring.position = SCNVector3(placement.sectorCenter.x, 0.05, placement.sectorCenter.y)
         missionScenarioRootNode.addChildNode(ring)
 
         var rng = SystemRandomNumberGenerator()
@@ -10176,7 +10194,8 @@ final class DroneSceneController {
         return agriFieldLayer.build(
             placement: placement,
             difficulty: difficulty,
-            into: missionScenarioRootNode
+            into: missionScenarioRootNode,
+            terrain: lastTerrainConfig ?? .default
         )
     }
 
@@ -10442,7 +10461,6 @@ final class DroneSceneController {
     func spawnFireResponseScenario(placement: FireZonePlacement) -> [SIMD3<Float>] {
         removeFreeFlightFireTruck()
         clearMissionScenario()
-        let groundY: Float = 0.0
 
         var rng = SystemRandomNumberGenerator()
         var newObstacles: [CollisionObstacle] = []
@@ -10454,6 +10472,7 @@ final class DroneSceneController {
         var anchorPositions: [SIMD3<Float>] = []
 
         for position in placement.treePositions {
+            let groundY = lastTerrainConfig?.surfaceHeight(x: position.x, z: position.y) ?? 0
             let heightMeters = Float.random(in: 14.0...22.0, using: &rng)
             let yaw = Float.random(in: 0...(2.0 * .pi), using: &rng)
             let tree = PineTreeAssetLoader.shared.makeTreeNode(targetHeightMeters: heightMeters, yaw: yaw) ?? SCNNode()
@@ -10524,7 +10543,7 @@ final class DroneSceneController {
         fireTreeFoamAccumulationNodes = foamAccumulationNodes
         lastFireTreeStatuses = Array(repeating: .unburned, count: treeNodes.count)
 
-        let truckObstacle = spawnFireTruckDecoration(placement: placement, groundY: groundY)
+        let truckObstacle = spawnFireTruckDecoration(placement: placement)
         if let truckObstacle {
             newObstacles.append(truckObstacle)
         }
@@ -10543,13 +10562,14 @@ final class DroneSceneController {
     /// `FireZonePlacement.generate` sized the zone against. Registered as a single-box collision
     /// obstacle so the drone doesn't clip through it, same as any other obstacle.
     @discardableResult
-    private func spawnFireTruckDecoration(placement: FireZonePlacement, groundY: Float) -> CollisionObstacle? {
+    private func spawnFireTruckDecoration(placement: FireZonePlacement) -> CollisionObstacle? {
         let dock = currentDockSpawnPoint()
         let dockPlanar = SIMD2<Float>(dock.x, dock.z)
         let toDock = dockPlanar - placement.zoneCenter
         let direction = simd_length(toDock) > 0.001 ? simd_normalize(toDock) : SIMD2<Float>(1.0, 0.0)
         let truckPosition2D = placement.zoneCenter + direction * (placement.zoneRadius + placement.truckStandoffMeters)
 
+        let groundY = lastTerrainConfig?.surfaceHeight(x: truckPosition2D.x, z: truckPosition2D.y) ?? 0
         let toZoneCenter = placement.zoneCenter - truckPosition2D
         let yaw = simd_length(toZoneCenter) > 0.001 ? atan2(toZoneCenter.x, toZoneCenter.y) : 0.0
 
@@ -10735,7 +10755,7 @@ final class DroneSceneController {
         }
     }
 
-    private func makeSearchSectorRing(radius: Float) -> SCNNode {
+    private func makeSearchSectorRing(radius: Float, center: SIMD2<Float>) -> SCNNode {
         let torus = SCNTorus(
             ringRadius: CGFloat(radius),
             pipeRadius: CGFloat(max(0.6, radius * 0.012))
@@ -10753,7 +10773,23 @@ final class DroneSceneController {
         material.readsFromDepthBuffer = false
         material.writesToDepthBuffer = false
         torus.firstMaterial = material
-        let node = SCNNode(geometry: torus)
+        let node: SCNNode
+        if lastTerrainConfig?.usesRelief == true {
+            var points: [SCNVector3] = []
+            var indices: [Int32] = []
+            let width = max(0.6, radius * 0.006)
+            for i in 0...256 {
+                let angle = Float(i) / 256 * 2 * Float.pi
+                for r in [radius - width, radius + width] {
+                    let x = cos(angle) * r, z = sin(angle) * r
+                    points.append(SCNVector3(x, lastTerrainConfig?.surfaceHeight(x: center.x + x, z: center.y + z) ?? 0, z))
+                }
+                if i < 256 { let a = Int32(i * 2); indices += [a, a + 2, a + 1, a + 1, a + 2, a + 3] }
+            }
+            let geometry = SCNGeometry(sources: [SCNGeometrySource(vertices: points)], elements: [SCNGeometryElement(indices: indices, primitiveType: .triangles)])
+            geometry.firstMaterial = material
+            node = SCNNode(geometry: geometry)
+        } else { node = SCNNode(geometry: torus) }
         node.name = "mission.search_sector"
         node.castsShadow = false
         return node
@@ -10850,6 +10886,23 @@ final class DroneSceneController {
         // always reaches at least as far as the decorated outer belt — no bare ground under the
         // trees, and no cliff/void beyond it either. Past this radius is flat, undecorated ground;
         // true unbounded/streamed terrain stays separate, deferred work.
+        let key = "\(terrain.usesRelief)-\(terrain.preset.rawValue)-\(terrain.seed)-\(terrain.mapScale.rawValue)-\(terrain.reliefAmplitude)-\(terrain.safeSpawnRadius)"
+        if reliefSurfaceKey != key {
+            reliefSurfaceNode?.removeFromParentNode(); reliefSurfaceNode = nil
+            reliefRayHeightGrid = []
+            reliefSurfaceKey = key
+            if terrain.usesRelief, let node = MainActor.assumeIsolated({ TerrainMeshFactory.makeReliefNode(configuration: terrain, snow: currentWeather.preset == .snow) }) {
+                scene.rootNode.addChildNode(node); reliefSurfaceNode = node
+                if let source = node.geometry?.sources(for: .vertex).first {
+                    reliefRayHeightGrid = source.data.withUnsafeBytes { bytes in
+                        (0..<source.vectorCount).map { i in
+                            let offset = source.dataOffset + i * source.dataStride + source.bytesPerComponent
+                            return source.bytesPerComponent == 4 ? bytes.loadUnaligned(fromByteOffset: offset, as: Float.self) : Float(bytes.loadUnaligned(fromByteOffset: offset, as: Double.self))
+                        }
+                    }
+                }
+            }
+        }
         let groundHalfExtent = terrain.beltOuterRadius + 24.0
         if let plane = groundNode.geometry as? SCNPlane {
             plane.width = CGFloat(groundHalfExtent * 2.0)

@@ -28,6 +28,14 @@ struct MissionReplayContextSnapshot: Codable, Equatable {
 
     let recordedAtAppVersion: String?
     var terrainDensity: Float? = nil
+    var terrainReliefEnabled: Bool? = nil
+    var terrainReliefAmplitude: Float? = nil
+    var terrainSafeSpawnRadius: Float? = nil
+    var weatherIntensity: Float? = nil
+    var windSpeedMps: Float? = nil
+    var windDirectionDeg: Float? = nil
+    var windGusts: Float? = nil
+    var spatialWindEnabled: Bool? = nil
     /// Local map package reference, rather than a copy of gigabytes of terrain in each flight.
     var importedWorld: MissionReplayImportedWorldReference? = nil
 }

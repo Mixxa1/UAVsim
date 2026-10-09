@@ -160,6 +160,7 @@ public:
         model->addItem(tr("Ламинарное (Навье—Стокс)"),QStringLiteral("laminar"));
         model->addItem(tr("Эйлер, без вязкости"),QStringLiteral("euler"));
         model->setCurrentIndex(0);
+        initial.timeoutSeconds=cfd::defaultTimeoutSeconds(model->currentData().toString().toStdString());
         physics->addRow(tr("Модель"),model);
         wallMode=new QComboBox;
         wallMode->addItem(tr("Разрешённый слой, y⁺ ≈ 1"),QStringLiteral("resolved"));
@@ -264,7 +265,17 @@ public:
         };
         connect(preset,&QComboBox::currentIndexChanged,this,applyPreset);
         connect(settings,&QPlainTextEdit::textChanged,this,[this]{estimateTime();});
-        connect(model,&QComboBox::currentIndexChanged,this,[this]{estimateTime();});
+        // The per-point time limit follows the model; a saved run keeps the limit it was computed with.
+        connect(model,&QComboBox::currentIndexChanged,this,[this,updateParameter,previous=model->currentData().toString()]() mutable {
+            const QString selected=model->currentData().toString();
+            if(!showingSaved){
+                const auto json=QJsonDocument::fromJson(settings->toPlainText().toUtf8()).object();
+                const double limit=json["timeoutSeconds"].toDouble();
+                const double moved=cfd::timeoutAfterModelChange(limit,previous.toStdString(),selected.toStdString());
+                if(moved!=limit)updateParameter("timeoutSeconds",moved);
+            }
+            previous=selected;estimateTime();
+        });
         for(auto* box:{speed,chordBox})connect(box,qOverload<double>(&QDoubleSpinBox::valueChanged),this,[this]{estimateTime();});
         connect(alpha,&QLineEdit::textChanged,this,[this]{estimateTime();});connect(beta,&QLineEdit::textChanged,this,[this]{estimateTime();});
         QTimer::singleShot(0,this,applyPreset);

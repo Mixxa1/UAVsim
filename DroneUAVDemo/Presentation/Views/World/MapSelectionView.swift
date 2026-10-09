@@ -4,7 +4,7 @@ import AppKit
 /// What the user chose to fly in.
 enum MapSelection: Equatable {
     /// One of the procedurally generated presets.
-    case standard(TerrainPreset)
+    case standard(TerrainPreset, relief: Bool = false, amplitude: Float = 70)
     /// An installed photogrammetric world, identified by its tile directory.
     case photogrammetric(tileKey: String, directory: URL)
     /// A world built from open geodata and saved as a package.
@@ -39,13 +39,22 @@ struct MapSelectionView: View {
     let airframeClass: AirframeClass
     let onConfirm: (MapSelection) -> Void
     let onCancel: () -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     @State private var family: Family = .standard
+    @State private var reliefEnabled = false
+    @State private var reliefAmplitude = 70.0
     @State private var highlightedPreset: TerrainPreset?
     @State private var highlightedWorld: InstalledWorld?
     @State private var installedWorlds: [InstalledWorld] = []
     @State private var packages: [BuiltPackage] = []
     @State private var highlightedPackage: BuiltPackage?
+
+    init(airframeClass: AirframeClass, onConfirm: @escaping (MapSelection) -> Void,
+         onCancel: @escaping () -> Void, relief: Bool = false) {
+        self.airframeClass = airframeClass; self.onConfirm = onConfirm; self.onCancel = onCancel
+        _reliefEnabled = State(initialValue: relief)
+    }
 
     /// A world the user built in the map constructor and saved.
     struct BuiltPackage: Identifiable, Equatable, Hashable {
@@ -70,6 +79,13 @@ struct MapSelectionView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Создайте полётный мир").font(.title2.bold())
+                    Text("Выберите поверхность и окружение для полёта").font(.callout).foregroundStyle(.secondary)
+                }
+                Spacer()
+            }.padding(.horizontal, 24).padding(.top, 20)
             Picker("", selection: $family) {
                 ForEach(Family.allCases) { family in
                     Text(LocalizedStringKey(family.titleKey)).tag(family)
@@ -85,7 +101,11 @@ struct MapSelectionView: View {
             ScrollView {
                 switch family {
                 case .standard:
-                    standardGrid
+                    VStack(alignment: .leading, spacing: 12) {
+                        surfaceSelection.padding(.horizontal, 20).cascadeAppear(0)
+                        Text("Окружение").font(.headline).padding(.horizontal, 24)
+                        standardGrid
+                    }.padding(.top, 14)
                 case .photogrammetric:
                     photogrammetricList
                 case .openData:
@@ -97,7 +117,10 @@ struct MapSelectionView: View {
             footer
         }
         .frame(minWidth: 860, minHeight: 620)
+        .background(GroundControlPalette.shell)
+        .animation(reduceMotion ? nil : Motion.panel, value: family)
         .onAppear {
+            if highlightedPreset == nil { highlightedPreset = availablePresets.first(where: { $0 == .field }) ?? availablePresets.first }
             refreshInstalledWorlds()
             refreshPackages()
         }
@@ -121,6 +144,70 @@ struct MapSelectionView: View {
 
     // MARK: - Standard presets
 
+    private var surfaceSelection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .top, spacing: 20) {
+                VStack(alignment: .leading, spacing: 12) {
+                    Text("Поверхность").font(.headline)
+                    HStack(spacing: 10) {
+                        surfaceChoice(relief: false, title: "Ровная", subtitle: "Открытая площадка\nдля отработки манёвров", icon: "minus")
+                        surfaceChoice(relief: true, title: "Холмы и долины", subtitle: "Неровная местность\nс перепадами высот", icon: "mountain.2")
+                    }
+                    Text(highlightedPreset.map { !$0.supportsRelief } == true
+                         ? "Для этого окружения доступна ровная поверхность."
+                         : "Площадка старта остаётся ровной в обоих вариантах.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+                TerrainSurfacePreview(elevation: reliefEnabled ? reliefAmplitude / 100 : 0)
+                    .frame(width: 290, height: 185)
+                    .animation(reduceMotion ? nil : Motion.panel, value: reliefEnabled)
+                    .animation(reduceMotion ? nil : Motion.panel, value: reliefAmplitude)
+                    .accessibilityHidden(true)
+            }
+            if reliefEnabled {
+                HStack(spacing: 16) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Высота рельефа").font(.callout.weight(.medium))
+                        Text("до \(Int(reliefAmplitude)) м").font(.caption.monospacedDigit()).foregroundStyle(.cyan)
+                    }.frame(width: 140, alignment: .leading)
+                    VStack(spacing: 4) {
+                        Slider(value: $reliefAmplitude, in: 10...250, step: 5)
+                        HStack { Text("Пологие холмы"); Spacer(); Text("Выраженные склоны") }
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }
+                }.padding(.top, 4).transition(.panelSwap)
+            }
+        }
+        .padding(20)
+        .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 20))
+        .overlay(RoundedRectangle(cornerRadius: 20).stroke(Color.white.opacity(0.08)))
+    }
+
+    private func surfaceChoice(relief: Bool, title: String, subtitle: String, icon: String) -> some View {
+        let selected = reliefEnabled == relief
+        let available = !relief || highlightedPreset.map(\.supportsRelief) != false
+        return Button {
+            withAnimation(reduceMotion ? nil : Motion.panel) { reliefEnabled = relief }
+        } label: {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Image(systemName: icon).font(.title3).foregroundStyle(selected ? Color.cyan : Color.secondary)
+                    Spacer()
+                    Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selected ? Color.cyan : Color.white.opacity(0.2))
+                }
+                Text(title).font(.callout.weight(.semibold)).foregroundStyle(.white)
+                Text(subtitle).font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.leading)
+            }
+            .padding(14).frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Color.cyan.opacity(0.10) : Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 14))
+            .overlay(RoundedRectangle(cornerRadius: 14).stroke(selected ? Color.cyan.opacity(0.7) : Color.white.opacity(0.08)))
+        }
+        .buttonStyle(ShellButtonStyle(cornerRadius: 14))
+        .disabled(!available)
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
     private var standardGrid: some View {
         LazyVGrid(
             columns: [GridItem(.adaptive(minimum: 240, maximum: 340), spacing: 16)],
@@ -131,10 +218,15 @@ struct MapSelectionView: View {
                     preset: preset,
                     isSelected: highlightedPreset == preset
                 )
-                .onTapGesture { highlightedPreset = preset }
+                .hoverHighlight(cornerRadius: 14, tint: .white)
+                .onTapGesture {
+                    withAnimation(reduceMotion ? nil : Motion.panel) {
+                        highlightedPreset = preset; if !preset.supportsRelief { reliefEnabled = false }
+                    }
+                }
                 // A double-click is the familiar "pick and go" for a card grid; the footer
                 // button remains for anyone who does not expect it.
-                .onTapGesture(count: 2) { onConfirm(.standard(preset)) }
+                .onTapGesture(count: 2) { onConfirm(.standard(preset, relief: reliefEnabled && preset.supportsRelief, amplitude: Float(reliefAmplitude))) }
             }
         }
         .padding(20)
@@ -186,7 +278,7 @@ struct MapSelectionView: View {
             Button("map.select.confirm") {
                 switch family {
                 case .standard:
-                    if let highlightedPreset { onConfirm(.standard(highlightedPreset)) }
+                    if let highlightedPreset { onConfirm(.standard(highlightedPreset, relief: reliefEnabled, amplitude: Float(reliefAmplitude))) }
                 case .photogrammetric:
                     if let highlightedWorld {
                         onConfirm(.photogrammetric(tileKey: highlightedWorld.key,
@@ -216,7 +308,7 @@ struct MapSelectionView: View {
         switch family {
         case .standard:
             guard let highlightedPreset else { return L10n.s("map.select.prompt") }
-            return L10n.s(highlightedPreset.titleKey)
+            return "\(L10n.s(highlightedPreset.titleKey)) · \(reliefEnabled ? "холмы и долины" : "ровная поверхность")"
         case .photogrammetric:
             guard let highlightedWorld else { return L10n.s("map.select.prompt_world") }
             return "\(highlightedWorld.key) — \(highlightedWorld.sizeBytes.formattedByteSize)"
@@ -294,6 +386,51 @@ struct MapSelectionView: View {
 }
 
 // MARK: - Cards
+
+/// A small isometric sample of the procedural height field. Elevation morphs on selection;
+/// generating a new simulator world is deferred until the user confirms.
+struct TerrainSurfacePreview: View, Animatable {
+    var elevation: Double
+    var animatableData: Double { get { elevation } set { elevation = newValue } }
+    private static let side = 25
+    private static let vertices: [SIMD3<Float>] = {
+        var terrain = TerrainConfiguration.default
+        terrain.preset = .field; terrain.reliefEnabled = true; terrain.reliefAmplitude = 100; terrain.seed = 42
+        return (0..<(side * side)).map { index in
+            let x = Float(index % side) / Float(side - 1), z = Float(index / side) / Float(side - 1)
+            return SIMD3(x, terrain.surfaceHeight(x: 80 + x * 420, z: 80 + z * 420), z)
+        }
+    }()
+    var body: some View {
+        Canvas { context, size in
+            let height = max(0, elevation)
+            func point(_ vertex: SIMD3<Float>) -> CGPoint {
+                CGPoint(x: size.width * (0.5 + Double(vertex.x - vertex.z) * 0.43),
+                        y: size.height * (0.62 + Double(vertex.x + vertex.z - 1) * 0.22 - Double(vertex.y) / 100 * height * 0.40))
+            }
+            var shadow = Path(ellipseIn: CGRect(x: size.width * 0.12, y: size.height * 0.76, width: size.width * 0.76, height: size.height * 0.16))
+            context.fill(shadow, with: .color(.black.opacity(0.16)))
+            let cells = (0..<((Self.side - 1) * (Self.side - 1))).sorted {
+                ($0 / (Self.side - 1) + $0 % (Self.side - 1)) < ($1 / (Self.side - 1) + $1 % (Self.side - 1))
+            }
+            for cell in cells {
+                let x = cell % (Self.side - 1), z = cell / (Self.side - 1), a = z * Self.side + x
+                let vertices = [Self.vertices[a], Self.vertices[a + 1], Self.vertices[a + Self.side + 1], Self.vertices[a + Self.side]]
+                var path = Path(); path.move(to: point(vertices[0]))
+                for vertex in vertices.dropFirst() { path.addLine(to: point(vertex)) }; path.closeSubpath()
+                let gradient = Double(vertices[1].y - vertices[0].y) * height / 30
+                let shade = min(0.65, max(0.28, 0.50 - gradient * 0.25))
+                context.fill(path, with: .color(Color(red: shade * 0.65, green: shade + 0.14, blue: shade * 0.7)))
+                // A tiny overlap avoids hairline seams between antialiased neighbour patches.
+                context.stroke(path, with: .color(Color(red: shade * 0.65, green: shade + 0.14, blue: shade * 0.7)), lineWidth: 0.6)
+            }
+            let marker = point(Self.vertices[Self.side * 7 + 7])
+            let markerPath = Path(ellipseIn: CGRect(x: marker.x - 4, y: marker.y - 4, width: 8, height: 8))
+            context.fill(markerPath, with: .color(.cyan)); context.stroke(markerPath, with: .color(.white.opacity(0.8)), lineWidth: 1)
+        }
+        .background(RadialGradient(colors: [Color.cyan.opacity(0.07), .clear], center: .center, startRadius: 5, endRadius: 170))
+    }
+}
 
 private struct MapPresetCard: View {
     let preset: TerrainPreset
@@ -489,5 +626,65 @@ private struct OpenDataBuilderSheet: View {
             .padding(12)
         }
         .frame(minWidth: 1000, minHeight: 700)
+    }
+}
+
+/// Shared by mission setup and the live environment module.
+struct TerrainSurfaceModePicker: View {
+    @Binding var relief: Bool
+    @Binding var amplitude: Double
+    var supportsRelief: Bool = true
+    var onAmplitudeCommit: () -> Void = {}
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                choice(false, title: "Ровная", icon: "minus")
+                choice(true, title: "Холмы и долины", icon: "mountain.2")
+            }
+            TerrainSurfacePreview(elevation: relief ? amplitude / 100 : 0)
+                .frame(height: 105)
+                .animation(reduceMotion ? nil : Motion.panel, value: relief)
+                .animation(reduceMotion ? nil : Motion.panel, value: amplitude)
+                .accessibilityLabel(relief ? "Рельефная поверхность" : "Ровная поверхность")
+            if relief {
+                HStack {
+                    Text("Высота рельефа")
+                    Spacer()
+                    Text("до \(Int(amplitude)) м").monospacedDigit()
+                }.font(.caption).foregroundStyle(.secondary)
+                Slider(value: $amplitude, in: 10...250, step: 5, onEditingChanged: { if !$0 { onAmplitudeCommit() } })
+                    .tint(.cyan)
+                    .accessibilityLabel("Высота рельефа")
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+            if !supportsRelief {
+                Text("Для этого окружения доступна ровная поверхность")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onChange(of: supportsRelief) { _, available in if !available { relief = false } }
+        .animation(reduceMotion ? nil : Motion.panel, value: relief)
+    }
+
+    private func choice(_ value: Bool, title: String, icon: String) -> some View {
+        Button {
+            withAnimation(reduceMotion ? nil : Motion.panel) { relief = value }
+        } label: {
+            HStack(spacing: 7) {
+                Image(systemName: icon)
+                Text(title).font(.caption.weight(.semibold))
+                Spacer(minLength: 0)
+                if relief == value { Image(systemName: "checkmark.circle.fill") }
+            }
+            .foregroundStyle(relief == value ? Color.cyan : Color.secondary)
+            .padding(10).frame(maxWidth: .infinity)
+            .background(relief == value ? Color.cyan.opacity(0.10) : Color.white.opacity(0.03), in: RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(relief == value ? Color.cyan.opacity(0.6) : Color.white.opacity(0.08)))
+        }
+        .buttonStyle(ShellButtonStyle(cornerRadius: 10))
+        .disabled(value && !supportsRelief)
+        .accessibilityAddTraits(relief == value ? .isSelected : [])
     }
 }

@@ -114,6 +114,7 @@ enum AppGraphicsSettings {
     static let qualityKey = "app.graphics.quality"
     static let renderScaleKey = "app.graphics.renderScale"
     static let windowSizeKey = "app.window.sizePreset"
+    static let interfaceScaleKey = "app.interface.scale"
 
     /// Default is `.high` so existing installs keep the current full-detail behavior until the
     /// user lowers it.

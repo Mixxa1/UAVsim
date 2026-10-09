@@ -1040,6 +1040,12 @@ do {
     check(malformed.problem != nil, "undeclared axes cannot enter runtime")
     malformed = table; malformed.model = "euler"
     check(!malformed.usableForFlight, "Euler is diagnostic only: no viscous drag or stall claim")
+    check(EngineeringAeroTable.solverModels.allSatisfy { model in var solved = table; solved.model = model; return solved.problem == nil },
+          "every flow model a run can be launched with is a readable table model")
+    var unsteadyTable = table; unsteadyTable.model = "urans_sst"
+    check(unsteadyTable.usableForFlight, "a time-averaged URANS polar is viscous and may fly")
+    malformed = table; malformed.model = "rans"
+    check(malformed.problem != nil, "an undeclared flow model is rejected")
     let imported = try WorkbenchAeroRunner.importTable(JSONEncoder().encode(table), build: build)
     build.aerodynamicRuns = [imported]
     let runtime = EngineeringAeroRuntime.resolve(build: build)
@@ -1154,12 +1160,44 @@ do {
         check(air.problem?.contains("SST") == true, "γ-Reθ transition is refused without a turbulence model")
         air.model = "sst"; air.turbulenceIntensity = 0
         check(air.problem != nil, "zero free-stream turbulence is refused")
+        // The time-accurate model the panel offers has to pass the gate the panel shows.
+        air.turbulenceIntensity = 0.01; air.transition = "none"; air.model = "urans_sst"
+        check(air.problem == nil, "URANS SST on a resolved wall is a valid setup", air.problem ?? "")
+        air.averagingSteps = air.timeSteps / 2 + 1
+        check(air.problem?.contains("URANS") == true, "an averaging window longer than half the run is refused")
+        air.averagingSteps = 80; air.timeStepSeconds = 0
+        check(air.problem?.contains("URANS") == true, "URANS without a physical time step is refused")
+        air.model = "sst"
+        check(air.problem == nil, "the time-accurate fields of a steady run do not block it")
+        // The per-point limit follows the model between its two defaults and leaves a typed one alone.
+        var limited = WorkbenchAeroSettings()
+        limited.selectModel("urans_sst")
+        check(limited.model == "urans_sst" && limited.timeoutSeconds == 28_800, "selecting URANS raises the default time limit to eight hours")
+        limited.selectModel("sst")
+        check(limited.model == "sst" && limited.timeoutSeconds == 3600, "returning to a steady model restores the steady hour")
+        limited.timeoutSeconds = 7200; limited.selectModel("urans_sst")
+        check(limited.timeoutSeconds == 7200, "a time limit the analyst set survives a model change")
         // Settings saved before a field existed still open, with that field at its default.
         var saved = try JSONSerialization.jsonObject(with: JSONEncoder().encode(WorkbenchAeroSettings())) as! [String: Any]
-        for key in ["wallTreatment", "transition", "turbulenceIntensity"] { saved.removeValue(forKey: key) }
+        for key in ["wallTreatment", "transition", "turbulenceIntensity", "timeSteps", "innerIterations", "averagingSteps", "timeStepSeconds"] {
+            saved.removeValue(forKey: key)
+        }
         let old = try? JSONDecoder().decode(WorkbenchAeroSettings.self, from: JSONSerialization.data(withJSONObject: saved))
         check(old?.wallTreatment == "resolved" && old?.transition == "none" && old?.turbulenceIntensity == 0.01,
               "settings saved before the wall and transition options still decode")
+        check(old?.timeSteps == 240 && old?.innerIterations == 25 && old?.averagingSteps == 80 && old?.timeStepSeconds == 0.001,
+              "settings saved before the URANS fields decode with the adapter's own defaults")
+    }
+    // The model list Swift validates against is the adapter's own, not a copy that can drift.
+    do {
+        let process = Process(), pipe = Pipe()
+        process.executableURL = tool; process.arguments = ["--capabilities"]; process.standardOutput = pipe
+        try process.run()
+        let bytes = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let declared = ((try? JSONSerialization.jsonObject(with: bytes)) as? [String: Any])?["models"] as? [String]
+        check(declared.map(Set.init) == Set(EngineeringAeroTable.solverModels),
+              "Swift accepts exactly the flow models the adapter declares", "\(declared ?? [])")
     }
     let prepared = try WorkbenchAeroRunner.prepare(build: build, settings: settings, solver: solver)
     let job = try JSONSerialization.jsonObject(with: prepared.job) as! [String: Any]
@@ -1214,6 +1252,26 @@ do {
         let decoded = try JSONDecoder().decode(WorkbenchAeroRun.self, from: Data(contentsOf: url))
         check(decoded == saved, "completed/cancelled run survives local history reload")
     }
+    // The time-accurate path, end to end: the model the panel offers must launch, come back and be
+    // read. A sphere at Re = 20 settles to a steady wake, so sixty physical steps reach an accepted
+    // mean. The coefficient itself is not a claim: SST has no business at this Reynolds number.
+    var unsteady = settings
+    unsteady.model = "urans_sst"; unsteady.timeSteps = 60; unsteady.innerIterations = 25
+    unsteady.averagingSteps = 20; unsteady.timeStepSeconds = 0.05
+    final class UnsteadyOutcome: @unchecked Sendable { var run: WorkbenchAeroRun? }
+    let unsteadyOutcome = UnsteadyOutcome(), unsteadyDone = DispatchSemaphore(value: 0)
+    let unsteadySettings = unsteady
+    Task.detached {
+        unsteadyOutcome.run = await WorkbenchAeroRunner.run(build: immutableBuild, settings: unsteadySettings, tool: tool,
+                                                            solver: solver, root: root)
+        unsteadyDone.signal()
+    }
+    unsteadyDone.wait()
+    let unsteadyRecord = unsteadyOutcome.run?.record
+    check(unsteadyRecord?.outcome == .warning && unsteadyRecord?.aerodynamicTable?.model == "urans_sst"
+            && unsteadyRecord?.aerodynamicTable?.points.count == 1,
+          "Workbench runs URANS SST through the same adapter and reads its time-averaged table",
+          unsteadyRecord?.failureReasons.joined(separator: "; ") ?? "no run")
 }
 
 // MARK: - 16. One shock event from the Workbench

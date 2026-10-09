@@ -57,6 +57,8 @@ final class SimulationAudioService {
     /// The boom is not a point source in the scene — it is a wave that has already arrived at
     /// the listener — so it bypasses the spatialiser.
     private let boomPlayer = AVAudioPlayerNode()
+    private let rewindPlayer = AVAudioPlayerNode()
+    private(set) var isRewindPlaybackActive = false
     private let monoFormat: AVAudioFormat
 
     private var isRunning = false
@@ -148,11 +150,13 @@ final class SimulationAudioService {
         engine.attach(master)
         engine.attach(limiter)
         engine.attach(boomPlayer)
+        engine.attach(rewindPlayer)
 
         engine.connect(environment, to: master, format: nil)
         engine.connect(master, to: limiter, format: nil)
         engine.connect(limiter, to: engine.mainMixerNode, format: nil)
         engine.connect(boomPlayer, to: master, format: monoFormat)
+        engine.connect(rewindPlayer, to: master, format: monoFormat)
 
         for _ in 0..<Self.oneShotVoiceCount {
             let player = AVAudioPlayerNode()
@@ -245,6 +249,7 @@ final class SimulationAudioService {
             registerSynthetic(.chargeDetonation, buffer: detonation, defaultGainDb: -3, loop: false, category: .damage)
         }
         isPrepared = true
+        if isRewindPlaybackActive { startRewindCue() }
 
         #if DEBUG
         let loadedFrames = buffers.values.reduce(UInt64(0)) { $0 + UInt64($1.frameLength) }
@@ -282,6 +287,8 @@ final class SimulationAudioService {
     }
 
     func stop() {
+        rewindPlayer.stop()
+        isRewindPlaybackActive = false
         soundScheduleGeneration &+= 1
         guard isRunning else { return }
         stopAllLoops()
@@ -293,6 +300,41 @@ final class SimulationAudioService {
         boomPlayer.stop()
         engine.stop()
         isRunning = false
+    }
+
+    /// A transport cue bypasses world distance/pan and follows master volume/mute.
+    /// World loops retain their handles, so releasing rewind resumes their existing life cycle.
+    func setRewindPlayback(_ active: Bool) {
+        guard active != isRewindPlaybackActive else { return }
+        isRewindPlaybackActive = active
+        refreshMasterVolume()
+        if active {
+            soundScheduleGeneration &+= 1
+            for index in oneShotVoices.indices {
+                oneShotVoices[index].generation &+= 1
+                oneShotVoices[index].player.stop()
+                oneShotVoices[index].isBusy = false
+            }
+            activeOneShotCount = 0
+            boomPlayer.stop()
+            for voice in loopVoices where voice.handle != nil { voice.player.pause() }
+            startRewindCue()
+        } else {
+            rewindPlayer.stop()
+            guard isRunning else { return }
+            boomPlayer.play()
+            for voice in oneShotVoices { voice.player.play() }
+            for voice in loopVoices where voice.handle != nil { voice.player.play() }
+        }
+    }
+
+    private func startRewindCue() {
+        guard isRewindPlaybackActive, let buffer = buffers[Self.bufferKey(AudioAssetID.flightRewindLoop.rawValue, 1)],
+              startIfNeeded() else { return }
+        rewindPlayer.stop()
+        rewindPlayer.volume = Self.linearGain(catalog.descriptor(for: .flightRewindLoop)?.defaultGainDb ?? -8)
+        rewindPlayer.scheduleBuffer(buffer, at: nil, options: [.loops])
+        rewindPlayer.play()
     }
 
     /// Applies the persisted volume/mute.

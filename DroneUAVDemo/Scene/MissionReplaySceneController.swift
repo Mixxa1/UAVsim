@@ -135,10 +135,7 @@ final class MissionReplaySceneController {
     private static let skyCloudInstanceRadius: Float = 180
     private static let skyCloudAltitudeAboveDrone: Float = 90
     private static let weatherEnvelopeRadius: Float = 250.0
-    // Mid-range stand-in for the live sim's `0.25 + intensity * 0.55` envelope opacity —
-    // MissionReplayContextSnapshot only captures which weather preset was recorded, not the
-    // intensity/wind values, so the exact recorded strength can't be reconstructed.
-    private static let weatherEnvelopeReplayOpacity: CGFloat = 0.55
+    private var weatherEnvelopeReplayOpacity: CGFloat = 0.55
     private static let skyCloudInstanceOffsets: [(SCNVector3, Float)] = [
         (SCNVector3(0, 0, 500), 0),
         (SCNVector3(420, 15, -380), 1.1),
@@ -216,6 +213,8 @@ final class MissionReplaySceneController {
     private var importedWorldRoot: SCNNode?
     private var importedWorldLoadTask: Task<Void, Never>?
     private var loadedSessionID: UUID?
+    private var initialReplayContext: MissionReplayContextSnapshot?
+    private var environmentTimeline: [MissionReplayEnvironmentChange] = []
     private var completeVisualRecording = false
     var hasImportedWorld: Bool { importedWorld != nil }
     private(set) var cameraSubjectID = "player"
@@ -321,6 +320,8 @@ final class MissionReplaySceneController {
 
         let context = session.context
         loadedContext = context
+        initialReplayContext = context
+        environmentTimeline = (session.environmentChanges ?? []).sorted { $0.timestamp < $1.timestamp }
         cameraSubjectID = "player"
         worldVisuals.load(assets: session.visualAssets ?? [:], scene: scene, playerRoot: replayDroneNode)
 
@@ -822,6 +823,7 @@ final class MissionReplaySceneController {
         duration: TimeInterval?
     ) {
         guard let frame else { return }
+        restoreEnvironment(at: replayTime ?? frame.timestamp)
         lastKnownFrame = frame
         replayDroneNode.simdPosition = SIMD3<Float>(
             Float(frame.position.x),
@@ -1336,7 +1338,7 @@ final class MissionReplaySceneController {
             weatherEnvelopeNode.addChildNode(node)
         }
         weatherEnvelopeNode.isHidden = weatherEnvelopeNode.childNodes.isEmpty
-        weatherEnvelopeNode.opacity = Self.weatherEnvelopeReplayOpacity
+        weatherEnvelopeNode.opacity = weatherEnvelopeReplayOpacity
     }
 
     private func configureOverlayNode(_ node: SCNNode) {
@@ -1545,9 +1547,12 @@ final class MissionReplaySceneController {
             mapScale: mapScale,
             density: context.terrainDensity ?? preset.defaultDensity,
             seed: seed,
-            safeSpawnRadius: 15.0
+            safeSpawnRadius: context.terrainSafeSpawnRadius ?? 15.0,
+            reliefEnabled: context.terrainReliefEnabled ?? false,
+            reliefAmplitude: context.terrainReliefAmplitude ?? 70
         )
 
+        weatherEnvelopeReplayOpacity = CGFloat(0.25 + (context.weatherIntensity ?? 0.55) * 0.55)
         let weather = context.weatherPresetRawValue.flatMap(WeatherPreset.init(rawValue:)) ?? .normal
         EnvironmentObjectFactory.snowWeatherActive = (weather == .snow)
         activeWeatherPreset = weather
@@ -1560,9 +1565,34 @@ final class MissionReplaySceneController {
             svc.populate(with: config, visualQuality: visualQuality)
         }
         applyReplayTerrainVisualStyle(for: preset, halfExtent: config.scenicHalfExtent, weather: weather)
+        if config.usesRelief, let relief = MainActor.assumeIsolated({ TerrainMeshFactory.makeReliefNode(configuration: config, snow: weather == .snow) }) {
+            environmentNode.addChildNode(relief)
+            groundNode.isHidden = true
+        }
         buildWorldBoundsIndicator(halfExtent: config.worldHalfExtent)
 
         return EnvironmentBuildResult(terrainPreset: preset, mapScale: mapScale, hasEnvironment: true)
+    }
+
+    private func restoreEnvironment(at timestamp: TimeInterval) {
+        guard let context = environmentTimeline.last(where: { $0.timestamp <= timestamp })?.context ?? initialReplayContext,
+              context != loadedContext else { return }
+        let previous = loadedContext
+        loadedContext = context
+        let terrainChanged = previous?.terrainPresetRawValue != context.terrainPresetRawValue
+            || previous?.mapScaleRawValue != context.mapScaleRawValue || previous?.terrainSeed != context.terrainSeed
+            || previous?.terrainDensity != context.terrainDensity || previous?.terrainReliefEnabled != context.terrainReliefEnabled
+            || previous?.terrainReliefAmplitude != context.terrainReliefAmplitude || previous?.terrainSafeSpawnRadius != context.terrainSafeSpawnRadius
+            || previous?.weatherPresetRawValue != context.weatherPresetRawValue
+        if terrainChanged {
+            worldVisuals.invalidateTemplateEnvironment()
+            environmentNode.childNodes.forEach { $0.removeFromParentNode() }
+            groundNode.isHidden = false
+            _ = buildReplayEnvironment(from: context)
+        } else {
+            weatherEnvelopeReplayOpacity = CGFloat(0.25 + (context.weatherIntensity ?? 0.55) * 0.55)
+            weatherEnvelopeNode.opacity = weatherEnvelopeReplayOpacity
+        }
     }
 
     private func rebuildReplayEnvironment(quality: EnvironmentVisualQuality) {

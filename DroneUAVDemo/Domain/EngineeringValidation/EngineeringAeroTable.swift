@@ -4,6 +4,10 @@ import simd
 /// Portable solver output. Forces use an orthonormal wind frame; moments use the simulator's
 /// right-hand convention (roll about aft, pitch about right, yaw about up). No implicit CG.
 struct EngineeringAeroTable: Codable, Hashable {
+    /// Flow models the CFD adapter computes, as its --capabilities lists them. One list for the
+    /// run settings and for the table a run returns: a model that can be launched must be readable.
+    static let solverModels = ["euler", "laminar", "sst", "urans_sst"]
+
     struct Reference: Codable, Hashable {
         var areaM2: Double
         var spanM: Double
@@ -36,7 +40,7 @@ struct EngineeringAeroTable: Codable, Hashable {
 
     var problem: String? {
         guard schema == "uavsim-aerodynamics/1", frame == "flight-body-rhu" else { return "Несовместимая схема или система осей аэротаблицы." }
-        guard ["euler", "laminar", "sst", "imported"].contains(model) else { return "Неизвестная модель течения." }
+        guard Self.solverModels.contains(model) || model == "imported" else { return "Неизвестная модель течения." }
         guard [reference.areaM2, reference.spanM, reference.chordM, speedMps, densityKgM3, viscosityPaS].allSatisfy({ $0.isFinite && $0 > 0 && Float($0).isFinite }),
               speedMps <= 100, reference.momentCenterModelM.count == 3,
               reference.momentCenterModelM.allSatisfy({ $0.isFinite && Float($0).isFinite }) else { return "Неверные опорные размеры, точка момента или условия." }

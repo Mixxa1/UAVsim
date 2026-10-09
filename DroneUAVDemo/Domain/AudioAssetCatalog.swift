@@ -9,6 +9,7 @@ import Foundation
 ///
 /// The raw values are the runtime IDs from the audio plan and match `AudioPack.json` exactly.
 enum AudioAssetID: String, CaseIterable, Hashable {
+    case flightRewindLoop = "flight_rewind_loop"
     // Vehicle — continuous and start/stop cues for the aircraft itself.
     case uavSmallHover = "uav_small_hover"
     case uavSmallSpinup = "uav_small_spinup"

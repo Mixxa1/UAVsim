@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 struct CameraModuleView: View {
     @SimulationObservedObject var viewModel: DroneSimulationViewModel
@@ -694,7 +695,8 @@ struct CameraModuleView: View {
             }
         }
         .sheet(isPresented: $showOSDEditor) {
-            FPVOSDEditorView(viewModel: viewModel)
+            ScaledSettingsPanel(minimumSize: CGSize(width: 1040, height: 620)) { FPVOSDEditorView(viewModel: viewModel) }
+                .frame(width: min(1120, (NSScreen.main?.visibleFrame.width ?? 1300) - 80), height: min(720, (NSScreen.main?.visibleFrame.height ?? 900) - 100))
         }
     }
 

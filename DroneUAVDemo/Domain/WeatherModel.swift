@@ -119,6 +119,7 @@ struct WeatherModel {
     var windDirectionDeg: Float
     var windSpeedMps: Float
     var gusts: Float
+    var spatialWindEnabled: Bool = true
 
     static let normal = WeatherModel(
         preset: .normal,

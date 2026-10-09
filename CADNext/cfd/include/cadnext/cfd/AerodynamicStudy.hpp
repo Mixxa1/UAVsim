@@ -49,6 +49,16 @@ struct AeroSettings {
 inline bool isUnsteady(const AeroSettings& settings) { return settings.model == "urans_sst"; }
 inline bool isTurbulent(const AeroSettings& settings) { return settings.model == "sst" || settings.model == "urans_sst"; }
 inline int aeroProgressTotal(const AeroSettings& settings) { return isUnsteady(settings) ? settings.timeSteps : settings.iterations; }
+// The wall-clock limit one point starts with. A steady point is one march; a URANS point is
+// timeSteps × innerIterations of them. Measured on four performance cores: 0.64 s per inner
+// iteration on a 0.4 M-cell wing mesh, 27 % above a steady iteration there, which puts a 1.7 M-cell
+// airframe mesh near 2.9 s and the default 240 × 30 near six hours. The steady hour would stop that
+// run a sixth of the way in. The Workbench panel carries the same two numbers.
+inline double defaultTimeoutSeconds(const std::string& model) { return model == "urans_sst" ? 28800 : 3600; }
+// Changing the model moves the limit from one default to the other; a limit the analyst set stays.
+inline double timeoutAfterModelChange(double current, const std::string& from, const std::string& to) {
+    return current == defaultTimeoutSeconds(from) ? defaultTimeoutSeconds(to) : current;
+}
 struct AeroGeometry {
     std::string id, path, sha256;
 };

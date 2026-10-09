@@ -3,6 +3,7 @@
   "sampleRate": 48000,
   "channels": 1,
   "assets": [
+    { "id": "flight_rewind_loop", "category": "aero", "path": "UI/flight_rewind_loop", "variants": 1, "loop": true, "durationSeconds": 4.000, "defaultGainDb": -8.0 },
     { "id": "fpv_electronics_boot", "category": "vehicle", "path": "Vehicle/Electric/fpv_electronics_boot", "variants": 1, "loop": false, "durationSeconds": 5.200, "defaultGainDb": -6.0 },
     { "id": "uav_heavy_spinup", "category": "vehicle", "path": "Vehicle/Electric/uav_heavy_spinup", "variants": 1, "loop": false, "durationSeconds": 7.000, "defaultGainDb": -6.0 },
     { "id": "helicopter_rotor_loop", "category": "vehicle", "path": "Vehicle/Rotorcraft/helicopter_rotor_loop", "variants": 1, "loop": true, "durationSeconds": 5.000, "defaultGainDb": -7.0 },

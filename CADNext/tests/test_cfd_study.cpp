@@ -43,6 +43,13 @@ int main() {
         bool refused=false;try{FlowSection::read(mesh,{{1,0,0}},0,{-1,3,-1,3});}catch(const std::exception&){refused=true;}
         check(refused,"partially written volume field is refused");
     }
+    check(defaultTimeoutSeconds("urans_sst")==28800 && defaultTimeoutSeconds("sst")==3600 && defaultTimeoutSeconds("laminar")==3600 && defaultTimeoutSeconds("euler")==3600,
+          "a URANS point starts with eight hours, a steady one with one");
+    check(timeoutAfterModelChange(3600,"sst","urans_sst")==28800 && timeoutAfterModelChange(28800,"urans_sst","sst")==3600,
+          "the time limit follows the model between the two defaults");
+    check(timeoutAfterModelChange(7200,"sst","urans_sst")==7200 && timeoutAfterModelChange(7200,"urans_sst","laminar")==7200,
+          "a time limit the analyst set survives a model change");
+    check(timeoutAfterModelChange(3600,"sst","laminar")==3600, "steady models share one limit");
     auto s=settings(); check(validateAeroSettings(s).empty(),"complete settings accepted");
     auto bad=s; bad.speedMps=INFINITY; check(!validateAeroSettings(bad).empty(),"infinite flow speed refused");
     bad=s; bad.alphaDeg={0,0}; check(!validateAeroSettings(bad).empty(),"duplicate sweep angle refused");

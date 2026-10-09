@@ -53,7 +53,7 @@ final class ScenePopulationService {
         // So this map previously had ~300 obstacles you could fly into but never see — not a
         // rendering bug, the objects were genuinely there. The grid demo map is meant to be bare,
         // so skip generating them at all rather than just hiding them.
-        if terrain.preset == .gridDemo {
+        if terrain.preset == .gridDemo && !terrain.usesRelief {
             return ([], [:])
         }
 
@@ -65,7 +65,9 @@ final class ScenePopulationService {
 
         var collidableDescriptors: [EnvironmentObjectDescriptor] = []
 
-        switch terrain.preset {
+        if terrain.usesRelief {
+            collidableDescriptors = generateReliefNature(terrain: terrain, generator: &generator)
+        } else { switch terrain.preset {
         case .gridDemo:
             // The early return above is the only supported grid-demo path.
             collidableDescriptors = []
@@ -100,6 +102,7 @@ final class ScenePopulationService {
             // The early return above is the only supported city path.
             collidableDescriptors = []
         }
+        }
 
         // Some generators can still return visual-only descriptors, but the main forest layer is
         // gameplay-collidable. Runtime collision uses a spatial index, so the cap below is no
@@ -120,6 +123,13 @@ final class ScenePopulationService {
             generator: &generator
         )
         var allDescriptors = collidableDescriptors + decorativeDescriptors + beltDescriptors
+        if terrain.usesRelief {
+            allDescriptors = allDescriptors.map { descriptor in
+                var placed = descriptor
+                placed.position.y += terrain.surfaceHeight(x: placed.position.x, z: placed.position.z)
+                return placed
+            }
+        }
         if let sceneryExclusion {
             let before = allDescriptors.count
             allDescriptors.removeAll { sceneryExclusion($0.position) }
@@ -226,6 +236,27 @@ final class ScenePopulationService {
         // which is what the old ×1.8 was compensating for before that split existed.
         let boost = terrain.missionDensityBoost ? 1.2 : 1.0
         return max(180, Int((baseLimit * multiplier * boost).rounded()))
+    }
+
+    private func generateReliefNature(terrain: TerrainConfiguration, generator: inout SeededRandomGenerator) -> [EnvironmentObjectDescriptor] {
+        var descriptors: [EnvironmentObjectDescriptor] = []
+        var occupied: [(SIMD2<Float>, Float)] = []
+        let forest = terrain.preset == .forest
+        let density = max(0.25, terrain.density)
+        let count = min(1200, Int((forest ? 700 : 260) * (0.35 + density) * min(2.2, terrain.areaScaleFactor)))
+        let safeRadius = max(terrain.safeSpawnRadius, 70)
+        for _ in 0..<(count * 8) {
+            guard descriptors.count < count else { break }
+            let point = randomPosition(extent: terrain.worldHalfExtent * 0.95, safeSpawn: safeRadius, generator: &generator)
+            let normal = terrain.surfaceNormal(x: point.x, z: point.y)
+            let vegetation = terrain.reliefVegetationDensity(x: point.x, z: point.y)
+            let tree = normal.y > 0.80 && Float.random(in: 0...1, using: &generator) < vegetation * (forest ? 1.6 : 0.95)
+            if !tree, Float.random(in: 0...1, using: &generator) > 0.10 { continue }
+            _ = appendPlacedObject(kind: tree ? .tree : .rock, terrain: forest ? .forest : .field,
+                position: point, safeSpawn: safeRadius, overlapPadding: 1.04,
+                occupied: &occupied, descriptors: &descriptors, generator: &generator)
+        }
+        return descriptors
     }
 
     private func generateField(

@@ -3609,6 +3609,11 @@
 "cfd.flow" = "Flow model";
 "cfd.laminar" = "Laminar";
 "cfd.urans" = "URANS SST (unsteady)";
+"cfd.time_step" = "Physical time step, ms";
+"cfd.time_steps" = "Time steps";
+"cfd.inner_iterations" = "Inner iterations per step";
+"cfd.averaging_steps" = "Averaging steps";
+"cfd.time_plan" = "The run covers %@ s — %@ chord passages at %@ steps per passage. Coefficients are averaged over the trailing steps. %@ inner iterations per point; the time limit leaves %@ s for each.";
 "cfd.wall_mode" = "Wall";
 "cfd.wall_resolved" = "Resolve the layer, y+ ≈ 1";
 "cfd.wall_functions" = "Wall functions, y+ 30…300";
@@ -4146,3 +4151,7 @@
 "instructor.action.vtolBack" = "Use back transition or position hold. Wait for stable rotorborne flight.";
 "instructor.action.vtolAutopilot" = "Engage Auto Route: autopilot manages the transitions. Observe for 4 seconds.";
 "instructor.action.examination" = "Five spheres in order. Fly manually; the cyan sphere is next.";
+
+"settings.page.osd" = "OSD editor";
+
+"keybind.flight.rewind" = "Rewind flight";

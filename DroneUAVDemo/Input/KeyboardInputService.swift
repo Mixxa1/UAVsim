@@ -95,6 +95,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
     case armAircraft, disarmAircraft, takeoff, land, autoPath, returnHome, manualControl, altitudeHold
     case openFlightPanel, openCameraPanel
     case resetDrone
+    case rewindFlight
     case releasePayload
     /// Moves the undercarriage lever to the other position.
     case toggleLandingGear
@@ -145,7 +146,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
              .thermalPaletteWhiteHot, .thermalPaletteBlackHot, .thermalPaletteIron, .toggleRangefinderArmed, .sprayHoseTrigger:
             return .camera
         case .toggleControlPanel, .toggleMissionMap, .togglePayloadPanel, .toggleTelemetryHUD,
-             .openFlightPanel, .openCameraPanel:
+             .openFlightPanel, .openCameraPanel, .rewindFlight:
             return .ui
         case .toggleDamageOverlay, .toggleThermalOverlay:
             return .debug
@@ -157,7 +158,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         case .moveForward, .moveBackward, .moveLeft, .moveRight, .descend, .ascend, .yawLeft, .yawRight, .accelerate,
              .vtolTransitionForward, .vtolTransitionBack,
              .zoomIn, .zoomOut,
-             .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .sprayHoseTrigger:
+             .cameraYawLeft, .cameraYawRight, .cameraPitchUp, .cameraPitchDown, .cameraLookPrecision, .sprayHoseTrigger, .rewindFlight:
             return true
         case .hover, .resetDrone, .releasePayload, .toggleLandingGear, .stepFlaps, .cameraModeFree, .cameraModeChase, .cameraModeOrbit, .cameraModeFPV, .cameraModeTop, .cameraModePayloadOptics, .cameraModePayload,
              .toggleFPV, .cycleCameraMode, .resetCameraOrientation,
@@ -205,6 +206,7 @@ enum KeyboardCommand: String, CaseIterable, Identifiable {
         case .altitudeHold: return "mode.fixed_wing_altitude_hold"
         case .openFlightPanel: return "module.flight_ops.toolbar_title"
         case .openCameraPanel: return "module.camera.toolbar_title"
+        case .rewindFlight: return "keybind.flight.rewind"
         case .resetDrone:
             return "keybind.flight.reset"
         case .releasePayload:
@@ -393,6 +395,7 @@ struct KeyBindingProfile {
             .altitudeHold: KeyBindingDescriptor(command: .altitudeHold, keyCode: 17, keyLabel: "⇧T", requiresShift: true),
             .openFlightPanel: KeyBindingDescriptor(command: .openFlightPanel, keyCode: 46, keyLabel: "⇧M", requiresShift: true),
             .openCameraPanel: KeyBindingDescriptor(command: .openCameraPanel, keyCode: 31, keyLabel: "⇧O", requiresShift: true),
+            .rewindFlight: KeyBindingDescriptor(command: .rewindFlight, keyCode: 51, keyLabel: "⌫"),
             .resetDrone: KeyBindingDescriptor(command: .resetDrone, keyCode: 15, keyLabel: "R"),
             .releasePayload: KeyBindingDescriptor(command: .releasePayload, keyCode: 5, keyLabel: "G"),
             .toggleLandingGear: KeyBindingDescriptor(command: .toggleLandingGear, keyCode: 8, keyLabel: "⇧C", requiresShift: true),
@@ -493,6 +496,7 @@ struct KeyBindingProfile {
 }
 
 enum InputAction: Equatable, Hashable {
+    case rewindFlight
     case requestHover
     case requestReset
     case dropPayload
@@ -573,10 +577,15 @@ protocol KeyboardInputProviding {
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String)
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String, requiresShift: Bool)
     func resetBindingsToDefault()
+    func replaceBindingProfile(_ profile: KeyBindingProfile)
     func setRaceBuilderShortcutsEnabled(_ enabled: Bool)
 }
 
 extension KeyboardInputProviding {
+    func replaceBindingProfile(_ profile: KeyBindingProfile) {
+        resetBindingsToDefault()
+        for binding in profile.bindings.values { rebind(command: binding.command, to: binding.keyCode, keyLabel: binding.keyLabel, requiresShift: binding.requiresShift) }
+    }
     func rebind(command: KeyboardCommand, to keyCode: UInt16, keyLabel: String, requiresShift: Bool) {
         rebind(command: command, to: keyCode, keyLabel: keyLabel)
     }
@@ -785,6 +794,10 @@ final class KeyboardInputService: KeyboardInputProviding {
         }
         processingMode = mode
         clearInputState(keepPendingActions: true)
+    }
+
+    func replaceBindingProfile(_ imported: KeyBindingProfile) {
+        resetTransientState(); profile = imported; persistProfile()
     }
 
     func currentBindingProfile() -> KeyBindingProfile {
@@ -1008,6 +1021,7 @@ final class KeyboardInputService: KeyboardInputProviding {
         case .openCameraPanel: enqueueAction(.openCameraPanel)
         case .hover:
             enqueueAction(.requestHover)
+        case .rewindFlight: enqueueAction(.rewindFlight)
         case .resetDrone:
             enqueueAction(.requestReset)
         case .releasePayload:

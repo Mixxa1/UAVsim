@@ -182,8 +182,9 @@ private final class AppShellViewModel: NSObject, ObservableObject, NSWindowDeleg
         )
 
         switch mapSelection {
-        case .standard(let preset):
+        case .standard(let preset, let relief, let amplitude):
             vm.setTerrainPreset(preset)
+            vm.setReliefTerrain(enabled: relief, amplitude: amplitude)
             activeSimulation = vm
         case .photogrammetric(let tileKey, let directory):
             // The world is prepared before the session becomes active: dropping the user into a
@@ -1156,10 +1157,12 @@ private struct KeyBindingsSheetHost: View {
                     // here came up in the system language while the same screen from the start menu
                     // was translated, so the locale ContentView sets on the main hierarchy does not
                     // reach this sheet's content. Same remedy as ReplayCenterView's own window uses.
-                    SettingsView(onClose: { simulationViewModel.setBindingsPanelVisible(false) }, simulationViewModel: simulationViewModel,
-                                 onStartInstructor: onStartInstructor,
-                                 initialPage: bindingsViewModel.opensKeyBindingsPage ? .keys : .guide)
-                        .environment(\.locale, L10n.currentLanguage().locale)
+                    ScaledSettingsPanel {
+                        SettingsView(onClose: { simulationViewModel.setBindingsPanelVisible(false) }, simulationViewModel: simulationViewModel,
+                                     onStartInstructor: onStartInstructor,
+                                     initialPage: bindingsViewModel.opensKeyBindingsPage ? .keys : .guide)
+                            .environment(\.locale, L10n.currentLanguage().locale)
+                    }
                 }
                 .frame(width: min(1040, (NSScreen.main?.visibleFrame.width ?? 1200) - 80),
                        height: min(800, (NSScreen.main?.visibleFrame.height ?? 900) - 100))
@@ -1252,7 +1255,8 @@ struct ContentView: View {
             .frame(width: 0, height: 0)
         )
         .sheet(isPresented: $showingMapSelection) {
-            MapSelectionView(
+            ScaledSettingsPanel(minimumSize: CGSize(width: 860, height: 620)) {
+                MapSelectionView(
                 airframeClass: .multirotor,
                 onConfirm: { selection in
                     showingMapSelection = false
@@ -1264,7 +1268,9 @@ struct ContentView: View {
                     pendingProjectName = nil
                 }
             )
-            .environment(\.locale, selectedLanguage.locale)
+                .environment(\.locale, selectedLanguage.locale)
+            }
+            .frame(width: min(1000, (NSScreen.main?.visibleFrame.width ?? 1200) - 80), height: min(760, (NSScreen.main?.visibleFrame.height ?? 900) - 100))
         }
         // A world can take tens of seconds to prepare on a cold cache; the overlay both reports
         // where that time is going and blocks a second start while it does.
@@ -1827,6 +1833,7 @@ struct ContentView: View {
                 FlightInstructorOverlayView(viewModel: viewModel, targets: targets,
                                             onExit: { appShell.requestReturnToMenu() })
             }
+            .overlay { if viewModel.isRewindingFlight { FlightRewindOverlay(viewModel: viewModel) } }
             .alert("battery.depleted.title", isPresented: Binding(
                 get: { viewModel.showBatteryDepletedDialog },
                 set: { viewModel.showBatteryDepletedDialog = $0 }
@@ -2161,6 +2168,14 @@ struct ContentView: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
             .help(L10n.s("hud.time_scale"))
+
+            Button {} label: {
+                headerUtilityButtonLabel(systemImage: "backward.end")
+            }
+            .buttonStyle(FlightRewindHoldButtonStyle(onHoldChange: viewModel.setFlightRewindHeld))
+            .disabled(viewModel.rewindAvailableSeconds < 0.2 || viewModel.rewindUnavailableReason != nil)
+            .help(viewModel.rewindUnavailableReason ?? "Удерживайте для перемотки назад · \(viewModel.bindingsViewModel.descriptor(for: .rewindFlight)?.keyLabel ?? "⌫")")
+            .accessibilityLabel("Удерживайте для перемотки полёта назад")
 
             Button {
                 viewModel.prepareReplayLibraryForPresentation()

@@ -25,6 +25,8 @@ struct MissionSetupView: View {
     @State private var kind: MissionScenarioKind = .searchAndRescue
     @State private var difficulty: MissionDifficulty = .medium
     @State private var terrain: TerrainPreset = .forest
+    @State private var reliefEnabled = false
+    @State private var reliefAmplitude: Double = 70
     @State private var terrainDensity: MissionTerrainDensity = .dense
     @State private var weather: WeatherPreset = .normal
     @State private var weatherIntensity: Double = 0.3
@@ -668,6 +670,8 @@ struct MissionSetupView: View {
                 .labelsHidden()
                 .frame(height: 28)
             }
+
+            TerrainSurfaceModePicker(relief: $reliefEnabled, amplitude: $reliefAmplitude, supportsRelief: terrain.supportsRelief)
 
             labeledRow("mission.setup.terrain_density") {
                 Picker("", selection: $terrainDensity) {
@@ -1335,7 +1339,9 @@ struct MissionSetupView: View {
             weather: weather,
             weatherIntensity: Float(weatherIntensity),
             timeOfDay: timeOfDay,
-            timeLimitMinutes: timeLimitMinutes
+            timeLimitMinutes: timeLimitMinutes,
+            reliefEnabled: reliefEnabled,
+            reliefAmplitude: Float(reliefAmplitude)
         )
         let config = MissionScenarioConfiguration(
             parameters: parameters,

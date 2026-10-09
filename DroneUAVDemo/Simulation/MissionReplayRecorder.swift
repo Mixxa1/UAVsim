@@ -10,6 +10,28 @@ final class MissionReplayRecorder {
     private(set) var visualAssetArchives: [String: MissionReplayVisualAssetArchive] = [:]
 
     private var lastFrameTimestamp: TimeInterval?
+    private var timelineOffset: TimeInterval = 0
+    private var pausedAt: Date?
+    var timelineTimestamp: TimeInterval {
+        guard let startedAt = currentSessionStartedAt else { return 0 }
+        return max(0, (pausedAt ?? Date()).timeIntervalSince(startedAt) - timelineOffset)
+    }
+    func pauseTimeline() { if pausedAt == nil { pausedAt = Date() } }
+    func resumeTimeline(at timestamp: TimeInterval? = nil) {
+        guard let startedAt = currentSessionStartedAt else { pausedAt = nil; return }
+        let target = timestamp ?? timelineTimestamp
+        if timestamp != nil {
+            currentSession?.frames.removeAll { $0.timestamp > target }
+            currentSession?.events.removeAll { $0.timestamp > target }
+            currentSession?.environmentChanges?.removeAll { $0.timestamp > target }
+            lastFrameTimestamp = currentSession?.frames.last?.timestamp
+            didReachFrameLimit = false
+            visualNodeBaselines.removeAll(); visualNodePaths.removeAll(); visualGeometryIDs.removeAll()
+        }
+        timelineOffset = Date().timeIntervalSince(startedAt) - target
+        pausedAt = nil
+        currentSession?.recordedDuration = target
+    }
     private var didReachFrameLimit: Bool = false
     var visualNodeBaselines: [String: [String: MissionReplayNodeState]] = [:]
     var visualNodePaths: [String: [ObjectIdentifier: String]] = [:]
@@ -34,6 +56,7 @@ final class MissionReplayRecorder {
     func checkpoint(at date: Date = Date()) -> MissionReplaySession? {
         guard var session = currentSession else { return nil }
         session.endedAt = date
+        session.recordedDuration = timelineTimestamp
         return session
     }
 
@@ -59,7 +82,9 @@ final class MissionReplayRecorder {
             position: nil
         )
         session.events.append(event)
+        session.recordedDuration = timestamp
         currentSession = session
+        timelineOffset = 0; pausedAt = nil
         visualNodeBaselines.removeAll()
         visualNodePaths.removeAll()
         visualGeometryIDs.removeAll()
@@ -80,6 +105,7 @@ final class MissionReplayRecorder {
         )
         session.events.append(event)
         session.endedAt = date
+        session.recordedDuration = timestamp
         lastCompletedSession = session
         currentSession = nil
         visualNodeBaselines.removeAll()
@@ -129,13 +155,14 @@ final class MissionReplayRecorder {
 
         currentSession?.frames.append(frame)
         lastFrameTimestamp = frame.timestamp
+        currentSession?.recordedDuration = frame.timestamp
     }
 
     var needsFrame: Bool {
         guard let session = currentSession else { return false }
         if session.frames.count >= maxFrameCount { return !didReachFrameLimit }
         guard let lastFrameTimestamp else { return true }
-        return Date().timeIntervalSince(session.startedAt) - lastFrameTimestamp >= minFrameInterval
+        return timelineTimestamp - lastFrameTimestamp >= minFrameInterval
     }
 
     /// The producer archives geometry only on first encounter, not at the recording cadence.
@@ -158,6 +185,13 @@ final class MissionReplayRecorder {
     func registerDeferredVisualAsset(id: String, makeData: @escaping @Sendable () -> Data?) {
         guard isRecording, !hasVisualAsset(id: id) else { return }
         visualAssetArchives[id] = MissionReplayVisualAssetArchive(makeData: makeData)
+    }
+
+    func recordEnvironment(_ context: MissionReplayContextSnapshot, at timestamp: TimeInterval) {
+        guard let session = currentSession else { return }
+        guard context != (session.environmentChanges?.last?.context ?? session.context) else { return }
+        if currentSession?.environmentChanges == nil { currentSession?.environmentChanges = [] }
+        currentSession?.environmentChanges?.append(MissionReplayEnvironmentChange(timestamp: timestamp, context: context))
     }
 
     func recordEvent(_ event: MissionReplayEvent) {

@@ -1437,6 +1437,21 @@ if(CADNEXT_WITH_QT AND CADNEXT_WITH_COIN3D AND CADNEXT_WITH_OCCT AND CADNEXT_WIT
              COMMAND cadnext_test_gui_structural_study_panel $<TARGET_FILE:cadnext_structural>)
 endif()
 
+# The CFD study dialog's time limit against the model it shows. Needs the GUI, not the solver.
+if(CADNEXT_WITH_QT AND CADNEXT_WITH_COIN3D AND CADNEXT_WITH_OCCT)
+    add_executable(cadnext_test_gui_aerodynamics_time_limit
+        test_gui_aerodynamics_time_limit.cpp
+    )
+
+    target_link_libraries(cadnext_test_gui_aerodynamics_time_limit
+        PRIVATE
+            cadnext_gui
+    )
+
+    add_test(NAME cadnext_test_gui_aerodynamics_time_limit
+             COMMAND cadnext_test_gui_aerodynamics_time_limit ${CMAKE_SOURCE_DIR}/cfd/schema/sphere.uavframe)
+endif()
+
 add_executable(cadnext_test_fea_bird_strike test_fea_bird_strike.cpp)
 target_link_libraries(cadnext_test_fea_bird_strike PRIVATE cadnext_fea)
 target_include_directories(cadnext_test_fea_bird_strike PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
